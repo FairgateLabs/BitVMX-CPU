@@ -11,7 +11,7 @@ The repository contains three main components.
 3. **Bitcoin Script Generator**: A Rust project responsible for generating Bitcoin scripts that validate the execution of RISCV instructions on-chain 
 
 ## Building a program
-Follow the instructions in the [docker folder](docker-riscv32/README.rd)
+Follow the instructions in the [docker folder](docker-riscv32/README.md)
 
 ## Emulation 
 Run the compiled sample C program on the emulator.

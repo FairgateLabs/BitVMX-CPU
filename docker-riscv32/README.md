@@ -1,7 +1,13 @@
+# Building the container
+
 This `Dockerfile` supports building and emulating riscv32 architecture.
 
-### Build the image
-`docker build -t riscv32 .`
+### Build the image 
+Run
+
+`docker build -t riscv32 .` 
+
+This has been tested on Mac (m1 pro) and ubuntu (intel) machines.
 
 ### Running the docker container
 This command will run the docker file and mount the current dir inside `/data`
@@ -13,7 +19,9 @@ linux/mac: `docker run -v $(pwd):/data -it --name riscv32 riscv32:latest`
 ### Remove the container after use
 `docker rm riscv32`
 
-### Inside the Dcoker file
+### Inside the Docker Container
+
+Move inside the directory `docker-riscv32` 
 
 ### Compiling
 
@@ -31,7 +39,7 @@ It's also possible to define the linking address space using link.ld file
 `$CC -nostdlib -T link.ld entrypoint.s plainc.s -o plainc.elf`
 
 #### Dissasembling 
-`$DUMP -d test.elf >trace.s`
+`$DUMP -d test.elf > trace.s`
 
 ### Running in QEMU
 `$QEMU test.elf` (you should get "Hello, World!" printed)
@@ -39,5 +47,5 @@ It's also possible to define the linking address space using link.ld file
 `$QEMU -d in_asm -D traces.txt test.elf` to produce asm traces. Check other `$QEMU -h` for other traces.
 
 
-### Aknowledge:
+### Acknowledgement:
 The Dockerfile and some instructions were taken and modified from: https://github.com/halseth/docker-riscv forked from (https://github.com/rene-fonseca/docker-riscv) 
