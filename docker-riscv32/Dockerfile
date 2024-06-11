@@ -25,6 +25,8 @@ RUN apt-get update -y && \
   apt-get install -y libmpc-dev libmpfr-dev libgmp-dev && \
   rm -rf /var/lib/apt/lists/*
 
+RUN pip install tomli
+
 RUN cd /src && \
   git clone https://git.qemu.org/git/qemu.git && \
   cd qemu && \
