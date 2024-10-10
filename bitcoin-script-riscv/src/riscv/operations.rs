@@ -200,7 +200,7 @@ pub fn is_lower_than_slti(stack: &mut StackTracker, value: &mut StackVariable, t
 
     stack.move_var(*value);
 
-    let mut than_extended = if immediate {
+    let than_extended = if immediate {
         Some(bit_extend(stack, than))
     } else {
         None
