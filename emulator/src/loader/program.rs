@@ -1,16 +1,26 @@
 use std::cmp::Ordering;
 
-use elf::{endian::LittleEndian, ElfBytes};
+use bitcoin_script_riscv::riscv::instruction_mapping::{get_key_from_instruction_and_micro, get_required_microinstruction};
+use elf::{abi::SHF_EXECINSTR, endian::LittleEndian, ElfBytes};
+use serde::{Deserialize, Serialize};
+use serde_big_array::BigArray;
 
-#[derive(Debug)]
+use crate::{executor::trace::generate_initial_step_hash, REGISTERS_BASE_ADDRESS};
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Section {
     pub name: String,
     pub data: Vec<u32>,
-    pub last_step: Vec<u32>,
+    pub last_step: Vec<u64>,
     pub start: u32,
     pub size: u32,
+    pub is_code: bool,
+    pub initialized: bool,
 }
 
+pub const CHECKPOINT_SIZE : u64 = 50_000_000;
+//pub const CHECKPOINT_SIZE : u64 = 50;
+pub const LIMIT_STEP : u64 = 10_000_000_000; //ten billion arbitrary limit
 const RISCV32_REGISTERS : usize = 32;
 const AUX_REGISTERS : usize = 2;
 pub const AUX_REGISTER_1 : u32 = 32;
@@ -20,10 +30,12 @@ pub const REGISTER_ZERO : usize = 0;
 pub const REGISTER_A0 : usize = 10;
 pub const REGISTER_A7_ECALL_ARG : usize = 17;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Registers {
+    #[serde(with = "BigArray")]
     value: [u32; RISCV32_REGISTERS + AUX_REGISTERS],
-    last_step: [u32; RISCV32_REGISTERS + AUX_REGISTERS],
+    #[serde(with = "BigArray")]
+    last_step: [u64; RISCV32_REGISTERS + AUX_REGISTERS],
     base_address: u32,
 }
 
@@ -38,15 +50,19 @@ impl Registers {
         registers
     }
 
+    pub fn get_base_address(&self) -> u32 {
+        self.base_address
+    }
+
     pub fn get(&self, idx: u32) -> u32 {
         self.value[idx as usize]
     }
 
-    pub fn get_last_step(&self, idx: u32) -> u32 {
+    pub fn get_last_step(&self, idx: u32) -> u64 {
         self.last_step[idx as usize]
     }
 
-    pub fn set(&mut self, idx: u32, value: u32, step: u32) {
+    pub fn set(&mut self, idx: u32, value: u32, step: u64) {
         if idx == REGISTER_ZERO as u32 {
             panic!("Cannot set register zero. Value: {} Step: {}", value, step);
         }
@@ -59,7 +75,7 @@ impl Registers {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ProgramCounter {
     address: u32,
     micro: u8,
@@ -97,15 +113,26 @@ impl ProgramCounter {
 
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Program {
     pub sections: Vec<Section>,
     pub registers: Registers,
     pub pc: ProgramCounter,
-    pub step: u32,
+    pub step: u64,
+    pub hash: [u8; 32],
 }
 
 impl Program {
+    pub fn serialize_to_file(&self, fname: &str) {
+        let serialized = serde_json::to_string(self).unwrap();
+        std::fs::write(fname, serialized).expect("Unable to write file");
+    }
+
+    pub fn deserialize_from_file(fname: &str) -> Program {
+        let serialized = std::fs::read(fname).expect("Unable to read file");
+        let serialized_str = std::str::from_utf8(&serialized).expect("Unable to convert to UTF-8");
+        serde_json::from_str(serialized_str).expect("Unable to deserialize")
+    }
 
     fn new(entry_point: u32, registers_base_address: u32, sp_base_address: u32) -> Program {
         Program {
@@ -113,6 +140,7 @@ impl Program {
             registers: Registers::new(registers_base_address, sp_base_address),
             pc: ProgramCounter::new(entry_point, 0),
             step: 0,
+            hash: generate_initial_step_hash().try_into().expect("Invalid hash size"),
         }
     }
     
@@ -152,19 +180,22 @@ impl Program {
 
     //TODO: handle errors
     pub fn read_mem(&self, address: u32) -> u32 {
-        let section = self.find_section(address).unwrap();
-        section.data[(address - section.start) as usize / 4]
+        if cfg!(target_endian = "big") {
+            panic!("Big endian machine not supported");
+        }
+        let section = self.find_section(address).expect(&format!("Address 0x{:08x} not found in any section", address));
+        u32::from_be( section.data[(address - section.start) as usize / 4])
     }
 
-    pub fn get_last_step(&self, address: u32) -> u32 {
+    pub fn get_last_step(&self, address: u32) -> u64 {
         let section = self.find_section(address).unwrap();
         section.last_step[(address - section.start) as usize / 4]
     }
 
     pub fn write_mem(&mut self, address: u32, value: u32) {
         let step = self.step;
-        let section = self.find_section_mut(address).unwrap();
-        section.data[(address - section.start) as usize / 4] = value;
+        let section = self.find_section_mut(address).expect(&format!("Address 0x{:08x} not found in any section", address));
+        section.data[(address - section.start) as usize / 4] = value.to_be(); 
         section.last_step[(address - section.start) as usize / 4] = step
     }
 
@@ -194,10 +225,9 @@ pub fn vec_u8_to_vec_u32(input: &[u8], little:bool) -> Vec<u32> {
 }
 
 
-pub fn load_elf(fname: &str) -> Program  {
+pub fn load_elf(fname: &str, show_sections: bool) -> Program  {
     //TODO: handle errors on unwrap
 
-    const REGISTERS_BASE_ADDRESS: u32 = 0xF000_0000;    //CHECK: this can be parameterized
     const STACK_BASE_ADDRESS: u32 = 0xE000_0000;        //CHECK: this can be parameterized
     const STACK_SIZE: u32 = 0x80_0000;                  //QEMU Default stack size
 
@@ -210,33 +240,38 @@ pub fn load_elf(fname: &str) -> Program  {
     let string_table =file.section_headers_with_strtab().unwrap().1.unwrap();
 
     let mut program = Program::new(entry_point, REGISTERS_BASE_ADDRESS, STACK_BASE_ADDRESS+STACK_SIZE);
-    program.add_section(Section {
-        name: ".stack".to_string(),
-        data: vec![0; STACK_SIZE as usize / 4],
-        last_step: vec![0xffff_ffff; STACK_SIZE as usize / 4],
-        start: STACK_BASE_ADDRESS,
-        size: STACK_SIZE,
-    });
 
     file.section_headers().unwrap().iter().for_each(|phdr| {
-        if phdr.sh_flags == 0 || phdr.sh_flags > 6 {
+
+        if phdr.sh_flags as u32 & elf::abi::SHF_ALLOC != elf::abi::SHF_ALLOC {
             return;
         }
+
         let name = string_table.get_raw(phdr.sh_name as usize).map(|name| {
             std::str::from_utf8(name).unwrap().to_string()
         }).unwrap_or("".to_string());
         let start = u32::try_from(phdr.sh_addr).unwrap();
         let size = u32::try_from(phdr.sh_size).unwrap();
         let initialized = phdr.sh_type == elf::abi::SHT_PROGBITS;
+        //println!("{:?}",phdr);
+        if size == 0 {
+            if show_sections {
+                println!("Empty section: {} Start: 0x{:08x} Size: 0x{:08x} Initialized: {}", name, start, size, initialized);
+            }
+            return;
+        }
 
         let data = if initialized {
-            vec_u8_to_vec_u32(&slice[phdr.sh_offset as usize..(phdr.sh_offset + size as u64) as usize], true)
+            vec_u8_to_vec_u32(&slice[phdr.sh_offset as usize..(phdr.sh_offset + size as u64) as usize], false)
         } else {
             assert!(size % 4 == 0, "Number of bytes must be a multiple of 4");
             let num_u32 = size / 4;
             vec![0; num_u32 as usize]
         };
-        //println!("Section: {} Start: {:08x} Size: {:08x} {:?}", name, start, size, data);
+
+        if show_sections {
+            println!("Loading section: {} Start: 0x{:08x} Size: 0x{:08x} Initialized: {} Flags: {:0b} Type: {:0b} ", name, start, size, initialized, phdr.sh_flags, phdr.sh_type);
+        }
 
         program.add_section(Section {
             name,
@@ -244,6 +279,8 @@ pub fn load_elf(fname: &str) -> Program  {
             last_step: vec![0xffff_ffff; size as usize / 4],
             start,
             size,
+            is_code: phdr.sh_flags as u32 & SHF_EXECINSTR == SHF_EXECINSTR,
+            initialized: initialized,
         })
         
     });
@@ -251,4 +288,37 @@ pub fn load_elf(fname: &str) -> Program  {
     program
 
 
+}
+
+
+pub fn generate_rom_commitment(program: &Program) {
+    for section in &program.sections {
+        if section.is_code {
+            for i in 0..section.size / 4 {
+                let position = section.start + i * 4;
+                let data = program.read_mem(position);
+
+                let instruction = riscv_decode::decode(data).expect(&format!("code section with undecodeable instruction: 0x{:08x} at position: 0x{:08x}", data, position));
+                let micros = get_required_microinstruction(&instruction);
+                for micro in 0..micros {
+                    let key = get_key_from_instruction_and_micro(&instruction, micro);
+                    println!("PC: 0x{:08x} Micro: {} Opcode: 0x{:08x} Key: {}", position, micro, data, key);
+                }
+            }
+        }
+    }
+    for section in &program.sections {
+        if !section.is_code && section.initialized {
+            for i in 0..section.size / 4 {
+                let position = section.start + i * 4;
+                let data = program.read_mem(position);
+                println!("Address: 0x{:08x} value: 0x{:08x}", position, data);
+            }
+        }
+    }
+    for section in &program.sections {
+        if !section.is_code && !section.initialized {
+            println!("Zero initialized range: start: 0x{:08x} size: 0x{:08x}", section.start, section.size);
+        }
+    }
 }

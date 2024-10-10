@@ -25,6 +25,7 @@ RUN apt-get update -y && \
   apt-get install -y libmpc-dev libmpfr-dev libgmp-dev && \
   rm -rf /var/lib/apt/lists/*
 
+
 RUN pip install tomli
 
 RUN cd /src && \
@@ -33,6 +34,11 @@ RUN cd /src && \
   ./configure --prefix=/riscv32 --static --disable-system --target-list=riscv32-linux-user && \
   make -j 8 && \
   make install
+
+#get some files to compile multiplication and division for riscv32
+RUN cd /src && curl -LJO https://github.com/gcc-mirror/gcc/raw/master/libgcc/config/epiphany/mulsi3.c \
+            && curl -LJO https://github.com/gcc-mirror/gcc/raw/master/libgcc/config/riscv/riscv-asm.h \ 
+            && curl -LJO https://github.com/gcc-mirror/gcc/raw/master/libgcc/config/riscv/div.S 
 
 ENV PATH /riscv32/bin:$PATH
 

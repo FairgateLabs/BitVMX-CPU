@@ -6,32 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bitcoin-script-stack = { git = "https://github.com/FairgateLabs/rust-bitcoin-script-stack", features = ["interactive"]}
-bitcoin = { git = "https://github.com/rust-bitcoin/rust-bitcoin", branch = "bitvm" }
-bitcoin-script = { git = "https://github.com/BitVM/rust-bitcoin-script" }
+bitcoin-script-stack = { git = "https://github.com/FairgateLabs/rust-bitcoin-script-stack", features = ["interactive"], branch = "bitvmx"}
+bitcoin = "0.32.1"
+bitcoin-script = { git = "https://github.com/FairgateLabs/rust-bitcoin-script", branch="bitvmx" }
 riscv-decode = "0.2.1"
-
-#patches for bitvm branch of rust-bitcoin
-[patch.crates-io.base58check]
-git = "https://github.com/rust-bitcoin/rust-bitcoin"
-branch = "bitvm"
-
-[patch.crates-io.bitcoin]
-git = "https://github.com/rust-bitcoin/rust-bitcoin"
-branch = "bitvm"
-
-[patch.crates-io.bitcoin_hashes]
-git = "https://github.com/rust-bitcoin/rust-bitcoin"
-branch = "bitvm"
-
-[patch.crates-io.bitcoin-internals]
-git = "https://github.com/rust-bitcoin/rust-bitcoin"
-branch = "bitvm"
-
-[patch.crates-io.bitcoin-io]
-git = "https://github.com/rust-bitcoin/rust-bitcoin"
-branch = "bitvm"
-
-[patch.crates-io.bitcoin-units]
-git = "https://github.com/rust-bitcoin/rust-bitcoin"
-branch = "bitvm"
+thiserror = "1.0.61"

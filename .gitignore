@@ -17,12 +17,17 @@ Cargo.lock
 *.html
 tests/resources/
 
-# Exclude Jetbrains IDEs
 .idea/
+/docker-riscv32/compliance/build/*.s
 
 # Exclude build files
-plainc.elf
-plainc.s
-test.elf
-trace.s
-traces.txt
+/docker-riscv32/*.elf
+/docker-riscv32/*.s
+/docker-riscv32/compliance/*.elf
+/docker-riscv32/compliance/*.s
+/docker-riscv32/verifier/*.elf
+/docker-riscv32/verifier/*.s
+/.vscode
+
+# checkpoints
+*.json

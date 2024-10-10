@@ -1,25 +1,82 @@
+
 # BitVMX-CPU
 
-This repository contains the work in progress implementation of the CPU for [BitVMX](https://bitvmx.org/).
+**WARNING**: This repository contains the work in progress implementation of the CPU for [BitVMX](https://bitvmx.org/), and has not received careful code review. This implementation is NOT production ready.
 
-The architecture adopted for this first version is [RISCV-32i](https://riscv.org/).
+The BitVMX-CPU is a core component of the BitVMX Protocol, please refer to the [BitVMX](https://bitvmx.org/) website and white paper for a better understanding.
+
+The architecture adopted for this first version is [RISCV-32i](https://riscv.org/), we are also extending this implementation with the "m" extension.
 
 
-The repository contains three main components.
-1. **Docker Image**: This image allows the compilation of C programs into the RISCV-32i architecture. Currently, the programs must follow specific rules regarding memory access and do not support stdlib.
-2. **RISCV Emulator**: Implemented in Rust, this emulator produces the hash list and execution trace of the program. 
-3. **Bitcoin Script Generator**: A Rust project responsible for generating Bitcoin scripts that validate the execution of RISCV instructions on-chain 
+## Structure
+
+The repository contains three folders
+1. **docker-riscv32**: Contains the recipe for an image that allows the compilation of C programs into the RISCV-32i architecture. Currently, the programs must be carefully crafted to be used inside BitVMX, using specific memory layouts, predefined input sections and the lack of support for now of the stdlib.  
+There are two subfolders: `compliance` which have the code necessary to create the RISCV compliance verification files, and `verifier` which helps with the compilation of a zero knowledge proof verifier program.
+2. **emulator**: The emulator is a library with a command line interface implemented in Rust which is used to execute the binary files compiled. Also this tool helps in the creation of the execution trace, the hash list of the execution necessary for the challenge protocol.
+3. **bitocoin-script-riscv**: This library contains the code that allows to verify any of the RISCV instructions on Bitcoin Script, and therefore challenge the execution of the CPU on-chain.  
+
+## Emulator 
+
+The emulator has three main command that can be listed using the cli help
+`cargo run --release -p emulator help`
+
+The options are:
+- execute: That is used to execute the compiled binaries to generate traces and check the result of the execution for a given input.
+
+- instruction-mapping: This is a helper method used to produce all the bitcoin scripts that are necessary to challenge every RISCV opcode.
+
+- generate-rom-commitment: This method is used to generate the data that needs to be agreed by the two parties and are dependent on the program. One part contains the program opcodes, and the other contains any other constand data that might be necessary to challenge on-chain and define the behavior of the program.
+
+
+### Running an example:
+
+As an example, there is a precompiled [hello-world.elf](docker-riscv32/hello-world.elf) that can be used with the emulator, but any other program compiled using the instructions of the next section should work too. The `.c` file is in the same folder.
+
+execute:  
+```cargo run --release -p emulator execute --elf docker-riscv32/hello-world.elf --stdout```  
+The execute command takes an `--elf` file and will output through `--stdout` some message and a resulting error code (1) in this case as it expects certain input.
+
+Arguments:  
+```cargo run --release -p emulator execute --elf docker-riscv32/hello-world.elf --stdout --input 11111111```  
+As the program expects `0x11111111` as input it will return (0) and a success message.
+(The input of the program needs to be provided as hex values and is treated as big-endian encoding except `--input-as-little` flag is set, which will treat the input as 32 bit words as little endian.)
+
+Trace:  
+```cargo run --release -p emulator execute --elf docker-riscv32/hello-world.elf --trace --input 11111111```  
+If `--trace` is used, the program will generate the trace of every step as `;` delimited value, and the hash for that step (concatenated with the previous hash). You can test that the last hash of the trace changes if you change the input.
+
+Debug:  
+```cargo run --release -p emulator execute --elf docker-riscv32/hello-world.elf --trace --input 11111111```  
+`--debug` will show every step of the execution, dumping the opcode and the decoded instruction, at the end will also show the state of the registers, some metrics and the input data.
+
+
+### Generate the script validation mapping
+To generate the bitcoin script mapping for every RISCV opcode just run:  
+`cargo run -p emulator -- instruction-mapping`
+The result will be a little unreadable as it generates the hexdump of the bitcoin script code for every opcode (+ some extra for microinstructions needed for some of the opcodes)
+
+### Generate program commitment
+To generate the ROM commitments use the following command:   
+`cargo run -p emulator -- generate-rom-commitment --elf docker-riscv32/hello-world.elf`
+
+## Advanced commands 
+
+When running longer programs first run with `--debug` and `--checkpoints` this will generate a checkpoint file every 50M steps and will print the last hash and the total number of steps.
+
+`cargo run --release --bin emulator -- execute --elf docker-riscv32/verifier/zkverifier --debug --checkpoints`
+
+Then when the binary search requires some specific step execute from the closest (lower) checkpoint: i.e `--step 150000000`, put as limit the maximun step required i.e: `--limit 180000000` and use list to specify the requested value steps: `--list "160000000,165000000,170000000"` and `--trace` to print them.
+
+`cargo run --release --bin emulator -- execute  --step 150000000 --limit 180000000 --list "160000000,165000000,170000000" --trace`
+
+### Generating failing cases:
+
+To emulate an error in the hash calculation and get a defective hash list, use `--fail-hash [step]`
+
+
+To emulate an error in the execution, `--fail-execute [step]`. This will add 1 to the trace_write_value.
+
 
 ## Building a program
-Follow the instructions in the [docker folder](docker-riscv32/README.md)
-
-## Emulation 
-Run the compiled sample C program on the emulator.
-
-`cargo run -p emulator docker-riscv32/plainc.elf 01`
-
-## Bitcoin Script Validation
-
-Run the step by step validation of the `addi` instruction on bitcoin script.
-
-`cargo run -p bitcoin-script-riscv`
+To build your own programs follow the instructions in the [docker folder](docker-riscv32/README.md)

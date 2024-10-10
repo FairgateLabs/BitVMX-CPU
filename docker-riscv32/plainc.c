@@ -16,18 +16,35 @@ int main(int x) {
     int e = a ^ b;
     int f = a & b;
     int g = a | b;
+    int multiplied = a * b;
+    if (multiplied != 200) {
+        return 0xeeee;
+    }
 
+    /* TODO: fix docker to get muldi3
+    unsigned int aa = 0xffffffff;
+    unsigned int bb = 0xffffffff;
+    unsigned long long int mul_64 = (unsigned long long int)aa * (unsigned long long int)bb;
+    if (mul_64 != 0xfffffffe00000001) {
+        return 0xffff;
+    }*/
+    int div = a / b;
+    int mod = a % b;
+
+    int e1 = a ^ 0x123;
+    int f1 = a & 0x123;
+    int g1 = a | 0x123;
 
     //test sw missaligned
-    int* z2 = (int*)INPUT_ADDRESS + 5;
+    int* z2 = (int*)(INPUT_ADDRESS + 5);
     *z2 = 0x01020304;
 
     //test sh middle
-    short* y = (short*)INPUT_ADDRESS + 0xd;
+    short* y = (short*)(INPUT_ADDRESS + 0xd);
     *y = 0x1234;
 
     //test sh two words
-    short* y2 = (short*)INPUT_ADDRESS + 0x13; 
+    short* y2 = (short*)(INPUT_ADDRESS + 0x13); 
     *y2 = 0xAABB;
 
     //test bytes

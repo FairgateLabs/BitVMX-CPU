@@ -1,43 +1,121 @@
-use crate::{executor::trace::*, executor::alignment_masks::*, loader::program::*, ExecutionResult};
-use riscv_decode::{types::*, Instruction::{self, *}};
-use super::trace::TraceRWStep;
+use std::{cmp::Ordering, collections::HashSet};
 
-pub fn execute_program(program: &mut Program, input: Vec<u8> ) -> Result<Vec<String>, ExecutionResult> {
+use crate::{executor::trace::*, executor::alignment_masks::*, loader::program::*, ExecutionResult};
+use bitcoin_script_riscv::riscv::instruction_mapping::create_verification_script_mapping;
+use riscv_decode::{types::*, Instruction::{self, *}};
+use sha2::{Digest, Sha256};
+use super::{trace::TraceRWStep, validator::validate};
+
+
+pub fn execute_program(program: &mut Program, input: Vec<u8>, input_section: &str, little_endian: bool, save_checkpoints: bool, limit_step: Option<u64>, print_trace: bool, 
+    validate_on_chain: bool, use_instruction_mapping: bool, print_program_stdout: bool, debug: bool, no_hash: bool,
+    fail_hash: Option<u64>, fail_execute: Option<u64>, trace_list: Option<Vec<u64>> ) -> Result<(Vec<String>, ExecutionResult), ExecutionResult> {
+
+    let trace_set: Option<HashSet<u64>> = trace_list.map(|vec| vec.into_iter().collect());
 
     //TOOD: This is a hack to copy the input into the bss section
     //copy into bss section the input
-    let bss = program.find_section_by_name(".bss").ok_or(ExecutionResult::Error)?;
-    let input_as_u32 = vec_u8_to_vec_u32(&input, false);
-    for (i, byte) in input_as_u32.iter().enumerate() {
-        bss.data[i] = *byte;
+    if !input.is_empty() {
+        let section = program.find_section_by_name(input_section).ok_or(ExecutionResult::SectionNotFound(input_section.to_string()))?;
+        let input_as_u32 = vec_u8_to_vec_u32(&input, little_endian);
+        for (i, byte) in input_as_u32.iter().enumerate() {
+            section.data[i] = *byte;
+        }
+    }
+    let instruction_mapping = match validate_on_chain && use_instruction_mapping {
+        true => Some(create_verification_script_mapping(program.registers.get_base_address())),
+        false => None,
+    };
+    
+    let mut hasher = Sha256::new();
+
+    let mut count = 0;
+
+    if save_checkpoints {
+        Program::serialize_to_file(&program, "checkpoint.0.json");
     }
 
-
-    let mut tracelist : Vec<String> = Vec::new();
-    tracelist.push("0".to_string());
-
-    loop {
-        let trace = execute_step(program);
+    let ret = loop {
+        let mut trace = execute_step(program, print_program_stdout, debug);
 
         if trace.is_err() {
-            println!("Result: {:?}", trace);
-            println!("Returned value from main(): 0x{:08x}", program.registers.get(REGISTER_A0 as u32));
-            let bss = program.find_section_by_name(".bss").ok_or(ExecutionResult::Error)?;
-            for (idx, value) in bss.data.iter().enumerate().take(10) {
-                print!("{:x}: ", (idx * 4) + bss.start as usize);
-                println!("{:08x} ", value);
+            if debug {
+                println!("Result: {:?}", trace);
+                println!("Returned value from main(): 0x{:08x}", program.registers.get(REGISTER_A0 as u32));
             }
 
-            //TODO: validate halt
-
-            return Ok(tracelist)
+            //TODO: make debugging, and memory dump optional. Maybe move outside after result.
+            if debug && !input.is_empty() {
+                let bss = program.find_section_by_name(input_section).ok_or(ExecutionResult::SectionNotFound(input_section.to_string()))?;
+                for (idx, value) in bss.data.iter().enumerate().take(10) {
+                    print!("{:x}: ", (idx * 4) + bss.start as usize);
+                    println!("{:08x} ", value.to_be());
+                }
+            }
         }
-    
-        //validate(execute_trace(trace.read, get_bitcoin_script_step(trace.opcode)), trace.write);
 
-        hash_trace(&mut tracelist, program.step, &trace.unwrap().get_trace_step());
+        if trace.is_ok() {
+            
+            if let Some(fail) = fail_execute {
+                if fail == program.step {
+                    let value = &mut trace.as_mut().unwrap().trace_step.write_1.value;
+                    *value = value.wrapping_add(1);
+                }
+            }
 
+            if !no_hash {
+                let trace_bytes = trace.as_ref().unwrap().trace_step.to_bytes();
+                program.hash = compute_step_hash(&mut hasher, &program.hash, &trace_bytes);
+                if let Some(fail) = fail_hash {
+                    if fail == program.step {
+                        program.hash = compute_step_hash(&mut hasher,&program.hash, &trace_bytes);
+                    }
+                }
+            }
+        }
+
+        if print_trace && trace.is_ok() {
+            //println!("Step: {}", program.step);
+            if trace_set.is_none() || trace_set.as_ref().unwrap().contains(&program.step) {
+                let trace_str = trace.as_ref().unwrap().trace_step.to_hex_string();
+                println!("{};{};{}", trace.as_ref().unwrap().to_csv(), trace_str, program.hash.iter().map(|byte| format!("{:02x}", byte)).collect::<String>());
+            }
+        }
+
+        if save_checkpoints && (program.step % CHECKPOINT_SIZE == 0 || trace.is_err()) {
+            Program::serialize_to_file(&program, &format!("checkpoint.{}.json", program.step));
+        }
+
+        if trace.is_ok() && validate_on_chain {
+            if validate(trace.as_ref().unwrap(), program.registers.get_base_address(), &instruction_mapping ) {
+                count += 1;
+            } else {
+                break ExecutionResult::Error;
+            }
+        }
+
+        if trace.is_err() {
+            break trace.unwrap_err();
+        }
+
+        if let Some(limit_step) = limit_step {
+            if  limit_step == program.step {
+                break ExecutionResult::LimitStepReached;
+            }
+        }
+
+    };
+   
+
+    if debug && validate_on_chain {
+        println!("Instructions validated on chain:  {}", count);
     }
+
+    if debug { 
+        println!("Last hash: {}", program.hash.iter().map(|byte| format!("{:02x}", byte)).collect::<String>());
+    }
+
+    Ok((vec![], ret))
 
 }
 
@@ -48,7 +126,7 @@ pub fn wrapping_add(value: u32, x: u32, mask: u8) -> u32 {
 }
 
 pub fn wrapping_add_btype(value: u32, x: &BType) -> u32 {
-    wrapping_add(value, x.imm(), 20)
+    wrapping_add(value, x.imm(),19)
 }
 
 pub fn wrapping_add_itype(value: u32, x: &IType) -> u32 {
@@ -63,28 +141,45 @@ pub fn wrapping_add_stype(value: u32, x: &SType) -> u32 {
     wrapping_add(value, x.imm(), 20)
 }
 
-pub fn execute_step(program: &mut Program) -> Result<TraceRWStep, ExecutionResult> {
+pub fn execute_step(program: &mut Program, print_program_stdout: bool, debug: bool) -> Result<TraceRWStep, ExecutionResult> {
     let pc = program.pc.clone();
 
-    //println!("Executing instruction at 0x{:x} micro: {}", pc.get_address(), pc.get_micro());
     let opcode = program.read_mem(pc.get_address());
-    //println!("Data:0x{:x}",  opcode);
     let instruction = riscv_decode::decode(opcode).unwrap();
+
+    if debug && program.step % 100000000 < 10000 {
+        println!("Step: {} PC: 0x{:08x}:{} Opcode: 0x{:08x} Instruction: {:?} ", program.step, pc.get_address(), pc.get_micro(), opcode, instruction );
+    }
+
+    let mut witness = None;
+    
     let (read_1, read_2, write_1) = match instruction {
+        Fence(_) => {
+            program.pc.next_address();
+            (TraceRead::default(), TraceRead::default(), TraceWrite::default())
+        },
         Ebreak |
         Ecall => {
             let syscall = program.registers.get(REGISTER_A7_ECALL_ARG as u32);
             match syscall {
                 116 => {
-                    let bss = program.find_section_by_name(".bss").ok_or(ExecutionResult::Error)?;
-                    bss.data.last().map(|x| print!("{}", *x as u8 as char  ));
+                    if print_program_stdout {
+                        let x = program.read_mem(0xA000_1000) >> 24;
+                        print!("{}", x as u8 as char  ); 
+                    }
                     program.pc.next_address();
                     (TraceRead::default(), TraceRead::default(), TraceWrite::default())
                 },
                 93 => {
                     let exit_code = program.registers.get(REGISTER_A0 as u32);
                     println!("Exit code: 0x{:08x}", exit_code);
-                    return Err(ExecutionResult::Success);
+                    if debug {
+                        for i in 0..32 {
+                            println!("Register {}: 0x{:08x}", i, program.registers.get(i));
+                        }
+                        println!("Total steps: {} 0x{:016x}", program.step, program.step);
+                    }
+                    return Err(ExecutionResult::Success(exit_code));
                 },
                 _ => {
                     return Err(ExecutionResult::SyscallNotImplemented(syscall));
@@ -93,11 +188,23 @@ pub fn execute_step(program: &mut Program) -> Result<TraceRWStep, ExecutionResul
         },
         Jal(x) => op_jal(&x, program),
         Jalr(x) => op_jalr(&x, program),
+        Mul(x) |
+        Mulh(x) |
+        Mulhsu(x) |
+        Mulhu(x) |
+        Div(x) |
+        Divu(x) |
+        Rem(x) |
+        Remu(x) |
         Sub(x) |
         Xor(x) |
         And(x) |
         Or(x) |
-        Add(x) => op_arithmetic(&instruction, &x, program),
+        Add(x) => {
+            let (ret, wit) = op_arithmetic(&instruction, &x, program);
+            witness = wit;
+            ret
+        },
         Sll(x)|
         Srl(x)|
         Sra(x)|
@@ -134,8 +241,15 @@ pub fn execute_step(program: &mut Program) -> Result<TraceRWStep, ExecutionResul
         read_1,
         read_2,
         TraceReadPC::new(pc, opcode),
-        TraceStep::new(write_1, TraceWritePC::new(&program.pc))
+        TraceStep::new(write_1, TraceWritePC::new(&program.pc)),
+        witness,
     );
+
+    //if trace.get_trace_step().get_write().address == 0x00000000 {
+    //    println!("===ZERO=== {:?}", instruction);
+    //} else {
+    //    println!("{:?}", instruction);
+    //}
     
     program.step += 1;
     Ok(trace)
@@ -193,6 +307,7 @@ pub fn op_jalr(x: &IType, program: &mut Program) -> (TraceRead, TraceRead, Trace
     let pc = program.pc.clone();
     let dest_register = x.rd();
     let src_value = program.registers.get(x.rs1());
+    let read_1 = TraceRead::new_from(&program.registers, x.rs1());
 
     let write_1 = if dest_register == REGISTER_ZERO as u32 {
         //used by rets 
@@ -205,17 +320,75 @@ pub fn op_jalr(x: &IType, program: &mut Program) -> (TraceRead, TraceRead, Trace
 
     program.pc.jump(wrapping_add_itype(src_value, x));
 
-    (TraceRead::default(), TraceRead::default(), write_1)
+    (read_1, TraceRead::default(), write_1)
 }
 
-pub fn op_arithmetic(instruction: &Instruction, x: &RType, program: &mut Program) -> (TraceRead, TraceRead, TraceWrite) {
+pub fn op_arithmetic(instruction: &Instruction, x: &RType, program: &mut Program) -> ((TraceRead, TraceRead, TraceWrite), Option<u32>) {
+
+    if  x.rd() == REGISTER_ZERO as u32 { 
+        program.pc.next_address();
+        return ((TraceRead::default(), TraceRead::default(), TraceWrite::default()), None);
+    }
 
     let read_1 = TraceRead::new_from(&program.registers, x.rs1());
     let read_2 = TraceRead::new_from(&program.registers, x.rs2());
     let value_1 = program.registers.get(x.rs1());
     let value_2 = program.registers.get(x.rs2());
 
+    let witness = match instruction {
+        Rem(_) => {
+            match value_2 {
+                0 => Some(0xFFFF_FFFF), 
+                0xFFFF_FFFF => Some(value_1), 
+                _ => Some((value_1 as i32 / value_2 as i32) as u32)
+            }
+        },
+        Div(_) => {
+            match value_2 {
+                0 => Some(value_1),
+                0xFFFF_FFFF => Some(0),
+                _ => Some((value_1 as i32 % value_2 as i32) as u32)
+            }
+        },
+        Remu(_) => if value_2 == 0 { Some(0xFFFFFFFF) } else { Some(value_1 / value_2) },
+        Divu(_) => if value_2 == 0 { Some(value_1) } else { Some(value_1 % value_2) },
+        _ => None
+    };
+
+
     let result = match instruction {
+        Mul(_) => {
+            let result: u64 = (value_1 as u64) * (value_2 as u64);
+            result as u32  // Low 32 bits
+        },
+        Mulh(_) => {
+            let result: i64 = (value_1 as i32 as i64) * (value_2 as i32 as i64);
+            (result >> 32) as u32  // High 32 bits
+        },
+        Mulhsu(_) => {
+            let result: i64 = (value_1 as i32 as i64) * (value_2 as u64 as i64);
+            (result >> 32) as u32  // High 32 bits
+        },
+        Mulhu(_) => {
+            let result: u64 = (value_1 as u64) * (value_2 as u64);
+            (result >> 32) as u32  // High 32 bits
+        },
+        Div(_) => {
+            match value_2 {
+                0 => 0xFFFF_FFFF, 
+                0xFFFF_FFFF => value_1, 
+                _ => (value_1 as i32 / value_2 as i32) as u32
+            }
+        },
+        Divu(_) => if value_2 == 0 { 0xFFFFFFFF } else { value_1 / value_2 },
+        Rem(_) => {
+            match value_2 {
+                0 => value_1,
+                0xFFFF_FFFF => 0,
+                _ => (value_1 as i32 % value_2 as i32) as u32
+            }
+        },
+        Remu(_) => if value_2 == 0 { value_1 } else { value_1 % value_2 },
         Sub(_) => value_1.wrapping_sub(value_2),
         Xor(_) => value_1 ^ value_2,
         And(_) => value_1 & value_2,
@@ -224,10 +397,12 @@ pub fn op_arithmetic(instruction: &Instruction, x: &RType, program: &mut Program
         _ => panic!("Unreachable"),
     };
 
+    //println!("{} {} = {} witness: {:?}", value_1, value_2, result, witness);
+
     program.registers.set(x.rd(), result, program.step);
     program.pc.next_address();
 
-    (read_1, read_2, TraceWrite::new_from(&program.registers, x.rd()))
+    ((read_1, read_2, TraceWrite::new_from(&program.registers, x.rd())), witness)
 }
 
 pub fn op_arithmetic_imm(instruction: &Instruction, x: &IType, program: &mut Program) -> (TraceRead, TraceRead, TraceWrite) {
@@ -235,9 +410,8 @@ pub fn op_arithmetic_imm(instruction: &Instruction, x: &IType, program: &mut Pro
 
     // special cases
 
-    if  rd == 0 { // nop is translated in: addi 0,0,0
+    if  rd == REGISTER_ZERO as u32 { // nop is translated in: addi 0,0,0
         program.pc.next_address();
-
         return (TraceRead::default(), TraceRead::default(), TraceWrite::default());
     }
 
@@ -245,15 +419,16 @@ pub fn op_arithmetic_imm(instruction: &Instruction, x: &IType, program: &mut Pro
     let read_1 = TraceRead::new_from(&program.registers, x.rs1());
 
     let rs1 = program.registers.get(x.rs1());
-    let value = x.imm();
+    let imm_value_signed = ((x.imm() as i32) << 20) >> 20;
+
     // registers.get(x.rs1());
     let result = match instruction {
         // arithmetical operations
-        Addi(_) =>  wrapping_add_itype(rs1, &x),
+        Addi(_) =>  wrapping_add_itype(rs1, x),
         // logical operations
-        Andi(_) => value & rs1,
-        Ori(_) => value | rs1,
-        Xori(_) => value ^ rs1,
+        Andi(_) => (imm_value_signed & rs1 as i32) as u32,
+        Ori(_) => (imm_value_signed | rs1 as i32) as u32,
+        Xori(_) => (imm_value_signed ^ rs1 as i32) as u32,
 
         _ => panic!("Unreachable"),
     };
@@ -271,6 +446,11 @@ pub fn op_shift_sl(instruction: &Instruction, x: &RType, program: &mut Program) 
     let read_2 = TraceRead::new_from(&program.registers, x.rs2());
     let value_1 = program.registers.get(x.rs1());
     let value_2 = program.registers.get(x.rs2());
+
+    if x.rd() == REGISTER_ZERO as u32 {
+        program.pc.next_address();
+        return (TraceRead::default(), TraceRead::default(), TraceWrite::default());
+    }
 
     let result = match instruction {        // Shift amount held in the lower 5 bits of register rs2
         Sll(_) => value_1 << (value_2 & 0x1F),
@@ -291,6 +471,11 @@ pub fn op_shift_sl(instruction: &Instruction, x: &RType, program: &mut Program) 
 
 pub fn op_shift_imm(instruction: &Instruction, x: &ShiftType, program: &mut Program) -> (TraceRead, TraceRead, TraceWrite) {
 
+    if x.rd() == REGISTER_ZERO as u32 {
+        program.pc.next_address();
+        return (TraceRead::default(), TraceRead::default(), TraceWrite::default());
+    }
+
     let read_1 = TraceRead::new_from(&program.registers, x.rs1());
     let value = program.registers.get(x.rs1());
 
@@ -308,14 +493,20 @@ pub fn op_shift_imm(instruction: &Instruction, x: &ShiftType, program: &mut Prog
 }
 
 pub fn op_sl_imm(instruction: &Instruction, x: &IType, program: &mut Program) -> (TraceRead, TraceRead, TraceWrite) {
-    
+
+    if x.rd() == REGISTER_ZERO as u32 {
+        program.pc.next_address();
+        return (TraceRead::default(), TraceRead::default(), TraceWrite::default());
+    }
+
     let read_1 = TraceRead::new_from(&program.registers, x.rs1());
     let value = program.registers.get(x.rs1());
     let imm = x.imm();
+    let imm_extended = ((imm as i32) << 20) >> 20;
 
     let result = match instruction {
-        Slti(_) => if (value as i32) < (imm as i32) { 1 } else { 0 },
-        Sltiu(_) => if value < imm { 1 } else { 0 },
+        Slti(_) => if (value as i32) < imm_extended { 1 } else { 0 },
+        Sltiu(_) => if value < imm_extended as u32 { 1 } else { 0 },
         _ => panic!("Unreachable"),
     };
 
@@ -400,12 +591,10 @@ pub fn op_store(instruction: &Instruction, x: &SType, program: &mut Program) -> 
 
             let value = program.registers.get(x.rs2());
             let masked = mask_src & value;
-            let shifted = if move_masked < 0 {
-                masked >> -move_masked * 8
-            } else if move_masked > 0 {
-                masked << move_masked * 8
-            } else {
-                masked
+            let shifted = match move_masked.cmp(&0) {
+                Ordering::Less => masked >> (-move_masked * 8),
+                Ordering::Greater => masked << (move_masked * 8),
+                Ordering::Equal => masked
             };
 
             program.registers.set(AUX_REGISTER_2, shifted, program.step);
@@ -472,6 +661,11 @@ pub fn get_src_mem(registers: &Registers, x: &IType) -> (TraceRead, u32, u32) {
 }
 pub fn op_load(instruction: &Instruction, x: &IType, program: &mut Program) -> (TraceRead, TraceRead, TraceWrite) {
 
+    if x.rd() == REGISTER_ZERO as u32 {
+        program.pc.next_address();
+        return (TraceRead::default(), TraceRead::default(), TraceWrite::default());
+    }
+
     let micro = program.pc.get_micro();
 
     let (read_1, mut src_mem, alignment) = get_src_mem(&program.registers, x);
@@ -498,12 +692,10 @@ pub fn op_load(instruction: &Instruction, x: &IType, program: &mut Program) -> (
 
             let (mask, shift) = if micro == 0 { get_mask_round_1_for_load(instruction, alignment) }  else { get_mask_round_2_for_load(instruction, alignment) };
             let masked = mask & value;
-            let shifted = if shift < 0 {
-                masked >> -shift * 8
-            } else if shift > 0 {
-                masked << shift * 8
-            } else {
-                masked
+            let shifted = match shift.cmp(&0) {
+                Ordering::Less => masked >> (-shift * 8),
+                Ordering::Greater => masked << (shift * 8),
+                Ordering::Equal => masked
             };
 
             let shifted = sign_extension(instruction, shifted);
@@ -557,6 +749,11 @@ pub fn op_load(instruction: &Instruction, x: &IType, program: &mut Program) -> (
 pub fn op_upper(instruction: &Instruction, x: &UType, program: &mut Program) -> (TraceRead, TraceRead, TraceWrite) {
 
     let dest_register = x.rd();
+    if dest_register == REGISTER_ZERO as u32 {
+        program.pc.next_address();
+        return (TraceRead::default(), TraceRead::default(), TraceWrite::default());
+    }
+
     let value = match instruction {
         Auipc(_) => program.pc.get_address().wrapping_add( x.imm() ),
         Lui(_) => x.imm(),
