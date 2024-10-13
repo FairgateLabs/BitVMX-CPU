@@ -11,13 +11,13 @@ input_file=$1
 base_name=$(basename "$input_file" .c)
 
 # Generate assembly from the input file
-$CC -S "$input_file" -o "${base_name}.s"
+$CC -march=rv32i -mabi=ilp32 -S "$input_file" -o "${base_name}.s"
 
 # Generate assembly for mulsi3.c
-$CC -S /src/mulsi3.c -o /src/mulsi3.s
+$CC -march=rv32i -mabi=ilp32 -S /src/mulsi3.c -o /src/mulsi3.s
 
 # Link the necessary files into an ELF executable
-$CC -nostdlib -T link.ld /src/div.S /src/mulsi3.s entrypoint.s "$input_file" -o "${base_name}.elf"
+$CC -march=rv32i -mabi=ilp32 -nostdlib -T link.ld /src/div.S /src/mulsi3.s entrypoint.s "$input_file" -o "${base_name}.elf"
 
 # Run the ELF with QEMU
 $QEMU -d in_asm -D "${base_name}.s" "${base_name}.elf"
