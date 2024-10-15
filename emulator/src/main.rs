@@ -103,11 +103,11 @@ enum Commands {
         #[arg(long, value_name = "TraceList")]
         list: Option<String>,
 
-        /// Fail reading read_1 (from a REGISTER) at a given step
+        /// Fail reading read_1 at a given step
         #[arg(long, value_names = &["step", "address_original", "value", "modified_address", "modified_last_step"], num_args = 5)]
         fail_read_1: Option<Vec<String>>,
 
-        /// Fail reading read_2 (from a REGISTER) at a given step
+        /// Fail reading read_2 at a given step
         #[arg(long, value_names = &["step", "address_original", "value", "modified_address", "modified_last_step"], num_args = 5)]
         fail_read_2: Option<Vec<String>>,
 
