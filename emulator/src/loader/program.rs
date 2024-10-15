@@ -74,9 +74,7 @@ impl Registers {
         self.base_address + (idx * 4)
     }
 
-    // returns the original idx given a register mapped address
-    // not working with address == 0
-    pub fn get_register_idx(&self, address: u32) -> u32 {
+    pub fn get_original_idx(&self, address: u32) -> u32 {
         (address - self.base_address) / 4
     }
 }
@@ -190,7 +188,6 @@ impl Program {
             panic!("Big endian machine not supported");
         }
         let section = self.find_section(address).expect(&format!("Address 0x{:08x} not found in any section", address));
-        println!("read mem section: {}", section.name);
         u32::from_be( section.data[(address - section.start) as usize / 4])
     }
 
@@ -202,9 +199,40 @@ impl Program {
     pub fn write_mem(&mut self, address: u32, value: u32) {
         let step = self.step;
         let section = self.find_section_mut(address).expect(&format!("Address 0x{:08x} not found in any section", address));
-        println!("write mem section: {}", section.name);
         section.data[(address - section.start) as usize / 4] = value.to_be(); 
         section.last_step[(address - section.start) as usize / 4] = step
+    }
+
+    pub fn dump_memory(&self, step: u64) {
+        if self.step != step {
+            return;
+        }
+        println!("\n========== Dumping memory at step: {} ==========", step);
+
+        println!("\n------- Section: REGISTERS Start: 0x{:08x} Size: 0x{:08x} -------\n",
+            REGISTERS_BASE_ADDRESS, (RISCV32_REGISTERS + AUX_REGISTERS) * std::mem::size_of::<u32>());
+
+        for (i, reg) in self.registers.value.iter().enumerate() {
+            let reg_addr = self.registers.get_register_address(i as u32);
+            println!("{}Reg({}): 0x{:08x} Value: 0x{:08x}",
+                if i == AUX_REGISTER_1 as usize || i == AUX_REGISTER_2 as usize { "AUX" } else { "" },
+                i, reg_addr, reg);
+        }
+
+        for section in &self.sections {
+            if section.data.iter().any(|&word| word != 0) {
+                println!("\n------- Section: {} Start: 0x{:08x} Size: 0x{:08x} -------\n", section.name, section.start, section.size);
+                for (i, word) in section.data.iter().enumerate() {
+                    let address = section.start + (i as u32 * 4);
+                    if *word != 0 {
+                        println!("Address: 0x{:08x} Value: 0x{:08x}", address, word);
+                    }
+                }
+            } else {
+                println!("\n------- Skipping empty section: {} -------", section.name);
+            }
+        }
+        println!("\n================================================\n");
     }
 }
 

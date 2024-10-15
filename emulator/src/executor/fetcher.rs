@@ -9,10 +9,9 @@ use super::{trace::TraceRWStep, validator::validate, utils::{FailRead, FailReads
 pub fn execute_program(program: &mut Program, input: Vec<u8>, input_section: &str, little_endian: bool, save_checkpoints: bool, limit_step: Option<u64>, print_trace: bool,
                        validate_on_chain: bool, use_instruction_mapping: bool, print_program_stdout: bool, debug: bool, no_hash: bool,
                        fail_hash: Option<u64>, fail_execute: Option<u64>, trace_list: Option<Vec<u64>>,
-                       fail_reads: Option<FailReads>) -> Result<(Vec<String>, ExecutionResult), ExecutionResult> {
+                       mem_dump: Option<u64>, fail_reads: Option<FailReads>) -> Result<(Vec<String>, ExecutionResult), ExecutionResult> {
     let trace_set: Option<HashSet<u64>> = trace_list.map(|vec| vec.into_iter().collect());
 
-    // todo(fede) can we remove this comment?
     //TOOD: This is a hack to copy the input into the bss section
     //copy into bss section the input
     if !input.is_empty() {
@@ -80,6 +79,10 @@ pub fn execute_program(program: &mut Program, input: Vec<u8>, input_section: &st
                     }
                 }
             }
+
+            if let Some(step) = mem_dump {
+                program.dump_memory(step);
+            }
         }
 
         if print_trace && trace.is_ok() {
@@ -111,9 +114,8 @@ pub fn execute_program(program: &mut Program, input: Vec<u8>, input_section: &st
                 break ExecutionResult::LimitStepReached;
             }
         }
-
     };
-   
+
 
     if debug && validate_on_chain {
         println!("Instructions validated on chain:  {}", count);
@@ -152,7 +154,6 @@ pub fn wrapping_add_stype(value: u32, x: &SType) -> u32 {
 pub fn execute_step(program: &mut Program, print_program_stdout: bool, debug: bool) -> Result<TraceRWStep, ExecutionResult> {
     let pc = program.pc.clone();
 
-    println!("fetch opcode from memory");
     let opcode = program.read_mem(pc.get_address());
     let instruction = riscv_decode::decode(opcode).unwrap();
 

@@ -111,6 +111,9 @@ enum Commands {
         #[arg(long, value_names = &["step", "address_original", "value", "modified_address", "modified_last_step"], num_args = 5)]
         fail_read_2: Option<Vec<String>>,
 
+        /// Memory dump at given step
+        #[arg(short, long)]
+        dump_mem: Option<u64>,
     },
 
 }
@@ -134,7 +137,7 @@ fn main() -> Result<(), ExecutionResult> {
         Some(Commands::Execute { elf, step, limit, input, input_section,
             input_as_little, no_hash, trace, verify, no_mapping, stdout , debug, sections,
             checkpoints, fail_hash, fail_execute, list,
-            fail_read_1: fail_read_1_args, fail_read_2: fail_read_2_args }) => {
+            fail_read_1: fail_read_1_args, fail_read_2: fail_read_2_args, dump_mem }) => {
 
             if elf.is_none() && step.is_none() {
                 println!("To execute an elf file or a checkpoint step is required");
@@ -183,9 +186,10 @@ fn main() -> Result<(), ExecutionResult> {
                 None
             };
 
-            execute_program(&mut program, input, &input_section.clone().unwrap_or(".input".to_string()),*input_as_little,
-                checkpoints, *limit,*trace, *verify, !*no_mapping,
-                *stdout, *debug, *no_hash, *fail_hash, *fail_execute, numbers, fail_reads)?;
+            execute_program(&mut program, input, &input_section.clone().unwrap_or(".input".to_string()),
+                *input_as_little, checkpoints, *limit,*trace,
+                *verify, !*no_mapping, *stdout, *debug,
+                *no_hash, *fail_hash, *fail_execute, numbers, *dump_mem, fail_reads)?;
         },
         None => {
             println!("No command specified");

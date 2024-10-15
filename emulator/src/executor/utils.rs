@@ -1,4 +1,4 @@
-use crate::{loader::program::Program, ExecutionResult};
+use crate::{loader::program::*, ExecutionResult};
 
 use super::trace::{TraceRWStep, TraceRead};
 
@@ -36,7 +36,7 @@ impl FailRead {
         if program.find_section(self.address_original).is_some() { 
             program.write_mem(self.address_original, self.value);
         } else {
-            let idx = program.registers.get_register_idx(self.address_original);
+            let idx = program.registers.get_original_idx(self.address_original);
             program.registers.set(idx, self.value, program.step);
         }
     }
@@ -94,7 +94,7 @@ mod utils_tests {
         let fail_reads = FailReads::new(Some(&fail_read_1_args), None);
         program.step = 10;
         fail_reads.patch_mem(&mut program);
-        let idx = program.registers.get_register_idx(4026531900);
+        let idx = program.registers.get_original_idx(4026531900);
 
         assert_eq!(program.registers.get(idx), 5);
     }
@@ -108,7 +108,7 @@ mod utils_tests {
         let fail_reads = FailReads::new(None, Some(&fail_read_2_args));
         program.step = 10;
         fail_reads.patch_mem(&mut program);
-        let idx = program.registers.get_register_idx(4026531904);
+        let idx = program.registers.get_original_idx(4026531904);
 
         assert_eq!(program.registers.get(idx), 6);
     }
