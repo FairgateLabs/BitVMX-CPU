@@ -9,7 +9,7 @@ pub struct FailRead {
     pub modified_address: u32,
     pub modified_last_step: u64,
     pub step: u64,
-    pub init: bool,
+    pub init: bool, // used to prevent failing on step == 0 (FailRead::default)
 }
 
 impl FailRead {
@@ -57,6 +57,7 @@ impl FailReads {
 
     pub fn patch_mem(&self, program: &mut Program) -> (bool, bool) {
         let (mut patch_1, mut patch_2) = (false, false);
+
         if self.read_1.init && self.read_1.step == program.step {
             self.read_1.patch_mem(program);
             patch_1 = true;
