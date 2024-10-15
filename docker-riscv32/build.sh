@@ -1,5 +1,7 @@
 #!/bin/bash
 
+cd /data
+
 # Check if the input file argument is provided
 if [ -z "$1" ]; then
     echo "Usage: $0 <input_filename>"

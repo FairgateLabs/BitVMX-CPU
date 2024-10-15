@@ -1,1 +1,1 @@
-docker build -t verifier .
+docker build -t verifier . --no-cache

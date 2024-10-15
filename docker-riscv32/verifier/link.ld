@@ -4,10 +4,7 @@ SECTIONS
 {
 
     .text 0x80000000: ALIGN(4) {
-   		*(.text._start)
-  		*(.text.__start)
-		*(.init)
-       		*(.text*)
+        *(.text)
         . = ALIGN(4);
     }
 

@@ -145,7 +145,7 @@ pub fn execute_step(program: &mut Program, print_program_stdout: bool, debug: bo
     let pc = program.pc.clone();
 
     let opcode = program.read_mem(pc.get_address());
-    println!("Opcode: 0x{:08x}", opcode);
+    //println!("Opcode: 0x{:08x}", opcode);
     let instruction = riscv_decode::decode(opcode).unwrap();
 
     if debug && program.step % 100000000 < 10000 {

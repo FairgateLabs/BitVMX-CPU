@@ -16,7 +16,7 @@ IF "%~2"=="" (
 )
 
 REM Run the Docker container and pass the filename to the build script
-docker run -v %cd%:/data -it --name riscv32 riscv32:latest sh -c "/data/%script_name% %input_filename%"
+docker run -v %cd%:/data -it --name riscv32 riscv32arch2:latest sh -c "/data/%script_name% %input_filename%"
 
 REM Remove the Docker container after completion
 docker rm riscv32

@@ -1,4 +1,4 @@
-FROM riscv32:latest
+FROM riscv32arch2:latest
 
 WORKDIR /
 
@@ -8,7 +8,11 @@ RUN pacman -Syu --noconfirm && \
 RUN cd /src && \ 
     git clone -v --recursive https://github.com/FairgateLabs/bitvmx-zk-verifier --branch custom_flags
 
-RUN cp -r /opt/riscv32-gnu-toolchain-elf-bin/riscv32-unknown-elf/include/* /src/bitvmx-zk-verifier/mcl/include/  
+#RUN ls    /opt/riscv32-gnu-toolchain-elf-bin/riscv32-unknown-elf/include
+RUN cp -r /riscv32/riscv32-unknown-elf/include/* /src/bitvmx-zk-verifier/mcl/include/  
+
+
+#RUN cp -r /opt/riscv32-gnu-toolchain-elf-bin/riscv32-unknown-elf/include/* /src/bitvmx-zk-verifier/mcl/include/  
 
 
 
