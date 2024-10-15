@@ -1,4 +1,4 @@
-use crate::{loader::program::*, ExecutionResult};
+use crate::loader::program::Program;
 
 use super::trace::{TraceRWStep, TraceRead};
 
@@ -70,7 +70,7 @@ impl FailReads {
         (patch_1, patch_2)
     }
 
-    pub fn patch_trace_reads(&self, step: u64, trace: &mut TraceRWStep, should_patch: (bool, bool)) {
+    pub fn patch_trace_reads(&self, trace: &mut TraceRWStep, should_patch: (bool, bool)) {
         if self.read_1.init && should_patch.0 {
             self.read_1.patch_trace_read(&mut trace.read_1);
         }

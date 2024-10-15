@@ -1,10 +1,10 @@
 use std::{cmp::Ordering, collections::HashSet};
 
-use crate::{executor::trace::*, executor::alignment_masks::*, loader::program::*, ExecutionResult, REGISTERS_BASE_ADDRESS};
+use crate::{executor::trace::*, executor::alignment_masks::*, loader::program::*, ExecutionResult};
 use bitcoin_script_riscv::riscv::instruction_mapping::create_verification_script_mapping;
 use riscv_decode::{types::*, Instruction::{self, *}};
 use sha2::{Digest, Sha256};
-use super::{trace::TraceRWStep, validator::validate, utils::{FailRead, FailReads}};
+use super::{trace::TraceRWStep, validator::validate, utils::FailReads};
 
 pub fn execute_program(program: &mut Program, input: Vec<u8>, input_section: &str, little_endian: bool, save_checkpoints: bool, limit_step: Option<u64>, print_trace: bool,
                        validate_on_chain: bool, use_instruction_mapping: bool, print_program_stdout: bool, debug: bool, no_hash: bool,
@@ -60,7 +60,7 @@ pub fn execute_program(program: &mut Program, input: Vec<u8>, input_section: &st
 
         if trace.is_ok() {
             if let Some(fr) = &fail_reads {
-                fr.patch_trace_reads(program.step, trace.as_mut().unwrap(), should_patch); // patches trace reads only at the right step
+                fr.patch_trace_reads(trace.as_mut().unwrap(), should_patch); // patches trace reads only at the right step
             }
 
             if let Some(fail) = fail_execute {
