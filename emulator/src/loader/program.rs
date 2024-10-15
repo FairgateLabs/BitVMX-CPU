@@ -203,12 +203,7 @@ impl Program {
         section.last_step[(address - section.start) as usize / 4] = step
     }
 
-    pub fn dump_memory(&self, step: u64) {
-        if self.step != step {
-            return;
-        }
-        println!("\n========== Dumping memory at step: {} ==========", step);
-
+    pub fn dump_memory(&self) {
         println!("\n------- Section: REGISTERS Start: 0x{:08x} Size: 0x{:08x} -------\n",
             REGISTERS_BASE_ADDRESS, (RISCV32_REGISTERS + AUX_REGISTERS) * std::mem::size_of::<u32>());
 

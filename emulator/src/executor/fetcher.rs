@@ -81,7 +81,10 @@ pub fn execute_program(program: &mut Program, input: Vec<u8>, input_section: &st
             }
 
             if let Some(step) = mem_dump {
-                program.dump_memory(step);
+                if program.step == step {
+                    println!("\n========== Dumping memory at step: {} ==========", step);
+                    program.dump_memory();
+                }
             }
         }
 
