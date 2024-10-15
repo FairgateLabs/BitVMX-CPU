@@ -4,7 +4,7 @@ use emulator::{executor::fetcher::execute_program, loader::program::load_elf, Ex
 fn verify_file(fname: &str, validate_on_chain: bool) -> Result<(Vec<String>, ExecutionResult), ExecutionResult> {
     let mut program = load_elf(&fname, false);
     println!("Execute program {}", fname);
-    execute_program(&mut program, Vec::new(), ".bss", false, false, None, false, validate_on_chain, false, false, true, true, None, None, None)
+    execute_program(&mut program, Vec::new(), ".bss", false, false, None, false, validate_on_chain, false, false, true, true, None, None, None, None)
 }
 
 

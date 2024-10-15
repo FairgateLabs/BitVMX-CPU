@@ -1,5 +1,5 @@
 use bitcoin_script_riscv::riscv::instruction_mapping::create_verification_script_mapping;
-use emulator::{executor::fetcher::execute_program, loader::program::{generate_rom_commitment, load_elf, Program}, ExecutionResult, REGISTERS_BASE_ADDRESS};
+use emulator::{executor::{fetcher::{execute_program}, utils::FailReads}, loader::program::{generate_rom_commitment, load_elf, Program}, ExecutionResult, REGISTERS_BASE_ADDRESS};
 use hex::FromHex;
 
 use clap::{Parser, Subcommand};
@@ -102,6 +102,15 @@ enum Commands {
         /// List of specific trace step to print
         #[arg(long, value_name = "TraceList")]
         list: Option<String>,
+
+        /// Fail reading read_1 (from a REGISTER) at a given step
+        #[arg(long, value_names = &["step", "address_original", "value", "modified_address", "modified_last_step"], num_args = 5)]
+        fail_read_1: Option<Vec<String>>,
+
+        /// Fail reading read_2 (from a REGISTER) at a given step
+        #[arg(long, value_names = &["step", "address_original", "value", "modified_address", "modified_last_step"], num_args = 5)]
+        fail_read_2: Option<Vec<String>>,
+
     },
 
 }
@@ -122,7 +131,10 @@ fn main() -> Result<(), ExecutionResult> {
             let program = load_elf(elf, *sections);
             generate_rom_commitment(&program);
         },
-        Some(Commands::Execute { elf, step, limit, input, input_section, input_as_little, no_hash, trace, verify, no_mapping, stdout , debug, sections, checkpoints, fail_hash, fail_execute, list }) => {
+        Some(Commands::Execute { elf, step, limit, input, input_section,
+            input_as_little, no_hash, trace, verify, no_mapping, stdout , debug, sections,
+            checkpoints, fail_hash, fail_execute, list,
+            fail_read_1: fail_read_1_args, fail_read_2: fail_read_2_args }) => {
 
             if elf.is_none() && step.is_none() {
                 println!("To execute an elf file or a checkpoint step is required");
@@ -165,9 +177,15 @@ fn main() -> Result<(), ExecutionResult> {
                 None => None
             };
 
-            
+            let fail_reads = if fail_read_1_args.is_some() || fail_read_2_args.is_some() {
+                Some(FailReads::new(fail_read_1_args.as_ref(), fail_read_2_args.as_ref()))
+            } else {
+                None
+            };
 
-            execute_program(&mut program, input, &input_section.clone().unwrap_or(".input".to_string()),*input_as_little, checkpoints, *limit,*trace, *verify, !*no_mapping, *stdout, *debug, *no_hash, *fail_hash, *fail_execute, numbers)?;
+            execute_program(&mut program, input, &input_section.clone().unwrap_or(".input".to_string()),*input_as_little,
+                checkpoints, *limit,*trace, *verify, !*no_mapping,
+                *stdout, *debug, *no_hash, *fail_hash, *fail_execute, numbers, fail_reads)?;
         },
         None => {
             println!("No command specified");
@@ -176,3 +194,4 @@ fn main() -> Result<(), ExecutionResult> {
 
     Ok(())
 }
+

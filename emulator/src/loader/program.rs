@@ -73,6 +73,12 @@ impl Registers {
     pub fn get_register_address(&self, idx: u32) -> u32 {
         self.base_address + (idx * 4)
     }
+
+    // returns the original idx given a register mapped address
+    // not working with address == 0
+    pub fn get_register_idx(&self, address: u32) -> u32 {
+        (address - self.base_address) / 4
+    }
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -134,7 +140,7 @@ impl Program {
         serde_json::from_str(serialized_str).expect("Unable to deserialize")
     }
 
-    fn new(entry_point: u32, registers_base_address: u32, sp_base_address: u32) -> Program {
+    pub fn new(entry_point: u32, registers_base_address: u32, sp_base_address: u32) -> Program {
         Program {
             sections: Vec::new(),
             registers: Registers::new(registers_base_address, sp_base_address),
@@ -184,6 +190,7 @@ impl Program {
             panic!("Big endian machine not supported");
         }
         let section = self.find_section(address).expect(&format!("Address 0x{:08x} not found in any section", address));
+        println!("read mem section: {}", section.name);
         u32::from_be( section.data[(address - section.start) as usize / 4])
     }
 
@@ -195,11 +202,10 @@ impl Program {
     pub fn write_mem(&mut self, address: u32, value: u32) {
         let step = self.step;
         let section = self.find_section_mut(address).expect(&format!("Address 0x{:08x} not found in any section", address));
+        println!("write mem section: {}", section.name);
         section.data[(address - section.start) as usize / 4] = value.to_be(); 
         section.last_step[(address - section.start) as usize / 4] = step
     }
-
-
 }
 
 pub fn vec_u8_to_vec_u32(input: &[u8], little:bool) -> Vec<u32> {
