@@ -1,4 +1,4 @@
-use crate::loader::program::Program;
+use crate::loader::program::{Program, Registers};
 
 use super::trace::{TraceRWStep, TraceRead};
 
@@ -33,12 +33,13 @@ impl FailRead {
     pub fn patch_mem(&self, program: &mut Program) {
         // wether the addr belongs to a section or to a register
         // todo this will be changed when we consolidate sections and registers
-        if program.find_section(self.address_original).is_some() { 
+        if program.find_section(self.address_original).is_some() {
             program.write_mem(self.address_original, self.value);
-        } else {
-            let idx = program.registers.get_original_idx(self.address_original);
-            program.registers.set(idx, self.value, program.step);
+            return;
         }
+
+        let idx = program.registers.get_original_idx(self.address_original);
+        program.registers.set(idx, self.value, program.step);
     }
 }
 
@@ -156,6 +157,25 @@ mod utils_tests {
         fail_reads.patch_mem(&mut program);
 
         assert_eq!(program.read_mem(4100), 11);
+    }
+
+    #[test]
+    fn test_fail_read_default_has_no_effect() {
+        let mut program = Program::new(0x1000, 0xF000_0000, 0xE000_0000);
+        program.add_section(Section {
+            name: "test_section".to_string(),
+            data: vec![0; 4],
+            last_step: vec![0; 4],
+            start: 0x1000,
+            size: 16,
+            is_code: false,
+            initialized: true,
+        });
+        let fail_reads = FailReads::new(None, None);
+        program.step = 10;
+        fail_reads.patch_mem(&mut program);
+
+        assert_eq!(program.read_mem(4100), 0);
     }
 }
 
