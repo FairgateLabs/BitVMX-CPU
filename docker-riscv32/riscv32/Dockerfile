@@ -19,27 +19,9 @@ RUN cd /src && curl -LJO https://github.com/gcc-mirror/gcc/raw/master/libgcc/con
             && curl -LJO https://github.com/gcc-mirror/gcc/raw/master/libgcc/config/riscv/riscv-asm.h \ 
             && curl -LJO https://github.com/gcc-mirror/gcc/raw/master/libgcc/config/riscv/div.S 
 
-  #--with-multilib-generator="rv32i-ilp32-rv32im--"  && \
-# Set environment variables if needed
-#ENV PATH="/opt/riscv/bin:$PATH"
 
-
-#ENV PATH /opt/riscv32-gnu-toolchain-elf-bin/bin:$PATH
-
-#ENV CC riscv32-unknown-elf-gcc
-#ENV CXX riscv32-unknown-elf-c++
-#ENV CPP riscv32-unknown-elf-cpp
-#ENV AS riscv32-unknown-elf-as
-#ENV LD riscv32-unknown-elf-ld
-#ENV AR riscv32-unknown-elf-ar
-#ENV DUMP riscv32-unknown-elf-objdump
-#ENV RANLIB riscv32-unknown-elf-ranlib
-#ENV HOST riscv32-unknown-elf
-#ENV QEMU qemu-riscv32 -L /riscv32/sysroot 
-#
-
-# Default command
-#CMD ["/bin/bash"]
+RUN pacman -Sy --noconfirm qemu-full
+RUN pacman -Sy --noconfirm dos2unix
 
 ENV PATH=/riscv32/bin:$PATH
 
@@ -52,5 +34,9 @@ ENV AR=riscv32-unknown-elf-ar
 ENV DUMP=riscv32-unknown-elf-objdump
 ENV RANLIB=riscv32-unknown-elf-ranlib
 ENV HOST=riscv32-unknown-elf
+ENV QEMU=qemu-riscv32
 
 WORKDIR /data
+
+# Default command
+CMD ["/bin/bash"]

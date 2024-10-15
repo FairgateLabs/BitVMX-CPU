@@ -1,3 +1,4 @@
+cd compliance
 for f in /riscv-tests/isa/rv32ui/*.S; do
   filename=$(basename "${f%.*}")
   if [[ "$filename" != "fence_i" ]]; then
@@ -11,5 +12,5 @@ for f in /riscv-tests/isa/rv32um/*.S; do
   if [[ "$filename" != "fence_i" ]]; then
      echo "$filename"
     ./build_mul.sh "$filename"
-  fi
+ fi
 done

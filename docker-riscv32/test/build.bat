@@ -1,1 +1,0 @@
-docker build -t riscv32arch2 .
