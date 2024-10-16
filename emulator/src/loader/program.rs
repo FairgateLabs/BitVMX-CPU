@@ -73,6 +73,10 @@ impl Registers {
     pub fn get_register_address(&self, idx: u32) -> u32 {
         self.base_address + (idx * 4)
     }
+
+    pub fn get_original_idx(&self, address: u32) -> u32 {
+        (address - self.base_address) / 4
+    }
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -134,7 +138,7 @@ impl Program {
         serde_json::from_str(serialized_str).expect("Unable to deserialize")
     }
 
-    fn new(entry_point: u32, registers_base_address: u32, sp_base_address: u32) -> Program {
+    pub fn new(entry_point: u32, registers_base_address: u32, sp_base_address: u32) -> Program {
         Program {
             sections: Vec::new(),
             registers: Registers::new(registers_base_address, sp_base_address),
@@ -199,7 +203,32 @@ impl Program {
         section.last_step[(address - section.start) as usize / 4] = step
     }
 
+    pub fn dump_memory(&self) {
+        println!("\n------- Section: REGISTERS Start: 0x{:08x} Size: 0x{:08x} -------\n",
+            REGISTERS_BASE_ADDRESS, (RISCV32_REGISTERS + AUX_REGISTERS) * std::mem::size_of::<u32>());
 
+        for (i, reg) in self.registers.value.iter().enumerate() {
+            let reg_addr = self.registers.get_register_address(i as u32);
+            println!("{}Reg({}): 0x{:08x} Value: 0x{:08x}",
+                if i == AUX_REGISTER_1 as usize || i == AUX_REGISTER_2 as usize { "AUX" } else { "" },
+                i, reg_addr, reg);
+        }
+
+        for section in &self.sections {
+            if section.data.iter().any(|&word| word != 0) {
+                println!("\n------- Section: {} Start: 0x{:08x} Size: 0x{:08x} -------\n", section.name, section.start, section.size);
+                for (i, word) in section.data.iter().enumerate() {
+                    let address = section.start + (i as u32 * 4);
+                    if *word != 0 {
+                        println!("Address: 0x{:08x} Value: 0x{:08x}", address, word);
+                    }
+                }
+            } else {
+                println!("\n------- Skipping empty section: {} -------", section.name);
+            }
+        }
+        println!("\n================================================\n");
+    }
 }
 
 pub fn vec_u8_to_vec_u32(input: &[u8], little:bool) -> Vec<u32> {
