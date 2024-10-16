@@ -18,15 +18,14 @@ Cargo.lock
 tests/resources/
 
 .idea/
-/docker-riscv32/compliance/build/*.s
 
 # Exclude build files
-/docker-riscv32/*.elf
-/docker-riscv32/*.s
-/docker-riscv32/compliance/*.elf
-/docker-riscv32/compliance/*.s
-/docker-riscv32/verifier/*.elf
-/docker-riscv32/verifier/*.s
+/docker-riscv32/riscv32/build/*.elf
+/docker-riscv32/riscv32/build/*.s
+/docker-riscv32/compliance/build/*.elf
+/docker-riscv32/compliance/build/*.s
+/docker-riscv32/verifier/build/*.elf
+/docker-riscv32/verifier/build/*.s
 /.vscode
 
 # checkpoints
