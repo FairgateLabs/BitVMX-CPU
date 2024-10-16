@@ -19,13 +19,6 @@ tests/resources/
 
 .idea/
 
-# Exclude build files
-/docker-riscv32/riscv32/build/*.elf
-/docker-riscv32/riscv32/build/*.s
-/docker-riscv32/compliance/build/*.elf
-/docker-riscv32/compliance/build/*.s
-/docker-riscv32/verifier/build/*.elf
-/docker-riscv32/verifier/build/*.s
 /.vscode
 
 # checkpoints

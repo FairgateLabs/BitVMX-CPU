@@ -31,23 +31,23 @@ The options are:
 
 ### Running an example:
 
-As an example, there is a precompiled [hello-world.elf](docker-riscv32/hello-world.elf) that can be used with the emulator, but any other program compiled using the instructions of the next section should work too. The `.c` file is in the same folder.
+As an example, there is a precompiled [hello-world.elf](docker-riscv32/riscv32/build/hello-world.elf) that can be used with the emulator, but any other program compiled using the instructions of the next section should work too. The `.c` file is in the same folder.
 
 execute:  
-```cargo run --release -p emulator execute --elf docker-riscv32/hello-world.elf --stdout```  
+```cargo run --release -p emulator execute --elf docker-riscv32/riscv32/build/hello-world.elf --stdout```  
 The execute command takes an `--elf` file and will output through `--stdout` some message and a resulting error code (1) in this case as it expects certain input.
 
 Arguments:  
-```cargo run --release -p emulator execute --elf docker-riscv32/hello-world.elf --stdout --input 11111111```  
+```cargo run --release -p emulator execute --elf docker-riscv32/riscv32/build/hello-world.elf --stdout --input 11111111```  
 As the program expects `0x11111111` as input it will return (0) and a success message.
 (The input of the program needs to be provided as hex values and is treated as big-endian encoding except `--input-as-little` flag is set, which will treat the input as 32 bit words as little endian.)
 
 Trace:  
-```cargo run --release -p emulator execute --elf docker-riscv32/hello-world.elf --trace --input 11111111```  
+```cargo run --release -p emulator execute --elf docker-riscv32/riscv32/build/hello-world.elf --trace --input 11111111```  
 If `--trace` is used, the program will generate the trace of every step as `;` delimited value, and the hash for that step (concatenated with the previous hash). You can test that the last hash of the trace changes if you change the input.
 
 Debug:  
-```cargo run --release -p emulator execute --elf docker-riscv32/hello-world.elf --trace --input 11111111```  
+```cargo run --release -p emulator execute --elf docker-riscv32/riscv32/build/hello-world.elf --trace --input 11111111```  
 `--debug` will show every step of the execution, dumping the opcode and the decoded instruction, at the end will also show the state of the registers, some metrics and the input data.
 
 
@@ -58,13 +58,13 @@ The result will be a little unreadable as it generates the hexdump of the bitcoi
 
 ### Generate program commitment
 To generate the ROM commitments use the following command:   
-`cargo run -p emulator -- generate-rom-commitment --elf docker-riscv32/hello-world.elf`
+`cargo run -p emulator -- generate-rom-commitment --elf docker-riscv32/riscv32/build/hello-world.elf`
 
 ## Advanced commands 
 
 When running longer programs first run with `--debug` and `--checkpoints` this will generate a checkpoint file every 50M steps and will print the last hash and the total number of steps.
 
-`cargo run --release --bin emulator -- execute --elf docker-riscv32/verifier/zkverifier --debug --checkpoints`
+`cargo run --release --bin emulator -- execute --elf docker-riscv32/verifier/build/zkverifier-new-mul --debug --checkpoints`
 
 Then when the binary search requires some specific step execute from the closest (lower) checkpoint: i.e `--step 150000000`, put as limit the maximun step required i.e: `--limit 180000000` and use list to specify the requested value steps: `--list "160000000,165000000,170000000"` and `--trace` to print them.
 
