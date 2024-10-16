@@ -31,3 +31,4 @@ tests/resources/
 
 # checkpoints
 *.json
+.DS_Store

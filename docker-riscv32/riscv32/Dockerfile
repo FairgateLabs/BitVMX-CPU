@@ -20,7 +20,15 @@ RUN cd /src && curl -LJO https://github.com/gcc-mirror/gcc/raw/master/libgcc/con
             && curl -LJO https://github.com/gcc-mirror/gcc/raw/master/libgcc/config/riscv/div.S 
 
 
-RUN pacman -Sy --noconfirm qemu-full
+# Define a build argument (default to false)
+ARG INSTALL_QEMU=true
+
+# Update the package manager and optionally install qemu-full based on the argument
+RUN pacman -Sy --noconfirm && \
+    if [ "$INSTALL_QEMU" = "true" ]; then \
+        pacman -S --noconfirm qemu-full; \
+    fi
+
 RUN pacman -Sy --noconfirm dos2unix
 
 ENV PATH=/riscv32/bin:$PATH
