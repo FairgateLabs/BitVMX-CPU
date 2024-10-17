@@ -893,7 +893,7 @@ pub fn mulh(stack: &mut StackTracker, tables: &StackTables, a: StackVariable, mu
 }
 
 
-pub fn div_check(stack: &mut StackTracker, tables: &StackTables, dividend: StackVariable, divisor: StackVariable, quotient: StackVariable, remainder: StackVariable, is_rem_check: bool) -> StackVariable {
+pub fn div_check(stack: &mut StackTracker, tables: &StackTables, dividend: StackVariable, divisor: StackVariable, quotient: StackVariable, remainder: StackVariable) {
 
     //this part asserts that the remainder is lower than the divisor
     let mut remainder_check = stack.copy_var(remainder);
@@ -901,8 +901,7 @@ pub fn div_check(stack: &mut StackTracker, tables: &StackTables, dividend: Stack
     is_lower_than(stack, &mut remainder_check, &mut divisor_check, true);
     stack.op_verify();
 
-    let copy_quotient = stack.copy_var(quotient);
-    let result = multiply(stack, divisor, copy_quotient,  false, false);
+    let result = multiply(stack, divisor, quotient,  false, false);
     stack.explode(result);
     stack.to_altstack_count(8);
 
@@ -919,21 +918,10 @@ pub fn div_check(stack: &mut StackTracker, tables: &StackTables, dividend: Stack
     is_equal_to(stack, &remainder, &diff);
     stack.op_verify();
 
-    if is_rem_check {
-        stack.to_altstack();
-    } else {
-        stack.drop(remainder);
-    }
+
+    stack.drop(remainder);
     stack.drop(diff);
 
-    // returns the original write_1_value as result to be checked in the normal equal verification later
-    stack.move_var(quotient);
-    if is_rem_check {
-        stack.drop(quotient);
-        stack.from_altstack()
-    } else {
-        quotient
-    }
 
 }
 
@@ -991,17 +979,6 @@ pub fn sign_check(stack: &mut StackTracker, tables: &StackTables, dividend: Stac
 
 
 }
-
-/* 
-pub fn match_edge_cases(stack: &mut StackTracker, tables: &StackTables, dividend: StackVariable, divisor: StackVariable, quotient: StackVariable, remainder: StackVariable) -> StackVariable {
-
-    let minus_one = stack.number_u32(0xFFFF_FFFF);
-    is_equal_to(stack, &minus_one, &divisor);
-    stack.to_altstack();
-    stack.drop(minus_one);
-    stack.from_altstack();
-
-}*/
 
 
 pub fn div(stack: &mut StackTracker, tables: &StackTables, dividend: StackVariable, divisor: StackVariable, quotient: StackVariable, remainder: StackVariable) -> StackVariable {
@@ -1065,7 +1042,13 @@ pub fn division_and_remainder(stack: &mut StackTracker, tables: &StackTables, di
 
     let (stack_true, mut stack_false) = edge_case(stack, dividend, divisor, quotient, remainder, compare, result);
 
-    div_check(&mut stack_false, tables, dividend, divisor, quotient, remainder, is_rem_check);
+    if is_rem_check {
+        stack_false.copy_var(remainder);
+    } else {
+        stack_false.copy_var(quotient);
+    }
+
+    div_check(&mut stack_false, tables, dividend, divisor, quotient, remainder);
 
     let ret = stack.end_if(stack_true, stack_false, 4, vec![(8, "write_quotient".to_string())], 0);
 
