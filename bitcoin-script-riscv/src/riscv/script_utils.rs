@@ -929,7 +929,7 @@ pub fn sign_check(stack: &mut StackTracker, tables: &StackTables, dividend: Stac
     //take the sign of every variable and convert to positive if negative
     //save the result with the sign unchanged to be used in the final result
 
-    //checks that the dividend and remainder have the same sign (and save the sign)
+    //checks that the dividend and remainder have the same sign (and save the sign) 
     is_negative(stack, remainder);      //rem_sign
     stack.op_dup();                           //rem_sign rem_sign
     stack.to_altstack();                      //rem_sign | rem_sign 
@@ -940,7 +940,18 @@ pub fn sign_check(stack: &mut StackTracker, tables: &StackTables, dividend: Stac
     stack.to_altstack();                      //rem_sign dividend_sign dividend_sign | dividend_sign  rem_sign
     stack.to_altstack();                      //rem_sign dividend_sign | dividend_sign dividend_sign  rem_sign
 
-    stack.op_equalverify();                   // | dividend_sign dividend_sign  rem_sign
+
+    //but if the remainder is zero the sign comparison can be ignored
+    let zero = stack.number_u32(0);
+    is_equal_to(stack, &remainder, &zero);
+    stack.to_altstack();
+    stack.drop(zero);
+    stack.from_altstack();
+
+    let (mut stack_true, mut stack_false) = stack.open_if();
+    stack_true.op_2drop();
+    stack_false.op_equalverify();
+    stack.end_if(stack_true, stack_false, 2, vec![],0);
 
 
     //then assert sign of divisor and dividen are the same the quotient sign is positive and negative otherwise
@@ -981,36 +992,6 @@ pub fn sign_check(stack: &mut StackTracker, tables: &StackTables, dividend: Stac
 }
 
 
-pub fn div(stack: &mut StackTracker, tables: &StackTables, dividend: StackVariable, divisor: StackVariable, quotient: StackVariable, remainder: StackVariable) -> StackVariable {
-
-    stack.move_var(dividend);
-    stack.move_var(divisor);
-    let quotient = stack.copy_var(quotient);   //as this is the original trace_step needs to be copied
-    stack.move_var(remainder);
-
-
-    let minus_one = stack.number_u32(0xFFFF_FFFF);
-    is_equal_to(stack, &minus_one, &divisor);
-    stack.to_altstack();
-    stack.drop(minus_one);
-    stack.from_altstack();
-
-
-    let (mut stack_true, mut stack_false) = stack.open_if();
-    stack_true.drop(remainder);
-    stack_true.drop(quotient);
-    stack_true.drop(divisor);
-
-
-    let (divisor, quotient, dividend, remainder) = sign_check(&mut stack_false, tables, dividend, divisor, quotient, remainder);
-    //divu(&mut stack_false, tables, dividend, divisor, quotient, remainder, false);
-
-
-    StackVariable::null()
-    
-
-}
-
 pub fn edge_case(stack: &mut StackTracker, dividend: StackVariable, divisor: StackVariable, quotient: StackVariable, remainder: StackVariable, compare: u32, result: Option<u32>) -> (StackTracker, StackTracker) {
 
     let value = stack.number_u32(compare);
@@ -1050,7 +1031,7 @@ pub fn division_and_remainder(stack: &mut StackTracker, tables: &StackTables, di
 
     div_check(&mut stack_false, tables, dividend, divisor, quotient, remainder);
 
-    let ret = stack.end_if(stack_true, stack_false, 4, vec![(8, "write_quotient".to_string())], 0);
+    let ret = stack.end_if(stack_true, stack_false, 4, vec![(8, "write_result".to_string())], 0);
 
     ret[0]
 
@@ -1064,6 +1045,35 @@ pub fn divu(stack: &mut StackTracker, tables: &StackTables, dividend: StackVaria
 pub fn remu(stack: &mut StackTracker, tables: &StackTables, dividend: StackVariable, divisor: StackVariable, remainder: StackVariable, quotient: StackVariable) -> StackVariable {
     division_and_remainder(stack, tables, dividend, divisor, quotient, remainder, 0, None, true)
 }
+
+pub fn div(stack: &mut StackTracker, tables: &StackTables, dividend: StackVariable, divisor: StackVariable, quotient: StackVariable, remainder: StackVariable) -> StackVariable {
+
+    stack.move_var(dividend);
+    stack.move_var(divisor);
+    stack.move_var(quotient);   
+    stack.move_var(remainder);
+
+    let (stack_true, mut stack_false) = edge_case(stack, dividend, divisor, quotient, remainder, 0, Some(0xFFFF_FFFF));
+
+    let (stack_true_2, mut stack_no_edge) = edge_case(&mut stack_false, dividend, divisor, quotient, remainder, 0xFFFF_FFFF, None);
+
+    stack_no_edge.copy_var(quotient);
+    let (divisor, quotient, dividend, remainder) = sign_check(&mut stack_no_edge, tables, dividend, divisor, quotient, remainder);
+    div_check(&mut stack_no_edge, tables, dividend, divisor, quotient, remainder);
+
+    stack_false.end_if(stack_true_2, stack_no_edge, 4, vec![(8, "write_result".to_string())], 0);
+
+    let ret= stack.end_if(stack_true, stack_false, 4, vec![(8, "write_result".to_string())], 0);
+
+    ret[0]
+    //divu(&mut stack_false, tables, dividend, divisor, quotient, remainder, false);
+
+
+    //StackVariable::null()
+    
+
+}
+
 
 
 

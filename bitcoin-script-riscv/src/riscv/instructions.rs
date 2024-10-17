@@ -404,7 +404,7 @@ pub fn op_arithmetic(instruction: &Instruction, stack: &mut StackTracker, trace_
         Mulh(_)  => mulh(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, false),
         Mulhsu(_)  => mulh(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, true),
         Mulhu(_) => multiply(stack, trace_read.read_1_value, trace_read.read_2_value, true, false),
-        //Div(_) => div(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, trace_step.write_1_value, witness.unwrap()),
+        Div(_) => div(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, write_value_copy.unwrap(), witness.unwrap()),
         Divu(_) => divu(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, write_value_copy.unwrap(), witness.unwrap()),
         Remu(_) => remu(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, write_value_copy.unwrap(), witness.unwrap()),
         Add(_) => add_with_bit_extension(stack, &tables, trace_read.read_1_value, &mut trace_read.read_2_value, StackVariable::null()),
