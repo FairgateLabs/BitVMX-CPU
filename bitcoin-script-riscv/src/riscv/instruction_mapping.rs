@@ -92,9 +92,9 @@ pub fn get_key_from_instruction_and_micro(instruction: &Instruction, micro: u8) 
         Mulh(x) => name_or_nop(x, "mulh"),
         Mulhsu(x) => name_or_nop(x, "mulhsu"),
         Mulhu(x) => name_or_nop(x, "mulhu"),
-        //Div(x) => name_or_nop(x, "div"),
+        Div(x) => name_or_nop(x, "div"),
         Divu(x) => name_or_nop(x, "divu"),
-        //Rem(x) => name_or_nop(x, "rem"),
+        Rem(x) => name_or_nop(x, "rem"),
         Remu(x) => name_or_nop(x, "remu"),
 
         Xor(x) => name_or_nop(x, "xor"),
@@ -159,6 +159,8 @@ pub fn generate_sample_instructions() -> Vec<(Instruction, u8)> {
         ( Mulhu(RType(33566899)) , 0 ),
         ( Divu(RType(46520115)) , 0 ),
         ( Remu(RType(46528307)) , 0 ),
+        ( Div(RType(46516019)) , 0 ),
+        ( Rem(RType(46524211)) , 0 ),
 
         ( Or(RType(24755)) , 0 ),
         ( Ori(IType(251682963)) , 0 ),

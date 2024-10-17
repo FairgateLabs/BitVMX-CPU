@@ -388,7 +388,6 @@ pub fn op_arithmetic(instruction: &Instruction, stack: &mut StackTracker, trace_
         masked_5lsb = stack.from_altstack_joined(2, "masked_5lsb");
     }
 
-    //stack.debug();
 
     let write_value_copy = match instruction {
         Div(_) | 
@@ -407,6 +406,7 @@ pub fn op_arithmetic(instruction: &Instruction, stack: &mut StackTracker, trace_
         Div(_) => div(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, write_value_copy.unwrap(), witness.unwrap()),
         Divu(_) => divu(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, write_value_copy.unwrap(), witness.unwrap()),
         Remu(_) => remu(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, write_value_copy.unwrap(), witness.unwrap()),
+        Rem(_) => rem(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, write_value_copy.unwrap(), witness.unwrap()),
         Add(_) => add_with_bit_extension(stack, &tables, trace_read.read_1_value, &mut trace_read.read_2_value, StackVariable::null()),
         Sub(_) => sub(stack, &tables, trace_read.read_1_value, &mut trace_read.read_2_value),
         Slt(_)  => is_lower_than_slti(stack, &mut trace_read.read_1_value, trace_read.read_2_value, false, false),
@@ -420,7 +420,6 @@ pub fn op_arithmetic(instruction: &Instruction, stack: &mut StackTracker, trace_
         _ => panic!("Unreachable")
     };
 
-    //stack.debug();
 
     let write_pc = pc_next(stack, &tables, trace_read.program_counter);
     let micro = stack.number(0);

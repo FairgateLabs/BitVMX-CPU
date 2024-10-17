@@ -21,12 +21,10 @@ fn list_files() {
             let fname = fname.to_string_lossy();
             if fname.ends_with(".elf") {
 
-                let validate_on_chain = !(fname.starts_with("div") || fname.starts_with("rem")); 
-
                 let path = path.path();
                 let path = path.to_string_lossy();
 
-                let (_, result) = verify_file(&format!("{}", path), validate_on_chain).unwrap();
+                let (_, result) = verify_file(&format!("{}", path), true).unwrap();
                 match result {
                     ExecutionResult::Success(exit_code) => {
                         assert!(exit_code == 0, "Error executing file {}", path);

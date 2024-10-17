@@ -1046,18 +1046,23 @@ pub fn remu(stack: &mut StackTracker, tables: &StackTables, dividend: StackVaria
     division_and_remainder(stack, tables, dividend, divisor, quotient, remainder, 0, None, true)
 }
 
-pub fn div(stack: &mut StackTracker, tables: &StackTables, dividend: StackVariable, divisor: StackVariable, quotient: StackVariable, remainder: StackVariable) -> StackVariable {
+pub fn division_and_remainder_signed(stack: &mut StackTracker, tables: &StackTables, dividend: StackVariable, divisor: StackVariable, quotient: StackVariable, remainder: StackVariable, 
+        compare_1: u32, result_1: Option<u32>, compare_2:u32, result_2: Option<u32>, is_rem_check: bool) -> StackVariable {
 
     stack.move_var(dividend);
     stack.move_var(divisor);
     stack.move_var(quotient);   
     stack.move_var(remainder);
 
-    let (stack_true, mut stack_false) = edge_case(stack, dividend, divisor, quotient, remainder, 0, Some(0xFFFF_FFFF));
+    let (stack_true, mut stack_false) = edge_case(stack, dividend, divisor, quotient, remainder, compare_1, result_1);
 
-    let (stack_true_2, mut stack_no_edge) = edge_case(&mut stack_false, dividend, divisor, quotient, remainder, 0xFFFF_FFFF, None);
+    let (stack_true_2, mut stack_no_edge) = edge_case(&mut stack_false, dividend, divisor, quotient, remainder, compare_2, result_2);
 
-    stack_no_edge.copy_var(quotient);
+    if is_rem_check {
+        stack_no_edge.copy_var(remainder);
+    } else {
+        stack_no_edge.copy_var(quotient);
+    }
     let (divisor, quotient, dividend, remainder) = sign_check(&mut stack_no_edge, tables, dividend, divisor, quotient, remainder);
     div_check(&mut stack_no_edge, tables, dividend, divisor, quotient, remainder);
 
@@ -1066,16 +1071,18 @@ pub fn div(stack: &mut StackTracker, tables: &StackTables, dividend: StackVariab
     let ret= stack.end_if(stack_true, stack_false, 4, vec![(8, "write_result".to_string())], 0);
 
     ret[0]
-    //divu(&mut stack_false, tables, dividend, divisor, quotient, remainder, false);
-
-
-    //StackVariable::null()
-    
 
 }
 
 
+pub fn div(stack: &mut StackTracker, tables: &StackTables, dividend: StackVariable, divisor: StackVariable, quotient: StackVariable, remainder: StackVariable) -> StackVariable {
+    division_and_remainder_signed(stack, tables, dividend, divisor, quotient, remainder, 0, Some(0xFFFF_FFFF), 0xFFFF_FFFF, None, false)
+} 
 
+
+pub fn rem(stack: &mut StackTracker, tables: &StackTables, dividend: StackVariable, divisor: StackVariable, remainder: StackVariable, quotient: StackVariable) -> StackVariable {
+    division_and_remainder_signed(stack, tables, dividend, divisor, quotient, remainder, 0, None, 0xFFFF_FFFF, Some(0), true)
+} 
 
 #[cfg(test)]
 mod tests {
