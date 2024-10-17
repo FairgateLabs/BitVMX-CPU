@@ -390,13 +390,23 @@ pub fn op_arithmetic(instruction: &Instruction, stack: &mut StackTracker, trace_
 
     //stack.debug();
 
+    let write_value_copy = match instruction {
+        Div(_) | 
+        Divu(_) | 
+        Rem(_) | 
+        Remu(_) => Some(stack.copy_var(trace_step.write_1_value)), 
+        _ => None
+    };
+
+
     let write_value = match instruction {
         Mul(_) => multiply(stack, trace_read.read_1_value, trace_read.read_2_value, false, true),
         Mulh(_)  => mulh(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, false),
         Mulhsu(_)  => mulh(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, true),
         Mulhu(_) => multiply(stack, trace_read.read_1_value, trace_read.read_2_value, true, false),
-        Divu(_) => divu(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, trace_step.write_1_value, witness.unwrap()),
-        Remu(_) => remu(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, trace_step.write_1_value, witness.unwrap()),
+        //Div(_) => div(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, trace_step.write_1_value, witness.unwrap()),
+        Divu(_) => divu(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, write_value_copy.unwrap(), witness.unwrap()),
+        Remu(_) => remu(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, write_value_copy.unwrap(), witness.unwrap()),
         Add(_) => add_with_bit_extension(stack, &tables, trace_read.read_1_value, &mut trace_read.read_2_value, StackVariable::null()),
         Sub(_) => sub(stack, &tables, trace_read.read_1_value, &mut trace_read.read_2_value),
         Slt(_)  => is_lower_than_slti(stack, &mut trace_read.read_1_value, trace_read.read_2_value, false, false),

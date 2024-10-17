@@ -1,4 +1,4 @@
-use crate::loader::program::{Program, Registers};
+use crate::loader::program::Program;
 
 use super::trace::{TraceRWStep, TraceRead};
 
