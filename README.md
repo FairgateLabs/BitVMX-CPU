@@ -5,7 +5,7 @@
 
 The BitVMX-CPU is a core component of the BitVMX Protocol, please refer to the [BitVMX](https://bitvmx.org/) website and white paper for a better understanding.
 
-The architecture adopted for this first version is [RISCV-32i](https://riscv.org/), we are also extending this implementation with the "m" extension.
+The architecture adopted for this first version is [RISCV-32i](https://riscv.org/), with additional support for the 'M' extension, which significantly reduces the number of opcodes needed to perform multiplication, division, and remainder operations.
 
 
 ## Structure
