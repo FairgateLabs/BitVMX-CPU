@@ -79,4 +79,4 @@ To emulate an error in the execution, `--fail-execute [step]`. This will add 1 t
 
 
 ## Building a program
-To build your own programs follow the instructions in the [docker folder](docker-riscv32/README.md)
+To build your own programs follow the instructions in the [docker folder](https://github.com/FairgateLabs/bitvmx-docker-riscv32/blob/main/README.md)
