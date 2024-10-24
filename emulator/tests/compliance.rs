@@ -5,7 +5,8 @@ fn verify_file(fname: &str, validate_on_chain: bool) -> Result<(Vec<String>, Exe
     let mut program = load_elf(&fname, false);
     println!("Execute program {}", fname);
     execute_program(&mut program, Vec::new(), ".bss", false, false, None, false, validate_on_chain,
-        false, false, true, true, None, None, None, None, None)
+                    false, false, true, true, None, None, None, None, None,
+                    None)
 }
 
 
