@@ -9,7 +9,8 @@ use super::{trace::TraceRWStep, validator::validate, utils::FailReads};
 pub fn execute_program(program: &mut Program, input: Vec<u8>, input_section: &str, little_endian: bool, save_checkpoints: bool, limit_step: Option<u64>, print_trace: bool,
                        validate_on_chain: bool, use_instruction_mapping: bool, print_program_stdout: bool, debug: bool, no_hash: bool,
                        fail_hash: Option<u64>, fail_execute: Option<u64>, trace_list: Option<Vec<u64>>,
-                       mem_dump: Option<u64>, fail_reads: Option<FailReads>) -> Result<(Vec<String>, ExecutionResult), ExecutionResult> {
+                       mem_dump: Option<u64>, fail_reads: Option<FailReads>,
+                       fail_pc: Option<u64>) -> Result<(Vec<String>, ExecutionResult), ExecutionResult> {
     let trace_set: Option<HashSet<u64>> = trace_list.map(|vec| vec.into_iter().collect());
 
     //TOOD: This is a hack to copy the input into the bss section
@@ -70,6 +71,12 @@ pub fn execute_program(program: &mut Program, input: Vec<u8>, input_section: &st
                 }
             }
 
+            if let Some(fail) = fail_pc {
+                if fail == program.step {
+                    program.pc.next_address(); // makes next pc fail
+                }
+            }
+
             if !no_hash {
                 let trace_bytes = trace.as_ref().unwrap().trace_step.to_bytes();
                 program.hash = compute_step_hash(&mut hasher, &program.hash, &trace_bytes);
@@ -111,6 +118,7 @@ pub fn execute_program(program: &mut Program, input: Vec<u8>, input_section: &st
         if trace.is_err() {
             break trace.unwrap_err();
         }
+
 
         if let Some(limit_step) = limit_step {
             if  limit_step == program.step {

@@ -114,6 +114,11 @@ enum Commands {
         /// Memory dump at given step
         #[arg(short, long)]
         dump_mem: Option<u64>,
+
+        /// Fail while reading the pc at the given step
+        #[arg(long)]
+        fail_pc: Option<u64>,
+
     },
 
 }
@@ -137,7 +142,7 @@ fn main() -> Result<(), ExecutionResult> {
         Some(Commands::Execute { elf, step, limit, input, input_section,
             input_as_little, no_hash, trace, verify, no_mapping, stdout , debug, sections,
             checkpoints, fail_hash, fail_execute, list,
-            fail_read_1: fail_read_1_args, fail_read_2: fail_read_2_args, dump_mem }) => {
+            fail_read_1: fail_read_1_args, fail_read_2: fail_read_2_args, dump_mem, fail_pc }) => {
 
             if elf.is_none() && step.is_none() {
                 println!("To execute an elf file or a checkpoint step is required");
@@ -187,9 +192,10 @@ fn main() -> Result<(), ExecutionResult> {
             };
 
             execute_program(&mut program, input, &input_section.clone().unwrap_or(".input".to_string()),
-                *input_as_little, checkpoints, *limit,*trace,
-                *verify, !*no_mapping, *stdout, *debug,
-                *no_hash, *fail_hash, *fail_execute, numbers, *dump_mem, fail_reads)?;
+                            *input_as_little, checkpoints, *limit, *trace,
+                            *verify, !*no_mapping, *stdout, *debug,
+                            *no_hash, *fail_hash, *fail_execute, numbers, *dump_mem, fail_reads,
+                            *fail_pc)?;
         },
         None => {
             println!("No command specified");

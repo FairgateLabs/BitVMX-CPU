@@ -70,6 +70,10 @@ Then when the binary search requires some specific step execute from the closest
 
 `cargo run --release --bin emulator -- execute  --step 150000000 --limit 180000000 --list "160000000,165000000,170000000" --trace`
 
+#### Memory dump 
+
+To generate a memory dump at a given step `--dump-mem [step]`. This will dump the memory state at the given step, excluding all the empty addresses.
+
 ### Generating failing cases:
 
 To emulate an error in the hash calculation and get a defective hash list, use `--fail-hash [step]`
@@ -77,6 +81,9 @@ To emulate an error in the hash calculation and get a defective hash list, use `
 
 To emulate an error in the execution, `--fail-execute [step]`. This will add 1 to the trace_write_value.
 
+To emulate an error in the program counter `--fail-pc [step]`. This will advance the program counter twice at the given step.
+
+To emulate an error in the read value 1 or 2 `--fail-read-1/2 [step addr_original value addr_modified last_step_modified]`. This writes the given value at the given address, producing a read failure for `addr_original`. You also have to specify `addr_modified` and `last_step_modified` which are workarounds (they don't produce any real change) to generate a trace with different read `address` and `last_step` . The only way to produce a real different trace is by providing a different `value`.
 
 ## Building a program
 To build your own programs follow the instructions in the [docker folder](https://github.com/FairgateLabs/bitvmx-docker-riscv32/blob/main/README.md)
