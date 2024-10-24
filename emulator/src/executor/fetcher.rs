@@ -117,7 +117,6 @@ pub fn execute_program(program: &mut Program, input: Vec<u8>, input_section: &st
         if trace.is_ok() {
             if let Some(fail) = fail_pc {
                 if fail == program.step {
-                    println!("failing pc");
                     program.pc.next_address();
                 }
             }
