@@ -71,6 +71,12 @@ pub fn execute_program(program: &mut Program, input: Vec<u8>, input_section: &st
                 }
             }
 
+            if let Some(fail) = fail_pc {
+                if fail == program.step {
+                    program.pc.next_address(); // makes next pc fail
+                }
+            }
+
             if !no_hash {
                 let trace_bytes = trace.as_ref().unwrap().trace_step.to_bytes();
                 program.hash = compute_step_hash(&mut hasher, &program.hash, &trace_bytes);
@@ -113,14 +119,6 @@ pub fn execute_program(program: &mut Program, input: Vec<u8>, input_section: &st
             break trace.unwrap_err();
         }
 
-        // makes next pc fail (if needed)
-        if trace.is_ok() {
-            if let Some(fail) = fail_pc {
-                if fail == program.step {
-                    program.pc.next_address();
-                }
-            }
-        }
 
         if let Some(limit_step) = limit_step {
             if  limit_step == program.step {
