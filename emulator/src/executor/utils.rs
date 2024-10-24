@@ -16,7 +16,7 @@ impl FailRead {
     #[allow(clippy::ptr_arg)]
     pub fn new(args: &Vec<String>) -> Self {
         Self {
-            step: args[0].parse::<u64>().expect("Invalid modified_last_step"),
+            step: args[0].parse::<u64>().expect("Invalid modified_last_step") - 1,
             address_original: args[1].parse::<u32>().expect("Invalid address_original value"),
             value: args[2].parse::<u32>().expect("Invalid value"),
             modified_address: args[3].parse::<u32>().expect("Invalid modified_address value"),
@@ -30,19 +30,28 @@ impl FailRead {
         trace.last_step = self.modified_last_step;
     }
 
+    //use this method to determine if the address is a register or a memory address until both are consolidated
+    pub fn is_register_address(&self, program: &Program) -> bool {
+        self.address_original >= program.registers.get_base_address() && self.address_original <= program.registers.get_last_register_address()
+    }
+
     pub fn patch_mem(&self, program: &mut Program) {
         // wether the addr belongs to a section or to a register
         // todo this will be changed when we consolidate sections and registers
+        if self.is_register_address(program) {
+            let idx = program.registers.get_original_idx(self.address_original);
+            program.registers.set(idx, self.value, program.step);
+        }
+
         if program.find_section(self.address_original).is_some() {
             program.write_mem(self.address_original, self.value);
             return;
         }
 
-        let idx = program.registers.get_original_idx(self.address_original);
-        program.registers.set(idx, self.value, program.step);
     }
 }
 
+#[derive(Debug)]
 pub struct FailReads {
     read_1: FailRead,
     read_2: FailRead,
