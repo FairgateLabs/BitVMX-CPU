@@ -103,7 +103,7 @@ mod utils_tests {
             "10".to_string(), "4026531900".to_string(), "5".to_string(), "4026531900".to_string(), "15".to_string(),
         ];
         let fail_reads = FailReads::new(Some(&fail_read_1_args), None);
-        program.step = 10;
+        program.step = 9;
         fail_reads.patch_mem(&mut program);
         let idx = program.registers.get_original_idx(4026531900);
 
@@ -117,7 +117,7 @@ mod utils_tests {
             "10".to_string(), "4026531904".to_string(), "6".to_string(), "4026531904".to_string(), "20".to_string(),
         ];
         let fail_reads = FailReads::new(None, Some(&fail_read_2_args));
-        program.step = 10;
+        program.step = 9;
         fail_reads.patch_mem(&mut program);
         let idx = program.registers.get_original_idx(4026531904);
 
@@ -140,7 +140,7 @@ mod utils_tests {
             "10".to_string(), "4096".to_string(), "10".to_string(), "4096".to_string(), "15".to_string(),
         ];
         let fail_reads = FailReads::new(Some(&fail_read_1_args), None);
-        program.step = 10;
+        program.step = 9;
         fail_reads.patch_mem(&mut program);
 
         assert_eq!(program.read_mem(4096), 10);
@@ -162,7 +162,7 @@ mod utils_tests {
             "10".to_string(), "4100".to_string(), "11".to_string(), "4100".to_string(), "20".to_string(),
         ];
         let fail_reads = FailReads::new(None, Some(&fail_read_2_args));
-        program.step = 10;
+        program.step = 9;
         fail_reads.patch_mem(&mut program);
 
         assert_eq!(program.read_mem(4100), 11);
