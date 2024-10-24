@@ -524,7 +524,7 @@ pub fn is_lower_than(stack: &mut StackTracker, value: &mut StackVariable, than: 
                 OP_IF
                     512
                 OP_ELSE
-                    -512
+                    { -512 }
                 OP_ENDIF
             OP_ENDIF
         }, 3, true, 0, "sign").unwrap();

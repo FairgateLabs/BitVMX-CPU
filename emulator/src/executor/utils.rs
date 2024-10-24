@@ -16,7 +16,7 @@ impl FailRead {
     #[allow(clippy::ptr_arg)]
     pub fn new(args: &Vec<String>) -> Self {
         Self {
-            step: args[0].parse::<u64>().expect("Invalid modified_last_step"),
+            step: args[0].parse::<u64>().expect("Invalid modified_last_step") - 1,
             address_original: args[1].parse::<u32>().expect("Invalid address_original value"),
             value: args[2].parse::<u32>().expect("Invalid value"),
             modified_address: args[3].parse::<u32>().expect("Invalid modified_address value"),
@@ -30,19 +30,28 @@ impl FailRead {
         trace.last_step = self.modified_last_step;
     }
 
+    //use this method to determine if the address is a register or a memory address until both are consolidated
+    pub fn is_register_address(&self, program: &Program) -> bool {
+        self.address_original >= program.registers.get_base_address() && self.address_original <= program.registers.get_last_register_address()
+    }
+
     pub fn patch_mem(&self, program: &mut Program) {
         // wether the addr belongs to a section or to a register
         // todo this will be changed when we consolidate sections and registers
+        if self.is_register_address(program) {
+            let idx = program.registers.get_original_idx(self.address_original);
+            program.registers.set(idx, self.value, program.step);
+        }
+
         if program.find_section(self.address_original).is_some() {
             program.write_mem(self.address_original, self.value);
             return;
         }
 
-        let idx = program.registers.get_original_idx(self.address_original);
-        program.registers.set(idx, self.value, program.step);
     }
 }
 
+#[derive(Debug)]
 pub struct FailReads {
     read_1: FailRead,
     read_2: FailRead,
@@ -94,7 +103,7 @@ mod utils_tests {
             "10".to_string(), "4026531900".to_string(), "5".to_string(), "4026531900".to_string(), "15".to_string(),
         ];
         let fail_reads = FailReads::new(Some(&fail_read_1_args), None);
-        program.step = 10;
+        program.step = 9;
         fail_reads.patch_mem(&mut program);
         let idx = program.registers.get_original_idx(4026531900);
 
@@ -108,7 +117,7 @@ mod utils_tests {
             "10".to_string(), "4026531904".to_string(), "6".to_string(), "4026531904".to_string(), "20".to_string(),
         ];
         let fail_reads = FailReads::new(None, Some(&fail_read_2_args));
-        program.step = 10;
+        program.step = 9;
         fail_reads.patch_mem(&mut program);
         let idx = program.registers.get_original_idx(4026531904);
 
@@ -131,7 +140,7 @@ mod utils_tests {
             "10".to_string(), "4096".to_string(), "10".to_string(), "4096".to_string(), "15".to_string(),
         ];
         let fail_reads = FailReads::new(Some(&fail_read_1_args), None);
-        program.step = 10;
+        program.step = 9;
         fail_reads.patch_mem(&mut program);
 
         assert_eq!(program.read_mem(4096), 10);
@@ -153,7 +162,7 @@ mod utils_tests {
             "10".to_string(), "4100".to_string(), "11".to_string(), "4100".to_string(), "20".to_string(),
         ];
         let fail_reads = FailReads::new(None, Some(&fail_read_2_args));
-        program.step = 10;
+        program.step = 9;
         fail_reads.patch_mem(&mut program);
 
         assert_eq!(program.read_mem(4100), 11);

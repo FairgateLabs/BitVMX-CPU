@@ -54,6 +54,10 @@ impl Registers {
         self.base_address
     }
 
+    pub fn get_last_register_address(&self) -> u32 {
+        self.base_address + (RISCV32_REGISTERS as u32 * 4 + AUX_REGISTERS as u32 * 4)
+    }
+
     pub fn get(&self, idx: u32) -> u32 {
         self.value[idx as usize]
     }
