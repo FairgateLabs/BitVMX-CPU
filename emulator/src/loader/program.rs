@@ -354,4 +354,5 @@ pub fn generate_rom_commitment(program: &Program) {
             println!("Zero initialized range: start: 0x{:08x} size: 0x{:08x}", section.start, section.size);
         }
     }
+    println!("Entrypoint: 0x{:08x}", program.pc.get_address());
 }
