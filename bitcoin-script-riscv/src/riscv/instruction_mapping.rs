@@ -112,7 +112,7 @@ pub fn get_key_from_instruction_and_micro(instruction: &Instruction, micro: u8) 
         Auipc(x) => name_or_nop(x, "auipc"), 
 
         Fence(_) => "nop".to_string(),
-        Ecall => "nop".to_string(),
+        Ecall => "ecall".to_string(),
         Ebreak => "nop".to_string(),
 
         _ => panic!("Instruction not supported")
@@ -178,6 +178,8 @@ pub fn generate_sample_instructions() -> Vec<(Instruction, u8)> {
         ( Xor(RType(16563)) , 0 ),
         ( Xori(IType(251674771)) , 0 ),
         ( Fence(FenceType(267386895)) , 0 ),    //as nop representative
+
+        ( Ecall, 0 ),    
 
         ( Lb(IType(5310211)) , 0 ), //lb is just one
         ( Lbu(IType(67390979)) , 0 ), 

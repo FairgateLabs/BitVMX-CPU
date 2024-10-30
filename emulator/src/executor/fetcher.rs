@@ -49,7 +49,6 @@ pub fn execute_program(program: &mut Program, input: Vec<u8>, input_section: &st
                 println!("Returned value from main(): 0x{:08x}", program.registers.get(REGISTER_A0 as u32));
             }
 
-            //TODO: make debugging, and memory dump optional. Maybe move outside after result.
             if debug && !input.is_empty() {
                 let bss = program.find_section_by_name(input_section).ok_or(ExecutionResult::SectionNotFound(input_section.to_string()))?;
                 for (idx, value) in bss.data.iter().enumerate().take(10) {
@@ -119,6 +118,9 @@ pub fn execute_program(program: &mut Program, input: Vec<u8>, input_section: &st
             break trace.unwrap_err();
         }
 
+        if program.halt {
+            break ExecutionResult::Halt(program.registers.get(REGISTER_A0 as u32));
+        }
 
         if let Some(limit_step) = limit_step {
             if  limit_step == program.step {
@@ -175,38 +177,12 @@ pub fn execute_step(program: &mut Program, print_program_stdout: bool, debug: bo
     let mut witness = None;
     
     let (read_1, read_2, write_1) = match instruction {
+        Ebreak |
         Fence(_) => {
             program.pc.next_address();
             (TraceRead::default(), TraceRead::default(), TraceWrite::default())
         },
-        Ebreak |
-        Ecall => {
-            let syscall = program.registers.get(REGISTER_A7_ECALL_ARG as u32);
-            match syscall {
-                116 => {
-                    if print_program_stdout {
-                        let x = program.read_mem(0xA000_1000) >> 24;
-                        print!("{}", x as u8 as char  ); 
-                    }
-                    program.pc.next_address();
-                    (TraceRead::default(), TraceRead::default(), TraceWrite::default())
-                },
-                93 => {
-                    let exit_code = program.registers.get(REGISTER_A0 as u32);
-                    println!("Exit code: 0x{:08x}", exit_code);
-                    if debug {
-                        for i in 0..32 {
-                            println!("Register {}: 0x{:08x}", i, program.registers.get(i));
-                        }
-                        println!("Total steps: {} 0x{:016x}", program.step, program.step);
-                    }
-                    return Err(ExecutionResult::Success(exit_code));
-                },
-                _ => {
-                    return Err(ExecutionResult::SyscallNotImplemented(syscall));
-                }
-            }
-        },
+        Ecall => op_ecall(program, print_program_stdout, debug), 
         Jal(x) => op_jal(&x, program),
         Jalr(x) => op_jalr(&x, program),
         Mul(x) |
@@ -266,14 +242,49 @@ pub fn execute_step(program: &mut Program, print_program_stdout: bool, debug: bo
         witness,
     );
 
-    //if trace.get_trace_step().get_write().address == 0x00000000 {
-    //    println!("===ZERO=== {:?}", instruction);
-    //} else {
-    //    println!("{:?}", instruction);
-    //}
     
     program.step += 1;
     Ok(trace)
+}
+
+pub fn op_ecall(program: &mut Program, print_program_stdout: bool, debug: bool ) -> (TraceRead, TraceRead, TraceWrite) {
+
+    let syscall = program.registers.get(REGISTER_A7_ECALL_ARG as u32);
+    let value_2 = program.registers.get(REGISTER_A0 as u32);
+    let read_1 = TraceRead::new_from(&program.registers, REGISTER_A7_ECALL_ARG as u32);
+    let read_2 = TraceRead::new_from(&program.registers, REGISTER_A0 as u32);
+
+    match syscall {
+        116 => {
+            if print_program_stdout {
+                let x = program.read_mem(0xA000_1000) >> 24;
+                print!("{}", x as u8 as char  ); 
+            }
+            program.pc.next_address();
+            (read_1, read_2, TraceWrite::default())
+        },
+        93 => {
+            if debug {
+                println!("Exit code: 0x{:08x}", value_2);
+                for i in 0..32 {
+                    println!("Register {}: 0x{:08x}", i, program.registers.get(i));
+                }
+                println!("Total steps: {} 0x{:016x}", program.step, program.step);
+            }
+
+            program.halt = true;
+            program.registers.set(REGISTER_A0 as u32, value_2, program.step);
+            (read_1, read_2, TraceWrite::new_from(&program.registers, REGISTER_A0 as u32))
+            //Intenttionally PC is not modified and remains in this instruction
+        },
+        _ => {
+            println!("Unimplemented syscall: {}", syscall);
+            program.pc.next_address();
+            (read_1, read_2, TraceWrite::default())
+        }
+    }
+
+
 }
 
 pub fn op_conditional(instruction: &Instruction, x: &BType, program: &mut Program) -> (TraceRead, TraceRead, TraceWrite) {

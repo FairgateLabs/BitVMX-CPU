@@ -27,7 +27,7 @@ fn list_files() {
 
                 let (_, result) = verify_file(&format!("{}", path), true).unwrap();
                 match result {
-                    ExecutionResult::Success(exit_code) => {
+                    ExecutionResult::Halt(exit_code) => {
                         assert!(exit_code == 0, "Error executing file {}", path);
                         println!("File {} executed successfully", path);
                         count += 1;

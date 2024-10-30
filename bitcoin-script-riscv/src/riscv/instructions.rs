@@ -67,6 +67,74 @@ pub fn op_nop(stack: &mut StackTracker, trace_read: &mut TraceRead) -> TraceStep
     TraceStep::new(write_add, write_value, pc, micro)
 }
 
+pub const REGISTER_A0 : usize = 10;
+pub const REGISTER_A7_ECALL_ARG : usize = 17;
+
+pub fn op_ecall(stack: &mut StackTracker, trace_read: &mut TraceRead, base_register_address: u32) -> TraceStep {
+
+
+    //compare the instruction number with the halt constant
+    let constant = stack.number_u32(93);
+    is_equal_to(stack, &trace_read.read_1_value, &constant);
+    stack.to_altstack();
+    stack.drop(constant);
+    stack.from_altstack();
+
+
+    let (mut stack_halt, mut stack_if_false) = stack.open_if();
+
+    //any opcode other than halt (93) is treated as a nop
+    let mut dup_trace = trace_read.clone();
+    op_nop(&mut stack_if_false, &mut dup_trace);
+
+    //asserts opcode
+    let mut ecall = stack_halt.number_u32( 0x00000073 );
+    stack_halt.equals(&mut trace_read.opcode, true, &mut ecall, true);
+    
+    //micro is not used
+    move_and_drop(&mut stack_halt, trace_read.micro);
+
+    //save the program counter
+    stack_halt.to_altstack();
+
+    //asserts that the return value is zero (success)
+    let mut success = stack_halt.number_u32( 0x00000000 );
+    stack_halt.equals(&mut trace_read.read_2_value, false, &mut success, true);
+    //save the second read value as the return value
+    stack_halt.to_altstack();
+
+    //assert reading from A0
+    let mut add_ra0 = stack_halt.number_u32(base_register_address + (REGISTER_A0 as u32) * 4);
+    stack_halt.equals(&mut trace_read.read_2_add, true, &mut add_ra0, true);
+
+    //we are already in the right halt branch 
+    stack_halt.drop(trace_read.read_1_value);
+    
+    //assert reading from A7
+    let mut add_ra7 = stack_halt.number_u32(base_register_address + (REGISTER_A7_ECALL_ARG as u32) * 4); 
+    stack_halt.equals(&mut trace_read.read_1_add, true, &mut add_ra7, true);
+
+    //store write address
+    stack_halt.number_u32(base_register_address + (REGISTER_A0 as u32) * 4);
+
+    //restore the value as write_value
+    stack_halt.from_altstack();
+
+    //restore pc and keep it constant as it halted
+    stack_halt.from_altstack();
+
+    //add micro
+    stack_halt.number(0);
+
+
+    let ret = stack.end_if(stack_halt, stack_if_false, 7,  vec![(8, "write_address".to_string()), (8, "write_value".to_string()), (8, "write_pc".to_string()), (1, "write_micro".to_string())], 0);
+
+    TraceStep::new(ret[0], ret[1], ret[2], ret[3])
+
+
+}
+
+    
 pub fn op_conditional(instruction: &Instruction, stack: &mut StackTracker, trace_read: &mut TraceRead, base_register_address: u32) -> TraceStep {
 
     let (func3, unsigned, lower, inverse) = match instruction {
@@ -502,9 +570,9 @@ pub fn execute_step( stack: &mut StackTracker, mut trace_read: TraceRead, trace_
     match instruction {
 
         Fence(_)  |
-        Ebreak    |
-        Ecall     => Ok(op_nop(stack, &mut trace_read)),
-
+        Ebreak    => Ok(op_nop(stack, &mut trace_read)),
+        
+        Ecall     => Ok(op_ecall(stack, &mut trace_read, program.base_register_address)),
 
         Beq(_) | Bne(_) | Blt(_) | Bge(_) | Bltu(_) |
         Bgeu(_) => Ok(op_conditional(instruction, stack, &mut trace_read, program.base_register_address)),

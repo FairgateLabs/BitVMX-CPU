@@ -7,7 +7,7 @@ pub enum ExecutionResult {
     #[error("Ok")]
     Ok,
     #[error("Program terminated successfully")]
-    Success(u32),
+    Halt(u32),
 
     #[error("Step limit reached")]
     LimitStepReached,
