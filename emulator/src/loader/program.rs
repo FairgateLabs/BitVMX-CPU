@@ -128,6 +128,7 @@ pub struct Program {
     pub pc: ProgramCounter,
     pub step: u64,
     pub hash: [u8; 32],
+    pub halt: bool,
 }
 
 impl Program {
@@ -149,6 +150,7 @@ impl Program {
             pc: ProgramCounter::new(entry_point, 0),
             step: 0,
             hash: generate_initial_step_hash().try_into().expect("Invalid hash size"),
+            halt: false,
         }
     }
     

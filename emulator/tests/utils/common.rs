@@ -52,6 +52,7 @@ pub fn get_new_program() -> Program {
         pc: ProgramCounter::new(0, 0),
         step: 0,
         hash: [0; 32],
+        halt: false,
     }
 }
 
