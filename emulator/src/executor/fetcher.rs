@@ -102,7 +102,7 @@ pub fn execute_program(program: &mut Program, input: Vec<u8>, input_section: &st
             }
         }
 
-        if save_checkpoints && (program.step % CHECKPOINT_SIZE == 0 || trace.is_err()) {
+        if save_checkpoints && (program.step % CHECKPOINT_SIZE == 0 || trace.is_err() || program.halt ) {
             Program::serialize_to_file(&program, &format!("checkpoint.{}.json", program.step));
         }
 
