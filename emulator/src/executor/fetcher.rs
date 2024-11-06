@@ -41,6 +41,12 @@ pub fn execute_program(program: &mut Program, input: Vec<u8>, input_section: &st
             should_patch = fr.patch_mem(program); // patches memory only at the right step
         }
 
+        if let Some(fail) = fail_pc {
+            if fail == program.step {
+                program.pc.next_address(); // makes pc fail by advancing twice
+            }
+        }
+
         let mut trace = execute_step(program, print_program_stdout, debug);
 
         if trace.is_err() {
@@ -67,12 +73,6 @@ pub fn execute_program(program: &mut Program, input: Vec<u8>, input_section: &st
                 if fail == program.step {
                     let value = &mut trace.as_mut().unwrap().trace_step.write_1.value;
                     *value = value.wrapping_add(1);
-                }
-            }
-
-            if let Some(fail) = fail_pc {
-                if fail == program.step {
-                    program.pc.next_address(); // makes next pc fail
                 }
             }
 
