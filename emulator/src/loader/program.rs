@@ -118,7 +118,6 @@ impl ProgramCounter {
         self.micro += 1;
     }
 
-
 }
 
 #[derive(Debug, Serialize, Deserialize)]
