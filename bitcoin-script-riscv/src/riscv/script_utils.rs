@@ -27,12 +27,13 @@ pub fn reverse_4_from_stack(stack: &mut StackTracker) {
 
 pub fn reverse(stack: &mut StackTracker, var: &mut StackVariable) -> StackVariable {
     let size = var.size();
+    let var_name = stack.get_var_name(*var);
     let mut ret = Vec::new();
     for i in (0..size).rev() {
         ret.push( stack.move_var_sub_n(var, i) );
     }
     let size_join = ret.len() - 1;
-    stack.rename(ret[0], &format!("reversed({})", stack.get_var_name(*var)));
+    stack.rename(ret[0], &format!("reversed({})", var_name));
     stack.join_count(&mut ret[0], size_join as u32)
 }
 
