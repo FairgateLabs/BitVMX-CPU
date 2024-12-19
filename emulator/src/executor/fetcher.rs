@@ -4,6 +4,7 @@ use crate::{executor::trace::*, executor::alignment_masks::*, loader::program::*
 use bitcoin_script_riscv::riscv::instruction_mapping::create_verification_script_mapping;
 use riscv_decode::{types::*, Instruction::{self, *}};
 use sha2::{Digest, Sha256};
+use tracing::{info, error};
 use super::{trace::TraceRWStep, validator::validate, utils::FailReads};
 
 pub fn execute_program(program: &mut Program, input: Vec<u8>, input_section: &str, little_endian: bool, save_checkpoints: bool, limit_step: Option<u64>, print_trace: bool,
@@ -45,15 +46,14 @@ pub fn execute_program(program: &mut Program, input: Vec<u8>, input_section: &st
 
         if trace.is_err() {
             if debug {
-                println!("Result: {:?}", trace);
-                println!("Returned value from main(): 0x{:08x}", program.registers.get(REGISTER_A0 as u32));
+                info!("Result: {:?}", trace);
+                info!("Returned value from main(): 0x{:08x}", program.registers.get(REGISTER_A0 as u32));
             }
 
             if debug && !input.is_empty() {
                 let bss = program.find_section_by_name(input_section).ok_or(ExecutionResult::SectionNotFound(input_section.to_string()))?;
                 for (idx, value) in bss.data.iter().enumerate().take(10) {
-                    print!("{:x}: ", (idx * 4) + bss.start as usize);
-                    println!("{:08x} ", value.to_be());
+                    info!("{:x}:  {:08x} ", (idx * 4) + bss.start as usize, value.to_be());
                 }
             }
         }
@@ -88,17 +88,16 @@ pub fn execute_program(program: &mut Program, input: Vec<u8>, input_section: &st
 
             if let Some(step) = mem_dump {
                 if program.step == step {
-                    println!("\n========== Dumping memory at step: {} ==========", step);
+                    info!("\n========== Dumping memory at step: {} ==========", step);
                     program.dump_memory();
                 }
             }
         }
 
         if print_trace && trace.is_ok() {
-            //println!("Step: {}", program.step);
             if trace_set.is_none() || trace_set.as_ref().unwrap().contains(&program.step) {
                 let trace_str = trace.as_ref().unwrap().trace_step.to_hex_string();
-                println!("{};{};{}", trace.as_ref().unwrap().to_csv(), trace_str, program.hash.iter().map(|byte| format!("{:02x}", byte)).collect::<String>());
+                info!("{};{};{}", trace.as_ref().unwrap().to_csv(), trace_str, program.hash.iter().map(|byte| format!("{:02x}", byte)).collect::<String>());
             }
         }
 
@@ -131,11 +130,11 @@ pub fn execute_program(program: &mut Program, input: Vec<u8>, input_section: &st
 
 
     if debug && validate_on_chain {
-        println!("Instructions validated on chain:  {}", count);
+        info!("Instructions validated on chain:  {}", count);
     }
 
     if debug { 
-        println!("Last hash: {}", program.hash.iter().map(|byte| format!("{:02x}", byte)).collect::<String>());
+        info!("Last hash: {}", program.hash.iter().map(|byte| format!("{:02x}", byte)).collect::<String>());
     }
 
     Ok((vec![], ret))
@@ -171,7 +170,7 @@ pub fn execute_step(program: &mut Program, print_program_stdout: bool, debug: bo
     let instruction = riscv_decode::decode(opcode).unwrap();
 
     if debug && program.step % 100000000 < 10000 {
-        println!("Step: {} PC: 0x{:08x}:{} Opcode: 0x{:08x} Instruction: {:?} ", program.step, pc.get_address(), pc.get_micro(), opcode, instruction );
+        info!("Step: {} PC: 0x{:08x}:{} Opcode: 0x{:08x} Instruction: {:?} ", program.step, pc.get_address(), pc.get_micro(), opcode, instruction );
     }
 
     let mut witness = None;
@@ -265,11 +264,11 @@ pub fn op_ecall(program: &mut Program, print_program_stdout: bool, debug: bool )
         },
         93 => {
             if debug {
-                println!("Exit code: 0x{:08x}", value_2);
+                info!("Exit code: 0x{:08x}", value_2);
                 for i in 0..32 {
-                    println!("Register {}: 0x{:08x}", i, program.registers.get(i));
+                    info!("Register {}: 0x{:08x}", i, program.registers.get(i));
                 }
-                println!("Total steps: {} 0x{:016x}", program.step, program.step);
+                info!("Total steps: {} 0x{:016x}", program.step, program.step);
             }
 
             program.halt = true;
@@ -278,7 +277,7 @@ pub fn op_ecall(program: &mut Program, print_program_stdout: bool, debug: bool )
             //Intenttionally PC is not modified and remains in this instruction
         },
         _ => {
-            println!("Unimplemented syscall: {}", syscall);
+            error!("Unimplemented syscall: {}", syscall);
             program.pc.next_address();
             (read_1, read_2, TraceWrite::default())
         }
@@ -429,7 +428,6 @@ pub fn op_arithmetic(instruction: &Instruction, x: &RType, program: &mut Program
         _ => panic!("Unreachable"),
     };
 
-    //println!("{} {} = {} witness: {:?}", value_1, value_2, result, witness);
 
     program.registers.set(x.rd(), result, program.step);
     program.pc.next_address();
@@ -665,7 +663,6 @@ pub fn op_store(instruction: &Instruction, x: &SType, program: &mut Program) -> 
             let write_1 = TraceWrite::new(dest_mem, value);
 
             if reads == 1 || micro == 7 {
-                //println!("Write: 0x{:08x} to 0x{:08x}", value, dest_mem);
                 program.pc.next_address();
             } else {
                 program.pc.next_micro();

@@ -147,7 +147,6 @@ pub fn op_conditional(instruction: &Instruction, stack: &mut StackTracker, trace
         _ => panic!("Unreachable")
     };
 
-    //println!("op_conditional: {:?} ", instruction);
     let tables = StackTables::new(stack, true, true, 7, 7, 0);
     stack.set_breakpoint(&format!("op_{:?}", instruction));
 

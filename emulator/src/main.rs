@@ -3,6 +3,7 @@ use emulator::{executor::{fetcher::{execute_program}, utils::FailReads}, loader:
 use hex::FromHex;
 
 use clap::{Parser, Subcommand};
+use tracing::{error, info};
 
 /// BitVMX-CPU Emulator and Verifier
 #[derive(Parser)]
@@ -126,13 +127,18 @@ enum Commands {
 
 fn main() -> Result<(), ExecutionResult> {
 
+    tracing_subscriber::fmt()
+    .without_time()
+    .with_target(false)
+    .init();
+
     let cli = Cli::parse();
 
     match &cli.command {
         Some(Commands::InstructionMapping) => {
             let mapping = create_verification_script_mapping(REGISTERS_BASE_ADDRESS);
             for (key, script) in mapping {
-                println!("Key: {}, Script: {:?}, Size: {}", key, script.to_hex_string(), script.len());
+                info!("Key: {}, Script: {:?}, Size: {}", key, script.to_hex_string(), script.len());
             }
         },
         Some(Commands::GenerateRomCommitment { elf, sections }) => {
@@ -145,11 +151,11 @@ fn main() -> Result<(), ExecutionResult> {
             fail_read_1: fail_read_1_args, fail_read_2: fail_read_2_args, dump_mem, fail_pc }) => {
 
             if elf.is_none() && step.is_none() {
-                println!("To execute an elf file or a checkpoint step is required");
+                error!("To execute an elf file or a checkpoint step is required");
                 return Err(ExecutionResult::Error);
             }
             if elf.is_some() && step.is_some() {
-                println!("To execute chose an elf file or a checkpoint not both");
+                error!("To execute chose an elf file or a checkpoint not both");
                 return Err(ExecutionResult::Error);
             }
 
@@ -158,7 +164,7 @@ fn main() -> Result<(), ExecutionResult> {
                     let input = input.clone().map(|i| Vec::from_hex(i).unwrap()).unwrap_or(Vec::new());
                     let program = load_elf(elf, *sections);
                     if *debug {
-                        println!("Execute program {} with input: {:?}", elf, input);
+                        info!("Execute program {} with input: {:?}", elf, input);
                     }
                     (program, input, *checkpoints)
                 },
@@ -166,7 +172,7 @@ fn main() -> Result<(), ExecutionResult> {
                     let step = step.expect("Step is expected");
                     let program = Program::deserialize_from_file(&format!("checkpoint.{}.json", step));
                     if *debug {
-                        println!("Execute from checkpoint: {} up to: {:?}", step, limit);
+                        info!("Execute from checkpoint: {} up to: {:?}", step, limit);
                     }
                     (program, vec![], false)
                 }
@@ -198,7 +204,7 @@ fn main() -> Result<(), ExecutionResult> {
                             *fail_pc)?;
         },
         None => {
-            println!("No command specified");
+            error!("No command specified");
         }
     };
 

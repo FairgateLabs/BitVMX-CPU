@@ -4,6 +4,7 @@ use bitcoin_script_riscv::riscv::instruction_mapping::{get_key_from_instruction_
 use elf::{abi::SHF_EXECINSTR, endian::LittleEndian, ElfBytes};
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
+use tracing::info;
 
 use crate::{executor::trace::generate_initial_step_hash, REGISTERS_BASE_ADDRESS};
 
@@ -210,30 +211,30 @@ impl Program {
     }
 
     pub fn dump_memory(&self) {
-        println!("\n------- Section: REGISTERS Start: 0x{:08x} Size: 0x{:08x} -------\n",
+        info!("\n------- Section: REGISTERS Start: 0x{:08x} Size: 0x{:08x} -------\n",
             REGISTERS_BASE_ADDRESS, (RISCV32_REGISTERS + AUX_REGISTERS) * std::mem::size_of::<u32>());
 
         for (i, reg) in self.registers.value.iter().enumerate() {
             let reg_addr = self.registers.get_register_address(i as u32);
-            println!("{}Reg({}): 0x{:08x} Value: 0x{:08x}",
+            info!("{}Reg({}): 0x{:08x} Value: 0x{:08x}",
                 if i == AUX_REGISTER_1 as usize || i == AUX_REGISTER_2 as usize { "AUX" } else { "" },
                 i, reg_addr, reg);
         }
 
         for section in &self.sections {
             if section.data.iter().any(|&word| word != 0) {
-                println!("\n------- Section: {} Start: 0x{:08x} Size: 0x{:08x} -------\n", section.name, section.start, section.size);
+                info!("\n------- Section: {} Start: 0x{:08x} Size: 0x{:08x} -------\n", section.name, section.start, section.size);
                 for (i, word) in section.data.iter().enumerate() {
                     let address = section.start + (i as u32 * 4);
                     if *word != 0 {
-                        println!("Address: 0x{:08x} Value: 0x{:08x}", address, word);
+                        info!("Address: 0x{:08x} Value: 0x{:08x}", address, word);
                     }
                 }
             } else {
-                println!("\n------- Skipping empty section: {} -------", section.name);
+                info!("\n------- Skipping empty section: {} -------", section.name);
             }
         }
-        println!("\n================================================\n");
+        info!("\n================================================\n");
     }
 }
 
@@ -288,10 +289,9 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Program  {
         let start = u32::try_from(phdr.sh_addr).unwrap();
         let size = u32::try_from(phdr.sh_size).unwrap();
         let initialized = phdr.sh_type == elf::abi::SHT_PROGBITS;
-        //println!("{:?}",phdr);
         if size == 0 {
             if show_sections {
-                println!("Empty section: {} Start: 0x{:08x} Size: 0x{:08x} Initialized: {}", name, start, size, initialized);
+                info!("Empty section: {} Start: 0x{:08x} Size: 0x{:08x} Initialized: {}", name, start, size, initialized);
             }
             return;
         }
@@ -305,7 +305,7 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Program  {
         };
 
         if show_sections {
-            println!("Loading section: {} Start: 0x{:08x} Size: 0x{:08x} Initialized: {} Flags: {:0b} Type: {:0b} ", name, start, size, initialized, phdr.sh_flags, phdr.sh_type);
+            info!("Loading section: {} Start: 0x{:08x} Size: 0x{:08x} Initialized: {} Flags: {:0b} Type: {:0b} ", name, start, size, initialized, phdr.sh_flags, phdr.sh_type);
         }
 
         program.add_section(Section {
@@ -337,7 +337,7 @@ pub fn generate_rom_commitment(program: &Program) {
                 let micros = get_required_microinstruction(&instruction);
                 for micro in 0..micros {
                     let key = get_key_from_instruction_and_micro(&instruction, micro);
-                    println!("PC: 0x{:08x} Micro: {} Opcode: 0x{:08x} Key: {}", position, micro, data, key);
+                    info!("PC: 0x{:08x} Micro: {} Opcode: 0x{:08x} Key: {}", position, micro, data, key);
                 }
             }
         }
@@ -347,14 +347,14 @@ pub fn generate_rom_commitment(program: &Program) {
             for i in 0..section.size / 4 {
                 let position = section.start + i * 4;
                 let data = program.read_mem(position);
-                println!("Address: 0x{:08x} value: 0x{:08x}", position, data);
+                info!("Address: 0x{:08x} value: 0x{:08x}", position, data);
             }
         }
     }
     for section in &program.sections {
         if !section.is_code && !section.initialized {
-            println!("Zero initialized range: start: 0x{:08x} size: 0x{:08x}", section.start, section.size);
+            info!("Zero initialized range: start: 0x{:08x} size: 0x{:08x}", section.start, section.size);
         }
     }
-    println!("Entrypoint: 0x{:08x}", program.pc.get_address());
+    info!("Entrypoint: 0x{:08x}", program.pc.get_address());
 }

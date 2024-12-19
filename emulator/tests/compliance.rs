@@ -1,9 +1,10 @@
 use emulator::{executor::fetcher::execute_program, loader::program::load_elf, ExecutionResult};
+use tracing::info;
 
 
 fn verify_file(fname: &str, validate_on_chain: bool) -> Result<(Vec<String>, ExecutionResult), ExecutionResult> {
     let mut program = load_elf(&fname, false);
-    println!("Execute program {}", fname);
+    info!("Execute program {}", fname);
     execute_program(&mut program, Vec::new(), ".bss", false, false, None, false, validate_on_chain,
                     false, false, true, true, None, None, None, None, None,
                     None)
@@ -29,7 +30,7 @@ fn list_files() {
                 match result {
                     ExecutionResult::Halt(exit_code) => {
                         assert!(exit_code == 0, "Error executing file {}", path);
-                        println!("File {} executed successfully", path);
+                        info!("File {} executed successfully", path);
                         count += 1;
                     }
                     _ => assert!(false, "Error executing file {}", path),
@@ -39,7 +40,7 @@ fn list_files() {
         }
     }
 
-    println!("Total files executed: {}", count);
+    info!("Total files executed: {}", count);
     assert_eq!(count, 47);
 
 }

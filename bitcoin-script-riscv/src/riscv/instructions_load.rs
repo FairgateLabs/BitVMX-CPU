@@ -7,8 +7,6 @@ use super::{instructions::validate_register_address, memory_alignment::*, trace:
 
 pub fn op_load(instruction: &Instruction, stack: &mut StackTracker, trace_read: &mut TraceRead, micro: u8, base_register_address: u32) -> TraceStep {
 
-    //println!("op_load: {:?} micro: {} ", instruction, micro);
-
     match micro {
         0 => op_load_micro_0(instruction, stack, trace_read, micro, base_register_address),
         1 => op_load_micro_1(instruction, stack, trace_read, micro, base_register_address),
