@@ -21,7 +21,7 @@ fn list_files() {
         if let Ok(path) = path {
             let fname = path.file_name();
             let fname = fname.to_string_lossy();
-            if fname.ends_with(".elf") {
+            if fname.ends_with(".elf") && !fname.contains("fence_i") {
 
                 let path = path.path();
                 let path = path.to_string_lossy();
