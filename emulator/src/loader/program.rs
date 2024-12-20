@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 use tracing::info;
 
-use crate::{executor::trace::generate_initial_step_hash, REGISTERS_BASE_ADDRESS};
+use crate::{executor::trace::generate_initial_step_hash, constants::*};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Section {
@@ -264,8 +264,7 @@ pub fn vec_u8_to_vec_u32(input: &[u8], little:bool) -> Vec<u32> {
 pub fn load_elf(fname: &str, show_sections: bool) -> Program  {
     //TODO: handle errors on unwrap
 
-    const STACK_BASE_ADDRESS: u32 = 0xE000_0000;        //CHECK: this can be parameterized
-    const STACK_SIZE: u32 = 0x80_0000;                  //QEMU Default stack size
+
 
     let path = std::path::PathBuf::from(fname);
     let file_data = std::fs::read(path).expect("Could not read file.");

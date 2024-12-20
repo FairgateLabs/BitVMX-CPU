@@ -1,5 +1,5 @@
 use bitcoin_script_riscv::riscv::instruction_mapping::create_verification_script_mapping;
-use emulator::{executor::{fetcher::{execute_program}, utils::FailReads}, loader::program::{generate_rom_commitment, load_elf, Program}, ExecutionResult, REGISTERS_BASE_ADDRESS};
+use emulator::{executor::{fetcher::execute_program, utils::FailReads}, loader::program::{generate_rom_commitment, load_elf, Program}, ExecutionResult, constants::REGISTERS_BASE_ADDRESS};
 use hex::FromHex;
 
 use clap::{Parser, Subcommand};
