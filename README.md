@@ -47,7 +47,7 @@ Trace:
 If `--trace` is used, the program will generate the trace of every step as `;` delimited value, and the hash for that step (concatenated with the previous hash). You can test that the last hash of the trace changes if you change the input.
 
 Debug:  
-```cargo run --release -p emulator execute --elf docker-riscv32/riscv32/build/hello-world.elf --trace --input 11111111```  
+```cargo run --release -p emulator execute --elf docker-riscv32/riscv32/build/hello-world.elf --debug --input 11111111```
 `--debug` will show every step of the execution, dumping the opcode and the decoded instruction, at the end will also show the state of the registers, some metrics and the input data.
 
 
@@ -64,7 +64,7 @@ To generate the ROM commitments use the following command:
 
 When running longer programs first run with `--debug` and `--checkpoints` this will generate a checkpoint file every 50M steps and will print the last hash and the total number of steps.
 
-`cargo run --release --bin emulator -- execute --elf docker-riscv32/verifier/build/zkverifier-new-mul --debug --checkpoints`
+`cargo run --release --bin emulator -- execute --elf docker-riscv32/verifier/build/zkverifier-new-mul.elf --debug --checkpoints`
 
 Then when the binary search requires some specific step execute from the closest (lower) checkpoint: i.e `--step 150000000`, put as limit the maximun step required i.e: `--limit 180000000` and use list to specify the requested value steps: `--list "160000000,165000000,170000000"` and `--trace` to print them.
 
