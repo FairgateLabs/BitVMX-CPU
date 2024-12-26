@@ -137,8 +137,8 @@ fn main() -> Result<(), ExecutionResult> {
     match &cli.command {
         Some(Commands::InstructionMapping) => {
             let mapping = create_verification_script_mapping(REGISTERS_BASE_ADDRESS);
-            for (key, script) in mapping {
-                info!("Key: {}, Script: {:?}, Size: {}", key, script.to_hex_string(), script.len());
+            for (key, (script, requires_witness)) in mapping {
+                info!("Key: {}, Script: {:?}, Size: {}, Witness: {}", key, script.to_hex_string(), script.len(), requires_witness);
             }
         },
         Some(Commands::GenerateRomCommitment { elf, sections }) => {

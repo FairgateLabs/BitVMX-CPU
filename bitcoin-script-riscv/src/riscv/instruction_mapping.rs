@@ -220,15 +220,16 @@ pub fn generate_verification_script(instruction: &Instruction, micro: u8, base_r
 
 }
 
-pub type InstructionMapping = HashMap<String, Script>;
+pub type InstructionMapping = HashMap<String, (Script, bool)>;
 
 pub fn create_verification_script_mapping(base_register_address: u32) -> InstructionMapping {
     let sample = generate_sample_instructions();
     let mut mapping = HashMap::new();
     for (instruction, micro) in sample {
         let key = get_key_from_instruction_and_micro(&instruction, micro);
-        let script = generate_verification_script(&instruction, micro, base_register_address, requires_witness(&instruction));
-        mapping.insert(key, script);
+        let requires_witness = requires_witness(&instruction);
+        let script = generate_verification_script(&instruction, micro, base_register_address, requires_witness);
+        mapping.insert(key, (script, requires_witness));
     }
     mapping
 }

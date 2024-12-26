@@ -711,7 +711,7 @@ pub fn verify(instruction_mapping: &Option<InstructionMapping>, program: Program
     if let Some(mapping) = instruction_mapping {
         let instruction = riscv_decode::decode(opcode).unwrap();
         let key = get_key_from_instruction_and_micro(&instruction, micro);
-        let verification_script = mapping.get(&key).unwrap();
+        let (verification_script, _requires_witness)  = mapping.get(&key).unwrap();
         stack.custom(verification_script.clone() , consumes, false, 0, "verify");
     } else {
         verify_execution(&mut stack, trace_step, trace_read, witness, opcode, micro, program)?;
