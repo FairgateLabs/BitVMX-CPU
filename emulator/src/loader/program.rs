@@ -4,9 +4,9 @@ use bitcoin_script_riscv::riscv::instruction_mapping::{get_key_from_instruction_
 use elf::{abi::SHF_EXECINSTR, endian::LittleEndian, ElfBytes};
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
-use tracing::info;
+use tracing::{info,error};
 
-use crate::{executor::trace::generate_initial_step_hash, constants::*};
+use crate::{constants::*, executor::trace::generate_initial_step_hash, ExecutionResult};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Section {
@@ -20,7 +20,6 @@ pub struct Section {
 }
 
 pub const CHECKPOINT_SIZE : u64 = 50_000_000;
-//pub const CHECKPOINT_SIZE : u64 = 50;
 pub const LIMIT_STEP : u64 = 10_000_000_000; //ten billion arbitrary limit
 const RISCV32_REGISTERS : usize = 32;
 const AUX_REGISTERS : usize = 2;
@@ -44,7 +43,7 @@ impl Registers {
     pub fn new(base_address: u32, sp_base_address: u32) -> Registers {
         let mut registers = Registers {
             value: [0; RISCV32_REGISTERS + AUX_REGISTERS],
-            last_step: [0xffffffff; RISCV32_REGISTERS + AUX_REGISTERS],
+            last_step: [LAST_STEP_INIT; RISCV32_REGISTERS + AUX_REGISTERS],
             base_address,
         };
         registers.value[REGISTER_STACK_POINTER] = sp_base_address; // Stack pointer
@@ -261,32 +260,41 @@ pub fn vec_u8_to_vec_u32(input: &[u8], little:bool) -> Vec<u32> {
 }
 
 
-pub fn load_elf(fname: &str, show_sections: bool) -> Program  {
-    //TODO: handle errors on unwrap
-
-
+pub fn load_elf(fname: &str, show_sections: bool) -> Result<Program, ExecutionResult>  {
 
     let path = std::path::PathBuf::from(fname);
-    let file_data = std::fs::read(path).expect("Could not read file.");
+    let file_data = std::fs::read(path).map_err(|_| ExecutionResult::CantLoadPorgram(format!("Error loading file: {}", fname)))?;
     let slice = file_data.as_slice();
-    let file = ElfBytes::<LittleEndian>::minimal_parse(slice).expect("Open test1");
+    let file = ElfBytes::<LittleEndian>::minimal_parse(slice).map_err(|_| ExecutionResult::CantLoadPorgram(format!("Error parsing elf: {}", fname)))?;
     
-    let entry_point = u32::try_from(file.ehdr.e_entry).unwrap();
-    let string_table =file.section_headers_with_strtab().unwrap().1.unwrap();
+    let entry_point = u32::try_from(file.ehdr.e_entry).map_err(|_| ExecutionResult::CantLoadPorgram(format!("Invalid entrypoint for elf: {}", fname)))?;
+    let string_table = file.section_headers_with_strtab()
+        .map_err(|_| ExecutionResult::CantLoadPorgram(format!("Can't read headers for: {}", fname)))?
+        .1.ok_or_else(|| ExecutionResult::CantLoadPorgram(format!("Can't read string table for: {}", fname)))?;
 
     let mut program = Program::new(entry_point, REGISTERS_BASE_ADDRESS, STACK_BASE_ADDRESS+STACK_SIZE);
 
-    file.section_headers().unwrap().iter().for_each(|phdr| {
+    let sections = file.section_headers().ok_or_else(|| ExecutionResult::CantLoadPorgram(format!("Can't read headers for: {}", fname)))?;
+
+    sections.iter().for_each(|phdr| {
 
         if phdr.sh_flags as u32 & elf::abi::SHF_ALLOC != elf::abi::SHF_ALLOC {
             return;
         }
 
         let name = string_table.get_raw(phdr.sh_name as usize).map(|name| {
-            std::str::from_utf8(name).unwrap().to_string()
+            std::str::from_utf8(name).unwrap_or("").to_string()
         }).unwrap_or("".to_string());
-        let start = u32::try_from(phdr.sh_addr).unwrap();
-        let size = u32::try_from(phdr.sh_size).unwrap();
+        let start = u32::try_from(phdr.sh_addr);
+        let size = u32::try_from(phdr.sh_size);
+        if start.is_err() || size.is_err() {
+            error!("Invalid start or size for section: {} Start: 0x{:08x} Size: 0x{:08x}", name, start.unwrap_or(0), size.unwrap_or(0));
+            return;
+        }
+        let start = start.unwrap();
+        let size = size.unwrap();
+
+
         let initialized = phdr.sh_type == elf::abi::SHT_PROGBITS;
         if size == 0 {
             if show_sections {
@@ -310,7 +318,7 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Program  {
         program.add_section(Section {
             name,
             data,
-            last_step: vec![0xffff_ffff; size as usize / 4],
+            last_step: vec![LAST_STEP_INIT; size as usize / 4],
             start,
             size,
             is_code: phdr.sh_flags as u32 & SHF_EXECINSTR == SHF_EXECINSTR,
@@ -319,13 +327,40 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Program  {
         
     });
 
-    program
+    Ok(program)
 
 
 }
 
 
-pub fn generate_rom_commitment(program: &Program) {
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Code {
+    pub address: u32,
+    pub micro: u8,
+    pub opcode: u32,
+    pub key: String,
+}
+
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RomCommitment {
+    pub entrypoint: u32,
+    pub code: Vec<Code>,
+    pub constants: Vec<(u32, u32)>,  //address, data
+    pub zero_initialized: Vec<(u32, u32)>, //start, size
+}
+
+
+pub fn generate_rom_commitment(program: &Program) -> RomCommitment {
+
+    let mut rom_commitment = RomCommitment {
+        entrypoint: program.pc.get_address(),
+        code: Vec::new(),
+        constants: Vec::new(),
+        zero_initialized: Vec::new(),
+    };
+
     for section in &program.sections {
         if section.is_code {
             for i in 0..section.size / 4 {
@@ -337,6 +372,12 @@ pub fn generate_rom_commitment(program: &Program) {
                 for micro in 0..micros {
                     let key = get_key_from_instruction_and_micro(&instruction, micro);
                     info!("PC: 0x{:08x} Micro: {} Opcode: 0x{:08x} Key: {}", position, micro, data, key);
+                    rom_commitment.code.push(Code {
+                        address: position,
+                        micro: micro,
+                        opcode: data,
+                        key: key,
+                    });
                 }
             }
         }
@@ -347,13 +388,18 @@ pub fn generate_rom_commitment(program: &Program) {
                 let position = section.start + i * 4;
                 let data = program.read_mem(position);
                 info!("Address: 0x{:08x} value: 0x{:08x}", position, data);
+                rom_commitment.constants.push((position, data));
             }
         }
     }
     for section in &program.sections {
         if !section.is_code && !section.initialized {
             info!("Zero initialized range: start: 0x{:08x} size: 0x{:08x}", section.start, section.size);
+            rom_commitment.zero_initialized.push((section.start, section.size));
         }
     }
+
     info!("Entrypoint: 0x{:08x}", program.pc.get_address());
+
+    rom_commitment
 }

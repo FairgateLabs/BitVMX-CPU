@@ -3,7 +3,7 @@ use emulator::{executor::{fetcher::execute_program, utils::FailReads}, loader::p
 use hex::FromHex;
 
 use clap::{Parser, Subcommand};
-use tracing::{error, info};
+use tracing::{error, info, Level};
 
 /// BitVMX-CPU Emulator and Verifier
 #[derive(Parser)]
@@ -73,11 +73,11 @@ enum Commands {
         verify: bool,
 
         /// Use instruction map
-        #[arg(short, long, default_value = "false")]
+        #[arg(long, default_value = "false")]
         no_mapping: bool,
 
         /// Print program stdout 
-        #[arg(short, long)]
+        #[arg(long)]
         stdout: bool,
 
         /// Debug
@@ -130,10 +130,10 @@ fn main() -> Result<(), ExecutionResult> {
     tracing_subscriber::fmt()
     .without_time()
     .with_target(false)
+    .with_max_level(Level::DEBUG)
     .init();
 
     let cli = Cli::parse();
-
     match &cli.command {
         Some(Commands::InstructionMapping) => {
             let mapping = create_verification_script_mapping(REGISTERS_BASE_ADDRESS);
@@ -142,7 +142,7 @@ fn main() -> Result<(), ExecutionResult> {
             }
         },
         Some(Commands::GenerateRomCommitment { elf, sections }) => {
-            let program = load_elf(elf, *sections);
+            let program = load_elf(elf, *sections)?;
             generate_rom_commitment(&program);
         },
         Some(Commands::Execute { elf, step, limit, input, input_section,
@@ -162,7 +162,7 @@ fn main() -> Result<(), ExecutionResult> {
             let (mut program, input, checkpoints) = match elf {
                 Some(elf) => {
                     let input = input.clone().map(|i| Vec::from_hex(i).unwrap()).unwrap_or(Vec::new());
-                    let program = load_elf(elf, *sections);
+                    let program = load_elf(elf, *sections)?;
                     if *debug {
                         info!("Execute program {} with input: {:?}", elf, input);
                     }
