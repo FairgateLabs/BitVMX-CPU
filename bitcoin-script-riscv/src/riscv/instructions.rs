@@ -1,4 +1,3 @@
-
 use bitcoin_script_stack::stack::{StackTracker, StackVariable};
 
 use riscv_decode::Instruction;
@@ -18,27 +17,27 @@ use super::trace::{TraceRead, TraceStep};
 
 pub const R_TYPE_OPCODE: u8 = 0x33;
 
-
-pub fn validate_register_address(stack: &mut StackTracker, read_address: StackVariable, register: StackVariable, base_register_address: u32  ) {
-
+pub fn validate_register_address(
+    stack: &mut StackTracker,
+    read_address: StackVariable,
+    register: StackVariable,
+    base_register_address: u32,
+) {
     for i in 0..4 {
-
         let mut x = stack.copy_var_sub_n(read_address, i * 2);
         stack.copy_var_sub_n(read_address, (i * 2) + 1);
         stack.join(&mut x);
 
         let mut base = if i < 3 {
             //verify the constant part of the address
-            stack.byte(((base_register_address & 0xFF00_0000 >> (i * 8 )) >> ((3-i)*8)) as u8)
+            stack.byte(((base_register_address & 0xFF00_0000 >> (i * 8)) >> ((3 - i) * 8)) as u8)
         } else {
             //verify the address pointed by the register
             stack.copy_var(register)
         };
 
         stack.equals(&mut x, true, &mut base, true);
-        
     }
-
 }
 
 pub fn op_nop(stack: &mut StackTracker, trace_read: &mut TraceRead) -> TraceStep {
@@ -51,7 +50,6 @@ pub fn op_nop(stack: &mut StackTracker, trace_read: &mut TraceRead) -> TraceStep
     move_and_drop(stack, trace_read.read_2_add);
     move_and_drop(stack, trace_read.read_1_value);
     move_and_drop(stack, trace_read.read_1_add);
-
 
     let write_add = stack.number_u32(0);
     let write_value = stack.number_u32(0);
@@ -67,19 +65,20 @@ pub fn op_nop(stack: &mut StackTracker, trace_read: &mut TraceRead) -> TraceStep
     TraceStep::new(write_add, write_value, pc, micro)
 }
 
-pub const REGISTER_A0 : usize = 10;
-pub const REGISTER_A7_ECALL_ARG : usize = 17;
+pub const REGISTER_A0: usize = 10;
+pub const REGISTER_A7_ECALL_ARG: usize = 17;
 
-pub fn op_ecall(stack: &mut StackTracker, trace_read: &mut TraceRead, base_register_address: u32) -> TraceStep {
-
-
+pub fn op_ecall(
+    stack: &mut StackTracker,
+    trace_read: &mut TraceRead,
+    base_register_address: u32,
+) -> TraceStep {
     //compare the instruction number with the halt constant
     let constant = stack.number_u32(93);
     is_equal_to(stack, &trace_read.read_1_value, &constant);
     stack.to_altstack();
     stack.drop(constant);
     stack.from_altstack();
-
 
     let (mut stack_halt, mut stack_if_false) = stack.open_if();
 
@@ -88,9 +87,9 @@ pub fn op_ecall(stack: &mut StackTracker, trace_read: &mut TraceRead, base_regis
     op_nop(&mut stack_if_false, &mut dup_trace);
 
     //asserts opcode
-    let mut ecall = stack_halt.number_u32( 0x00000073 );
+    let mut ecall = stack_halt.number_u32(0x00000073);
     stack_halt.equals(&mut trace_read.opcode, true, &mut ecall, true);
-    
+
     //micro is not used
     move_and_drop(&mut stack_halt, trace_read.micro);
 
@@ -98,7 +97,7 @@ pub fn op_ecall(stack: &mut StackTracker, trace_read: &mut TraceRead, base_regis
     stack_halt.to_altstack();
 
     //asserts that the return value is zero (success)
-    let mut success = stack_halt.number_u32( 0x00000000 );
+    let mut success = stack_halt.number_u32(0x00000000);
     stack_halt.equals(&mut trace_read.read_2_value, false, &mut success, true);
     //save the second read value as the return value
     stack_halt.to_altstack();
@@ -107,11 +106,12 @@ pub fn op_ecall(stack: &mut StackTracker, trace_read: &mut TraceRead, base_regis
     let mut add_ra0 = stack_halt.number_u32(base_register_address + (REGISTER_A0 as u32) * 4);
     stack_halt.equals(&mut trace_read.read_2_add, true, &mut add_ra0, true);
 
-    //we are already in the right halt branch 
+    //we are already in the right halt branch
     stack_halt.drop(trace_read.read_1_value);
-    
+
     //assert reading from A7
-    let mut add_ra7 = stack_halt.number_u32(base_register_address + (REGISTER_A7_ECALL_ARG as u32) * 4); 
+    let mut add_ra7 =
+        stack_halt.number_u32(base_register_address + (REGISTER_A7_ECALL_ARG as u32) * 4);
     stack_halt.equals(&mut trace_read.read_1_add, true, &mut add_ra7, true);
 
     //store write address
@@ -126,17 +126,28 @@ pub fn op_ecall(stack: &mut StackTracker, trace_read: &mut TraceRead, base_regis
     //add micro
     stack_halt.number(0);
 
-
-    let ret = stack.end_if(stack_halt, stack_if_false, 7,  vec![(8, "write_address".to_string()), (8, "write_value".to_string()), (8, "write_pc".to_string()), (1, "write_micro".to_string())], 0);
+    let ret = stack.end_if(
+        stack_halt,
+        stack_if_false,
+        7,
+        vec![
+            (8, "write_address".to_string()),
+            (8, "write_value".to_string()),
+            (8, "write_pc".to_string()),
+            (1, "write_micro".to_string()),
+        ],
+        0,
+    );
 
     TraceStep::new(ret[0], ret[1], ret[2], ret[3])
-
-
 }
 
-    
-pub fn op_conditional(instruction: &Instruction, stack: &mut StackTracker, trace_read: &mut TraceRead, base_register_address: u32) -> TraceStep {
-
+pub fn op_conditional(
+    instruction: &Instruction,
+    stack: &mut StackTracker,
+    trace_read: &mut TraceRead,
+    base_register_address: u32,
+) -> TraceStep {
     let (func3, unsigned, lower, inverse) = match instruction {
         Beq(_) => (0, false, false, false),
         Bne(_) => (1, false, false, true),
@@ -144,7 +155,7 @@ pub fn op_conditional(instruction: &Instruction, stack: &mut StackTracker, trace
         Bge(_) => (5, false, true, true),
         Bltu(_) => (6, true, true, false),
         Bgeu(_) => (7, true, true, true),
-        _ => panic!("Unreachable")
+        _ => panic!("Unreachable"),
     };
 
     let tables = StackTables::new(stack, true, true, 7, 7, 0);
@@ -165,22 +176,24 @@ pub fn op_conditional(instruction: &Instruction, stack: &mut StackTracker, trace
     move_and_drop(stack, trace_read.read_2_add);
 
     //prepare the result
-    let write_add = stack.number_u32(0);    //not used
+    let write_add = stack.number_u32(0); //not used
     stack.rename(write_add, "write_add");
-    let write_value = stack.number_u32(0);  //not used
+    let write_value = stack.number_u32(0); //not used
     stack.rename(write_value, "write_value");
-
 
     stack.move_var(trace_read.read_1_value);
     stack.move_var(trace_read.read_2_value);
 
-
     stack.move_var(imm);
     stack.move_var(trace_read.program_counter);
 
-
     if lower {
-        is_lower_than(stack, &mut trace_read.read_1_value, &mut trace_read.read_2_value, unsigned);
+        is_lower_than(
+            stack,
+            &mut trace_read.read_1_value,
+            &mut trace_read.read_2_value,
+            unsigned,
+        );
     } else {
         is_equal_to(stack, &trace_read.read_1_value, &trace_read.read_2_value);
         move_and_drop(stack, trace_read.read_1_value);
@@ -194,17 +207,26 @@ pub fn op_conditional(instruction: &Instruction, stack: &mut StackTracker, trace
 
     //if the condition is true, the program counter is updated
     let mut pc = trace_read.program_counter;
-    add_with_bit_extension(&mut stack_if_true, &tables, imm, &mut pc, StackVariable::null() );
+    add_with_bit_extension(
+        &mut stack_if_true,
+        &tables,
+        imm,
+        &mut pc,
+        StackVariable::null(),
+    );
 
     //if false, jump to the next instruction
     pc_next(&mut stack_if_false, &tables, trace_read.program_counter);
     move_and_drop(&mut stack_if_false, imm);
 
-    let ret = stack.end_if(stack_if_true, stack_if_false, 2, vec![(8, "write_pc".to_string())], 0);
+    let ret = stack.end_if(
+        stack_if_true,
+        stack_if_false,
+        2,
+        vec![(8, "write_pc".to_string())],
+        0,
+    );
     let write_pc = ret[0];
-
-
-
 
     let micro = stack.number(0);
     stack.rename(micro, "write_micro");
@@ -214,13 +236,15 @@ pub fn op_conditional(instruction: &Instruction, stack: &mut StackTracker, trace
     tables.drop(stack);
     trace.from_altstack(stack);
     trace
-    
 }
 
-
-pub fn store_if_not_zero(stack: &mut StackTracker, tables: &StackTables, rd: StackVariable, program_counter: StackVariable, base_register_address: u32) -> (StackVariable, StackVariable) {
-
-
+pub fn store_if_not_zero(
+    stack: &mut StackTracker,
+    tables: &StackTables,
+    rd: StackVariable,
+    program_counter: StackVariable,
+    base_register_address: u32,
+) -> (StackVariable, StackVariable) {
     stack.move_var(program_counter);
     stack.move_var(rd);
 
@@ -231,7 +255,7 @@ pub fn store_if_not_zero(stack: &mut StackTracker, tables: &StackTables, rd: Sta
     stack.number(0);
     stack.op_equal();
 
-    let (mut stack_if_true, mut stack_if_false) =  stack.open_if();
+    let (mut stack_if_true, mut stack_if_false) = stack.open_if();
 
     // if dest is zero, write data and value are zero
     stack_if_true.drop(rd);
@@ -247,16 +271,26 @@ pub fn store_if_not_zero(stack: &mut StackTracker, tables: &StackTables, rd: Sta
     let write_value = pc_next(&mut stack_if_false, tables, program_counter);
     stack_if_false.rename(write_value, "write_value");
 
-    let ret = stack.end_if(stack_if_true, stack_if_false, 2, vec![(8, "write_address".to_string()), (8, "write_value".to_string())], 0);
+    let ret = stack.end_if(
+        stack_if_true,
+        stack_if_false,
+        2,
+        vec![
+            (8, "write_address".to_string()),
+            (8, "write_value".to_string()),
+        ],
+        0,
+    );
     (ret[0], ret[1])
-    
-
 }
 
-pub fn op_jal(instruction: &Instruction, stack: &mut StackTracker, trace_read: &mut TraceRead, base_register_address: u32) -> TraceStep {
-
-
-    let tables = StackTables::new(stack, true, true, 5,5, 0);
+pub fn op_jal(
+    instruction: &Instruction,
+    stack: &mut StackTracker,
+    trace_read: &mut TraceRead,
+    base_register_address: u32,
+) -> TraceStep {
+    let tables = StackTables::new(stack, true, true, 5, 5, 0);
 
     stack.set_breakpoint(&format!("op_{:?}", instruction));
 
@@ -268,10 +302,16 @@ pub fn op_jal(instruction: &Instruction, stack: &mut StackTracker, trace_read: &
     move_and_drop(stack, trace_read.read_2_add);
     move_and_drop(stack, trace_read.read_2_value);
     move_and_drop(stack, trace_read.micro);
-    
+
     let pc = stack.copy_var(trace_read.program_counter);
-    
-    let (write_add, write_value) = store_if_not_zero(stack, &tables, rd, trace_read.program_counter, base_register_address);
+
+    let (write_add, write_value) = store_if_not_zero(
+        stack,
+        &tables,
+        rd,
+        trace_read.program_counter,
+        base_register_address,
+    );
 
     let write_pc = add_with_bit_extension(stack, &tables, pc, &mut imm, StackVariable::null());
     stack.rename(write_pc, "write_pc");
@@ -284,34 +324,47 @@ pub fn op_jal(instruction: &Instruction, stack: &mut StackTracker, trace_read: &
     tables.drop(stack);
     trace.from_altstack(stack);
     trace
-
-
 }
 
-
-pub fn op_jalr(instruction: &Instruction, stack: &mut StackTracker, trace_read: &mut TraceRead, base_register_address: u32) -> TraceStep {
-
-    let tables = StackTables::new(stack, true, true, 1,5, 0);
+pub fn op_jalr(
+    instruction: &Instruction,
+    stack: &mut StackTracker,
+    trace_read: &mut TraceRead,
+    base_register_address: u32,
+) -> TraceStep {
+    let tables = StackTables::new(stack, true, true, 1, 5, 0);
 
     stack.set_breakpoint(&format!("op_{:?}", instruction));
 
-    let (mut imm, rs1, rd, bit_extension) = decode_i_type(stack, &tables, trace_read.opcode, 0, 0x67, None);
+    let (mut imm, rs1, rd, bit_extension) =
+        decode_i_type(stack, &tables, trace_read.opcode, 0, 0x67, None);
 
     //these value are not used. can be droped or we can avoid to commit them
     move_and_drop(stack, trace_read.read_2_add);
     move_and_drop(stack, trace_read.read_2_value);
     move_and_drop(stack, trace_read.micro);
 
-    
     // assert rs1 + base_register_address == read_1 address
     validate_register_address(stack, trace_read.read_1_add, rs1, base_register_address);
 
     move_and_drop(stack, rs1); //This should be consumed
     move_and_drop(stack, trace_read.read_1_add);
-    
-    let (write_add, write_value) = store_if_not_zero(stack, &tables, rd, trace_read.program_counter, base_register_address);
 
-    let write_pc = add_with_bit_extension(stack, &tables, trace_read.read_1_value, &mut imm, bit_extension);
+    let (write_add, write_value) = store_if_not_zero(
+        stack,
+        &tables,
+        rd,
+        trace_read.program_counter,
+        base_register_address,
+    );
+
+    let write_pc = add_with_bit_extension(
+        stack,
+        &tables,
+        trace_read.read_1_value,
+        &mut imm,
+        bit_extension,
+    );
     stack.rename(write_pc, "write_pc");
 
     let micro = stack.number(0);
@@ -322,31 +375,34 @@ pub fn op_jalr(instruction: &Instruction, stack: &mut StackTracker, trace_read: 
     tables.drop(stack);
     trace.from_altstack(stack);
     trace
-
-
 }
 
-pub fn op_arithmetic_imm(instruction: &Instruction, stack: &mut StackTracker, trace_read: &mut TraceRead, base_register_address: u32) -> TraceStep {
-
+pub fn op_arithmetic_imm(
+    instruction: &Instruction,
+    stack: &mut StackTracker,
+    trace_read: &mut TraceRead,
+    base_register_address: u32,
+) -> TraceStep {
     let (mask, logic, func3, func7) = match instruction {
-        Xori(_) =>  (LOGIC_MASK_XOR, Some(LogicOperation::Xor), 4, None),
+        Xori(_) => (LOGIC_MASK_XOR, Some(LogicOperation::Xor), 4, None),
         Andi(_) => (LOGIC_MASK_AND, Some(LogicOperation::And), 7, None),
-        Ori(_)  => (LOGIC_MASK_OR, Some(LogicOperation::Or), 6, None),
+        Ori(_) => (LOGIC_MASK_OR, Some(LogicOperation::Or), 6, None),
         Slti(_) => (0, None, 2, None),
         Sltiu(_) => (0, None, 3, None),
         Addi(_) => (0, None, 0, None),
         Slli(_) => (0, None, 1, Some(0)),
         Srli(_) => (0, None, 5, Some(0)),
         Srai(_) => (0, None, 5, Some(0x20)),
-        _ => panic!("Unreachable") 
+        _ => panic!("Unreachable"),
     };
 
     let extra_shift = if func7.is_some() { 7 } else { 0 };
-    let tables = StackTables::new(stack, true, true, 1 | extra_shift,5 | extra_shift, mask);
+    let tables = StackTables::new(stack, true, true, 1 | extra_shift, 5 | extra_shift, mask);
 
     stack.set_breakpoint(&format!("op_{:?}", instruction));
 
-    let (mut imm, rs1, rd, bit_extension) = decode_i_type(stack, &tables, trace_read.opcode, func3, 0x13, func7);
+    let (mut imm, rs1, rd, bit_extension) =
+        decode_i_type(stack, &tables, trace_read.opcode, func3, 0x13, func7);
 
     //these value are not used. can be droped or we can avoid to commit them
     move_and_drop(stack, trace_read.read_2_add);
@@ -368,58 +424,89 @@ pub fn op_arithmetic_imm(instruction: &Instruction, stack: &mut StackTracker, tr
         Slli(_) => shift_value_with_bits(stack, &mut trace_read.read_1_value, imm, false, false),
         Srli(_) => shift_value_with_bits(stack, &mut trace_read.read_1_value, imm, true, false),
         Srai(_) => shift_value_with_bits(stack, &mut trace_read.read_1_value, imm, true, true),
-        Slti(_) => { move_and_drop(stack, bit_extension); operations::is_lower_than_slti(stack, &mut trace_read.read_1_value, imm, false, true) },
-        Sltiu(_) => { move_and_drop(stack, bit_extension); operations::is_lower_than_slti(stack, &mut trace_read.read_1_value, imm, true, true) },
-        Xori(_) | Andi(_) | Ori(_)  => logic_with_bit_extension(stack, &tables, &mut trace_read.read_1_value, &mut imm, bit_extension, logic.unwrap()),
-        Addi(_) => add_with_bit_extension(stack, &tables, trace_read.read_1_value, &mut imm, bit_extension),
-        _ => panic!("Unreachable") 
+        Slti(_) => {
+            move_and_drop(stack, bit_extension);
+            operations::is_lower_than_slti(stack, &mut trace_read.read_1_value, imm, false, true)
+        }
+        Sltiu(_) => {
+            move_and_drop(stack, bit_extension);
+            operations::is_lower_than_slti(stack, &mut trace_read.read_1_value, imm, true, true)
+        }
+        Xori(_) | Andi(_) | Ori(_) => logic_with_bit_extension(
+            stack,
+            &tables,
+            &mut trace_read.read_1_value,
+            &mut imm,
+            bit_extension,
+            logic.unwrap(),
+        ),
+        Addi(_) => add_with_bit_extension(
+            stack,
+            &tables,
+            trace_read.read_1_value,
+            &mut imm,
+            bit_extension,
+        ),
+        _ => panic!("Unreachable"),
     };
 
     let write_pc = pc_next(stack, &tables, trace_read.program_counter);
     let micro = stack.number(0);
     stack.rename(micro, "write_micro");
 
-    // result: 
-    //   write_add = base_register_address + rd 
-    //   write_value = read_1_value + (bitextended) imm   
+    // result:
+    //   write_add = base_register_address + rd
+    //   write_value = read_1_value + (bitextended) imm
     //   program_counter = read_program_counter + 4
     let trace = TraceStep::new(write_add, write_value, write_pc, micro);
     trace.to_altstack(stack);
     tables.drop(stack);
     trace.from_altstack(stack);
     trace
-
-
 }
 
-pub fn op_arithmetic(instruction: &Instruction, stack: &mut StackTracker, trace_read: &mut TraceRead, trace_step: &TraceStep, witness: Option<StackVariable>, base_register_address: u32) -> TraceStep {
+pub fn op_arithmetic(
+    instruction: &Instruction,
+    stack: &mut StackTracker,
+    trace_read: &mut TraceRead,
+    trace_step: &TraceStep,
+    witness: Option<StackVariable>,
+    base_register_address: u32,
+) -> TraceStep {
     let (mask, logic, func3, func7, extra_shift_for_mask) = match instruction {
-        Mul(_)  => (0x0, None, 0x0, 0x1, 0),
-        Mulh(_)  => (0x0, None, 0x1, 0x1, 0),
-        Mulhsu(_)  => (0x0, None, 0x2, 0x1, 0),
-        Mulhu(_)  => (0x0, None, 0x3, 0x1, 0),
-        Div(_)  => (0x0, None, 0x4, 0x1, 0),
-        Divu(_)  => (0x0, None, 0x5, 0x1, 0),
-        Rem(_)  => (0x0, None, 0x6, 0x1, 0),
-        Remu(_)  => (0x0, None, 0x7, 0x1, 0),
-        Add(_)  => (0x0, None, 0x0, 0x0, 0),
-        Sub (_) => (0x0, None, 0x0, 0x20, 0),
-        Xor(_)  => (LOGIC_MASK_XOR, Some(LogicOperation::Xor), 0x4, 0x0, 0),
-        And(_)  => (LOGIC_MASK_AND, Some(LogicOperation::And), 0x7, 0x0, 0),
-        Or(_)   => (LOGIC_MASK_OR, Some(LogicOperation::Or), 0x6, 0x0, 0),
-        Slt(_)  => (0, None, 2, 0, 0),
+        Mul(_) => (0x0, None, 0x0, 0x1, 0),
+        Mulh(_) => (0x0, None, 0x1, 0x1, 0),
+        Mulhsu(_) => (0x0, None, 0x2, 0x1, 0),
+        Mulhu(_) => (0x0, None, 0x3, 0x1, 0),
+        Div(_) => (0x0, None, 0x4, 0x1, 0),
+        Divu(_) => (0x0, None, 0x5, 0x1, 0),
+        Rem(_) => (0x0, None, 0x6, 0x1, 0),
+        Remu(_) => (0x0, None, 0x7, 0x1, 0),
+        Add(_) => (0x0, None, 0x0, 0x0, 0),
+        Sub(_) => (0x0, None, 0x0, 0x20, 0),
+        Xor(_) => (LOGIC_MASK_XOR, Some(LogicOperation::Xor), 0x4, 0x0, 0),
+        And(_) => (LOGIC_MASK_AND, Some(LogicOperation::And), 0x7, 0x0, 0),
+        Or(_) => (LOGIC_MASK_OR, Some(LogicOperation::Or), 0x6, 0x0, 0),
+        Slt(_) => (0, None, 2, 0, 0),
         Sltu(_) => (0, None, 3, 0, 0),
-        Sll(_)  => (0, None, 0x1, 0x00, 4),
-        Srl(_)  => (0, None, 0x5, 0x00, 4),
-        Sra(_)  => (0, None, 0x5, 0x20, 4),
-        _ => panic!("Unreachable")
+        Sll(_) => (0, None, 0x1, 0x00, 4),
+        Srl(_) => (0, None, 0x5, 0x00, 4),
+        Sra(_) => (0, None, 0x5, 0x20, 4),
+        _ => panic!("Unreachable"),
     };
 
     let tables = StackTables::new(stack, true, true, 3 | extra_shift_for_mask, 6, mask);
 
     stack.set_breakpoint(&format!("op_{:?}", instruction));
 
-    let (rs1, rs2, rd) = decode_r_type(stack, &tables, trace_read.opcode, func3, R_TYPE_OPCODE, func7);
+    let (rs1, rs2, rd) = decode_r_type(
+        stack,
+        &tables,
+        trace_read.opcode,
+        func3,
+        R_TYPE_OPCODE,
+        func7,
+    );
 
     //these value are not used. can be droped or we can avoid to commit them
     move_and_drop(stack, trace_read.micro);
@@ -455,45 +542,133 @@ pub fn op_arithmetic(instruction: &Instruction, stack: &mut StackTracker, trace_
         masked_5lsb = stack.from_altstack_joined(2, "masked_5lsb");
     }
 
-
     let write_value_copy = match instruction {
-        Div(_) | 
-        Divu(_) | 
-        Rem(_) | 
-        Remu(_) => Some(stack.copy_var(trace_step.write_1_value)), 
-        _ => None
+        Div(_) | Divu(_) | Rem(_) | Remu(_) => Some(stack.copy_var(trace_step.write_1_value)),
+        _ => None,
     };
-
 
     let write_value = match instruction {
-        Mul(_) => multiply(stack, trace_read.read_1_value, trace_read.read_2_value, false, true),
-        Mulh(_)  => mulh(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, false),
-        Mulhsu(_)  => mulh(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, true),
-        Mulhu(_) => multiply(stack, trace_read.read_1_value, trace_read.read_2_value, true, false),
-        Div(_) => div(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, write_value_copy.unwrap(), witness.unwrap()),
-        Divu(_) => divu(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, write_value_copy.unwrap(), witness.unwrap()),
-        Remu(_) => remu(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, write_value_copy.unwrap(), witness.unwrap()),
-        Rem(_) => rem(stack, &tables, trace_read.read_1_value, trace_read.read_2_value, write_value_copy.unwrap(), witness.unwrap()),
-        Add(_) => add_with_bit_extension(stack, &tables, trace_read.read_1_value, &mut trace_read.read_2_value, StackVariable::null()),
-        Sub(_) => sub(stack, &tables, trace_read.read_1_value, &mut trace_read.read_2_value),
-        Slt(_)  => is_lower_than_slti(stack, &mut trace_read.read_1_value, trace_read.read_2_value, false, false),
-        Sltu(_) => is_lower_than_slti(stack, &mut trace_read.read_1_value, trace_read.read_2_value, true, false),
-        Xor(_) |
-        And(_) |
-        Or(_)  => logic_with_bit_extension(stack, &tables, &mut trace_read.read_1_value, &mut trace_read.read_2_value, StackVariable::null(), logic.unwrap()),
-        Sll(_) => shift_value_with_bits(stack, &mut trace_read.read_1_value, masked_5lsb, false, false),
-        Srl(_) => shift_value_with_bits(stack, &mut trace_read.read_1_value, masked_5lsb, true, false),
-        Sra(_) => shift_value_with_bits(stack, &mut trace_read.read_1_value, masked_5lsb, true, true),
-        _ => panic!("Unreachable")
+        Mul(_) => multiply(
+            stack,
+            trace_read.read_1_value,
+            trace_read.read_2_value,
+            false,
+            true,
+        ),
+        Mulh(_) => mulh(
+            stack,
+            &tables,
+            trace_read.read_1_value,
+            trace_read.read_2_value,
+            false,
+        ),
+        Mulhsu(_) => mulh(
+            stack,
+            &tables,
+            trace_read.read_1_value,
+            trace_read.read_2_value,
+            true,
+        ),
+        Mulhu(_) => multiply(
+            stack,
+            trace_read.read_1_value,
+            trace_read.read_2_value,
+            true,
+            false,
+        ),
+        Div(_) => div(
+            stack,
+            &tables,
+            trace_read.read_1_value,
+            trace_read.read_2_value,
+            write_value_copy.unwrap(),
+            witness.unwrap(),
+        ),
+        Divu(_) => divu(
+            stack,
+            &tables,
+            trace_read.read_1_value,
+            trace_read.read_2_value,
+            write_value_copy.unwrap(),
+            witness.unwrap(),
+        ),
+        Remu(_) => remu(
+            stack,
+            &tables,
+            trace_read.read_1_value,
+            trace_read.read_2_value,
+            write_value_copy.unwrap(),
+            witness.unwrap(),
+        ),
+        Rem(_) => rem(
+            stack,
+            &tables,
+            trace_read.read_1_value,
+            trace_read.read_2_value,
+            write_value_copy.unwrap(),
+            witness.unwrap(),
+        ),
+        Add(_) => add_with_bit_extension(
+            stack,
+            &tables,
+            trace_read.read_1_value,
+            &mut trace_read.read_2_value,
+            StackVariable::null(),
+        ),
+        Sub(_) => sub(
+            stack,
+            &tables,
+            trace_read.read_1_value,
+            &mut trace_read.read_2_value,
+        ),
+        Slt(_) => is_lower_than_slti(
+            stack,
+            &mut trace_read.read_1_value,
+            trace_read.read_2_value,
+            false,
+            false,
+        ),
+        Sltu(_) => is_lower_than_slti(
+            stack,
+            &mut trace_read.read_1_value,
+            trace_read.read_2_value,
+            true,
+            false,
+        ),
+        Xor(_) | And(_) | Or(_) => logic_with_bit_extension(
+            stack,
+            &tables,
+            &mut trace_read.read_1_value,
+            &mut trace_read.read_2_value,
+            StackVariable::null(),
+            logic.unwrap(),
+        ),
+        Sll(_) => shift_value_with_bits(
+            stack,
+            &mut trace_read.read_1_value,
+            masked_5lsb,
+            false,
+            false,
+        ),
+        Srl(_) => shift_value_with_bits(
+            stack,
+            &mut trace_read.read_1_value,
+            masked_5lsb,
+            true,
+            false,
+        ),
+        Sra(_) => {
+            shift_value_with_bits(stack, &mut trace_read.read_1_value, masked_5lsb, true, true)
+        }
+        _ => panic!("Unreachable"),
     };
-
 
     let write_pc = pc_next(stack, &tables, trace_read.program_counter);
     let micro = stack.number(0);
     stack.rename(micro, "write_micro");
 
-    // result: 
-    //   write_addr = base_register_address + rd * 4 
+    // result:
+    //   write_addr = base_register_address + rd * 4
     //   write_value = read_1_value + read_2_value
     //   program_counter = read_program_counter + 4
     let trace = TraceStep::new(write_addr, write_value, write_pc, micro);
@@ -504,7 +679,12 @@ pub fn op_arithmetic(instruction: &Instruction, stack: &mut StackTracker, trace_
     trace
 }
 
-pub fn op_upper(instruction: &Instruction, stack: &mut StackTracker, trace_read: &mut TraceRead, base_register_address: u32) -> TraceStep {
+pub fn op_upper(
+    instruction: &Instruction,
+    stack: &mut StackTracker,
+    trace_read: &mut TraceRead,
+    base_register_address: u32,
+) -> TraceStep {
     let tables = StackTables::new(stack, true, true, 1, 4, 0);
 
     stack.set_breakpoint(&format!("op_{:?}", instruction));
@@ -512,17 +692,16 @@ pub fn op_upper(instruction: &Instruction, stack: &mut StackTracker, trace_read:
     let expected_opcode = match instruction {
         Lui(_) => 0x37,
         Auipc(_) => 0x17,
-        _ => panic!("Unreachable")
+        _ => panic!("Unreachable"),
     };
 
-    let (mut imm,rd) = decode_u_type(stack, &tables, trace_read.opcode, expected_opcode);
+    let (mut imm, rd) = decode_u_type(stack, &tables, trace_read.opcode, expected_opcode);
     // These value are not used
     move_and_drop(stack, trace_read.read_2_add);
     move_and_drop(stack, trace_read.read_2_value);
     move_and_drop(stack, trace_read.micro);
     move_and_drop(stack, trace_read.read_1_add);
     move_and_drop(stack, trace_read.read_1_value);
-
 
     let mut write_addr = number_u32_partial(stack, base_register_address, 6);
     stack.move_var(rd);
@@ -532,14 +711,14 @@ pub fn op_upper(instruction: &Instruction, stack: &mut StackTracker, trace_read:
     let write_value = match instruction {
         Lui(_) => imm,
         Auipc(_) => {
-            let pc= stack.copy_var(trace_read.program_counter);
+            let pc = stack.copy_var(trace_read.program_counter);
             add_with_bit_extension(stack, &tables, pc, &mut imm, StackVariable::null())
         }
-        _ => panic!("Unreachable")
+        _ => panic!("Unreachable"),
     };
 
     let write_pc = pc_next(stack, &tables, trace_read.program_counter);
-    let micro = stack.number(0);    
+    let micro = stack.number(0);
     stack.rename(micro, "write_micro");
 
     let trace = TraceStep::new(write_addr, write_value, write_pc, micro);
@@ -550,101 +729,146 @@ pub fn op_upper(instruction: &Instruction, stack: &mut StackTracker, trace_read:
 }
 
 pub struct ProgramSpec {
-    base_register_address: u32,  // base address used for the registers
+    base_register_address: u32, // base address used for the registers
 }
 
 impl ProgramSpec {
     pub fn new(base_register_address: u32) -> ProgramSpec {
-        //This requirement makes the easier to verify the addresses 
-        assert_eq!(base_register_address & 0x0000_00FF, 0, "Base register address must be aligned to 256 bytes");
+        //This requirement makes the easier to verify the addresses
+        assert_eq!(
+            base_register_address & 0x0000_00FF,
+            0,
+            "Base register address must be aligned to 256 bytes"
+        );
         ProgramSpec {
             base_register_address,
         }
     }
 }
 
-
-pub fn execute_step( stack: &mut StackTracker, mut trace_read: TraceRead, trace_step: &TraceStep, witness: Option<StackVariable>, instruction: &Instruction, micro: u8, program: ProgramSpec ) -> Result<TraceStep, ScriptValidation> {
-    
+pub fn execute_step(
+    stack: &mut StackTracker,
+    mut trace_read: TraceRead,
+    trace_step: &TraceStep,
+    witness: Option<StackVariable>,
+    instruction: &Instruction,
+    micro: u8,
+    program: ProgramSpec,
+) -> Result<TraceStep, ScriptValidation> {
     match instruction {
+        Fence(_) | Ebreak => Ok(op_nop(stack, &mut trace_read)),
 
-        Fence(_)  |
-        Ebreak    => Ok(op_nop(stack, &mut trace_read)),
-        
-        Ecall     => Ok(op_ecall(stack, &mut trace_read, program.base_register_address)),
+        Ecall => Ok(op_ecall(
+            stack,
+            &mut trace_read,
+            program.base_register_address,
+        )),
 
-        Beq(_) | Bne(_) | Blt(_) | Bge(_) | Bltu(_) |
-        Bgeu(_) => Ok(op_conditional(instruction, stack, &mut trace_read, program.base_register_address)),
+        Beq(_) | Bne(_) | Blt(_) | Bge(_) | Bltu(_) | Bgeu(_) => Ok(op_conditional(
+            instruction,
+            stack,
+            &mut trace_read,
+            program.base_register_address,
+        )),
 
-        Lh(_)  | Lhu(_) | Lw(_)  |
-        Lbu(_) | Lb(_) => Ok(op_load(instruction, stack, &mut trace_read, micro, program.base_register_address)),
+        Lh(_) | Lhu(_) | Lw(_) | Lbu(_) | Lb(_) => Ok(op_load(
+            instruction,
+            stack,
+            &mut trace_read,
+            micro,
+            program.base_register_address,
+        )),
 
-        Sb(_) | Sh(_) | Sw(_) => Ok(op_store(instruction, stack, &mut trace_read, micro, program.base_register_address)),
+        Sb(_) | Sh(_) | Sw(_) => Ok(op_store(
+            instruction,
+            stack,
+            &mut trace_read,
+            micro,
+            program.base_register_address,
+        )),
 
-        Jalr(_) => Ok(op_jalr(instruction, stack, &mut trace_read, program.base_register_address)),
-        Jal(_) => Ok(op_jal(instruction, stack, &mut trace_read, program.base_register_address)),
+        Jalr(_) => Ok(op_jalr(
+            instruction,
+            stack,
+            &mut trace_read,
+            program.base_register_address,
+        )),
+        Jal(_) => Ok(op_jal(
+            instruction,
+            stack,
+            &mut trace_read,
+            program.base_register_address,
+        )),
 
-
-        Slli(x) |
-        Srli(x) |
-        Srai(x) => {
-            if x.rd() == 0 {
-                Ok(op_nop(stack, &mut trace_read))
-            }  else {
-                Ok(op_arithmetic_imm(instruction, stack, &mut trace_read, program.base_register_address))
-            }
-        },
-        Xori(x)  |
-        Andi(x)  |
-        Ori(x)   |
-        Slti(x)  |
-        Sltiu(x) |
-        Addi(x) => { 
-            if x.rd() == 0 {
-                Ok(op_nop(stack, &mut trace_read))
-            }  else {
-                Ok(op_arithmetic_imm(instruction, stack, &mut trace_read, program.base_register_address))
-            }
-        },
-        Mul( x) |
-        Mulh( x) |
-        Mulhsu( x) |
-        Mulhu( x) |
-        Div( x) |
-        Divu( x) |
-        Rem( x) |
-        Remu( x) |
-        Xor(x) |
-        And(x) |
-        Or (x) |
-        Slt(x)  |
-        Sltu(x) |
-        Sll(x)  |
-        Srl(x)  |
-        Sra(x)  |
-        Add(x)  |
-        Sub(x) => {
-            if x.rd() == 0 {
-                Ok(op_nop(stack, &mut trace_read))
-           } else {
-                Ok(op_arithmetic(instruction, stack, &mut trace_read, trace_step, witness, program.base_register_address))
-            }
-        },
-        Lui(x) | 
-        Auipc(x) => {
+        Slli(x) | Srli(x) | Srai(x) => {
             if x.rd() == 0 {
                 Ok(op_nop(stack, &mut trace_read))
             } else {
-                Ok(op_upper(instruction, stack, &mut trace_read, program.base_register_address))
+                Ok(op_arithmetic_imm(
+                    instruction,
+                    stack,
+                    &mut trace_read,
+                    program.base_register_address,
+                ))
             }
-        },
-        _ => Err(ScriptValidation::InstructionNotImplemented(format!("{:?}",instruction)))
+        }
+        Xori(x) | Andi(x) | Ori(x) | Slti(x) | Sltiu(x) | Addi(x) => {
+            if x.rd() == 0 {
+                Ok(op_nop(stack, &mut trace_read))
+            } else {
+                Ok(op_arithmetic_imm(
+                    instruction,
+                    stack,
+                    &mut trace_read,
+                    program.base_register_address,
+                ))
+            }
+        }
+        Mul(x) | Mulh(x) | Mulhsu(x) | Mulhu(x) | Div(x) | Divu(x) | Rem(x) | Remu(x) | Xor(x)
+        | And(x) | Or(x) | Slt(x) | Sltu(x) | Sll(x) | Srl(x) | Sra(x) | Add(x) | Sub(x) => {
+            if x.rd() == 0 {
+                Ok(op_nop(stack, &mut trace_read))
+            } else {
+                Ok(op_arithmetic(
+                    instruction,
+                    stack,
+                    &mut trace_read,
+                    trace_step,
+                    witness,
+                    program.base_register_address,
+                ))
+            }
+        }
+        Lui(x) | Auipc(x) => {
+            if x.rd() == 0 {
+                Ok(op_nop(stack, &mut trace_read))
+            } else {
+                Ok(op_upper(
+                    instruction,
+                    stack,
+                    &mut trace_read,
+                    program.base_register_address,
+                ))
+            }
+        }
+        _ => Err(ScriptValidation::InstructionNotImplemented(format!(
+            "{:?}",
+            instruction
+        ))),
     }
-
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn load_trace_read_in_stack(stack: &mut StackTracker, r1: u32, v1: u32, r2: u32, v2: u32, pc: u32, micro: u8, opcode: u32) -> TraceRead {
+pub fn load_trace_read_in_stack(
+    stack: &mut StackTracker,
+    r1: u32,
+    v1: u32,
+    r2: u32,
+    v2: u32,
+    pc: u32,
+    micro: u8,
+    opcode: u32,
+) -> TraceRead {
     let read_1_add = stack.number_u32(r1);
     stack.rename(read_1_add, "read_1_add");
     let read_1_value = stack.number_u32(v1);
@@ -670,7 +894,13 @@ pub fn load_trace_read_in_stack(stack: &mut StackTracker, r1: u32, v1: u32, r2: 
     }
 }
 
-pub fn load_trace_step_in_stack(stack: &mut StackTracker, w1: u32, v1: u32, pc: u32, micro: u8) -> TraceStep {
+pub fn load_trace_step_in_stack(
+    stack: &mut StackTracker,
+    w1: u32,
+    v1: u32,
+    pc: u32,
+    micro: u8,
+) -> TraceStep {
     let write_1_add = stack.number_u32(w1);
     stack.rename(write_1_add, "write_1_add");
     let write_1_value = stack.number_u32(v1);
@@ -688,10 +918,22 @@ pub fn load_trace_step_in_stack(stack: &mut StackTracker, w1: u32, v1: u32, pc: 
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn verify(instruction_mapping: &Option<InstructionMapping>, program: ProgramSpec,
-              r1: u32, v1: u32, r2: u32, v2: u32, pc: u32, micro: u8, opcode: u32,
-              w1: u32, wv1: u32, wpc: u32, wmicro: u8, witness: Option<u32>) -> Result<bool, ScriptValidation> {
-
+pub fn verify(
+    instruction_mapping: &Option<InstructionMapping>,
+    program: ProgramSpec,
+    r1: u32,
+    v1: u32,
+    r2: u32,
+    v2: u32,
+    pc: u32,
+    micro: u8,
+    opcode: u32,
+    w1: u32,
+    wv1: u32,
+    wpc: u32,
+    wmicro: u8,
+    witness: Option<u32>,
+) -> Result<bool, ScriptValidation> {
     let mut stack = StackTracker::new();
     let trace_step = load_trace_step_in_stack(&mut stack, w1, wv1, wpc, wmicro);
     let mut consumes = 11;
@@ -711,41 +953,80 @@ pub fn verify(instruction_mapping: &Option<InstructionMapping>, program: Program
     if let Some(mapping) = instruction_mapping {
         let instruction = riscv_decode::decode(opcode).unwrap();
         let key = get_key_from_instruction_and_micro(&instruction, micro);
-        let (verification_script, _requires_witness)  = mapping.get(&key).unwrap();
-        stack.custom(verification_script.clone() , consumes, false, 0, "verify");
+        let (verification_script, _requires_witness) = mapping.get(&key).unwrap();
+        stack.custom(verification_script.clone(), consumes, false, 0, "verify");
     } else {
-        verify_execution(&mut stack, trace_step, trace_read, witness, opcode, micro, program)?;
+        verify_execution(
+            &mut stack, trace_step, trace_read, witness, opcode, micro, program,
+        )?;
     }
-    
+
     stack.op_true();
 
     if !stack.run().success {
-        panic!("Verification failed");  
+        panic!("Verification failed");
     }
     Ok(true)
 }
 
-pub fn verify_execution(stack: &mut StackTracker, mut trace_step: TraceStep, trace_read: TraceRead, witness: Option<StackVariable>, opcode: u32, micro: u8, program: ProgramSpec) -> Result<(), ScriptValidation> {
+pub fn verify_execution(
+    stack: &mut StackTracker,
+    mut trace_step: TraceStep,
+    trace_read: TraceRead,
+    witness: Option<StackVariable>,
+    opcode: u32,
+    micro: u8,
+    program: ProgramSpec,
+) -> Result<(), ScriptValidation> {
     let instruction = riscv_decode::decode(opcode).unwrap();
-    let mut result_step = execute_step(stack, trace_read, &trace_step, witness,&instruction, micro, program)?;
+    let mut result_step = execute_step(
+        stack,
+        trace_read,
+        &trace_step,
+        witness,
+        &instruction,
+        micro,
+        program,
+    )?;
     compare_trace_step(stack, &mut trace_step, &mut result_step);
 
     Ok(())
 }
 
-pub fn compare_trace_step(stack: &mut StackTracker, trace_step_commit: &mut TraceStep, trace_step_result: &mut TraceStep ) {
-
+pub fn compare_trace_step(
+    stack: &mut StackTracker,
+    trace_step_commit: &mut TraceStep,
+    trace_step_result: &mut TraceStep,
+) {
     stack.set_breakpoint("verify execution");
 
-    stack.equals(&mut trace_step_commit.micro, true, &mut trace_step_result.micro, true);
-    stack.equals(&mut trace_step_commit.program_counter, true, &mut trace_step_result.program_counter, true);
-    stack.equals(&mut trace_step_commit.write_1_value, true, &mut trace_step_result.write_1_value, true);
-    stack.equals(&mut trace_step_commit.write_1_add, true, &mut trace_step_result.write_1_add, true);
+    stack.equals(
+        &mut trace_step_commit.micro,
+        true,
+        &mut trace_step_result.micro,
+        true,
+    );
+    stack.equals(
+        &mut trace_step_commit.program_counter,
+        true,
+        &mut trace_step_result.program_counter,
+        true,
+    );
+    stack.equals(
+        &mut trace_step_commit.write_1_value,
+        true,
+        &mut trace_step_result.write_1_value,
+        true,
+    );
+    stack.equals(
+        &mut trace_step_commit.write_1_add,
+        true,
+        &mut trace_step_result.write_1_add,
+        true,
+    );
 
     stack.set_breakpoint("end verify execution");
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -760,7 +1041,6 @@ mod tests {
 
     #[test]
     fn test_conditional() {
-
         let mut stack = StackTracker::new();
         let opcode = 0x06f5C0e3; //beq
         let btype = BType(opcode);
@@ -768,27 +1048,38 @@ mod tests {
 
         //let program = ProgramSpec::new(0xA000_0000);
         //let trace_step = load_trace_step_in_stack(&mut stack, 0xA000_0008, 0xDFFF_FFA0, 0x8000_00c4, 0);
-        let mut trace_read = load_trace_read_in_stack(&mut stack, 0xA000_002c, 0x0000_0001, 0xA000_003c, 0x000_0002, 0x8000_0000, 0, opcode);
-        op_conditional(&instruction, &mut stack, &mut trace_read, BASE_REGISTER_ADDRESS);
-
+        let mut trace_read = load_trace_read_in_stack(
+            &mut stack,
+            0xA000_002c,
+            0x0000_0001,
+            0xA000_003c,
+            0x000_0002,
+            0x8000_0000,
+            0,
+            opcode,
+        );
+        op_conditional(
+            &instruction,
+            &mut stack,
+            &mut trace_read,
+            BASE_REGISTER_ADDRESS,
+        );
     }
 
     #[test]
     fn test_get_register() {
-
-        for r in 0..32 {  
+        for r in 0..32 {
             let mut stack = StackTracker::new();
             let tables = StackTables::new(&mut stack, false, false, 1, 4, 0);
 
             let add = r * 4;
-            let mut original = stack.number(add  >> 4);
+            let mut original = stack.number(add >> 4);
             stack.number(add & 0x0f);
             stack.join(&mut original);
 
-            let register_number : u8 = (r as u8) << 3;
+            let register_number: u8 = (r as u8) << 3;
             let register_encoded = stack.byte(register_number);
             let parts = stack.explode(register_encoded);
-
 
             let mut reconstructed = get_register_address(&mut stack, &tables, parts[0], parts[1]);
             stack.equals(&mut original, true, &mut reconstructed, true);
@@ -800,7 +1091,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn test_validate_register() {
         let base = 0x1234_5600;
@@ -809,7 +1099,7 @@ mod tests {
             let add = i << 2;
             let register = stack.byte(add);
             let read_address = stack.number_u32(base + add as u32);
-            validate_register_address(&mut stack,  read_address, register, base);
+            validate_register_address(&mut stack, read_address, register, base);
             stack.drop(read_address);
             stack.drop(register);
             stack.op_true();
@@ -817,15 +1107,23 @@ mod tests {
         }
     }
 
-
-
     #[test]
     fn test_addi() {
         let mut stack = StackTracker::new();
         let opcode = 0xfa010113;
         let program = ProgramSpec::new(0xA000_0000);
-        let trace_step = load_trace_step_in_stack(&mut stack, 0xA000_0008, 0xDFFF_FFA0, 0x8000_00c4, 0);
-        let trace_read = load_trace_read_in_stack(&mut stack, 0xA000_0008, 0xE000_0000, 0, 0, 0x8000_00c0, 0, opcode);
+        let trace_step =
+            load_trace_step_in_stack(&mut stack, 0xA000_0008, 0xDFFF_FFA0, 0x8000_00c4, 0);
+        let trace_read = load_trace_read_in_stack(
+            &mut stack,
+            0xA000_0008,
+            0xE000_0000,
+            0,
+            0,
+            0x8000_00c0,
+            0,
+            opcode,
+        );
         verify_execution(&mut stack, trace_step, trace_read, None, opcode, 0, program).unwrap();
         stack.op_true();
         assert!(stack.run().success);
@@ -841,9 +1139,18 @@ mod tests {
         let mut stack = StackTracker::new();
 
         // reg_addr = BASE_REGISTER_ADDRESS + reg_num * 4;
-        let trace_step = load_trace_step_in_stack(&mut stack, write_address, 0x0000_0007, 0x8000_00c4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(&mut stack, 0xA000_0024, 0x0000_0004, 0xA000_0028, 0x0000_0003, // r1, v1, r2, v2
-            0x8000_00c0, 0, opcode); // pc, micro, opcode
+        let trace_step =
+            load_trace_step_in_stack(&mut stack, write_address, 0x0000_0007, 0x8000_00c4, 0); // w, v, pc, micro
+        let trace_read = load_trace_read_in_stack(
+            &mut stack,
+            0xA000_0024,
+            0x0000_0004,
+            0xA000_0028,
+            0x0000_0003, // r1, v1, r2, v2
+            0x8000_00c0,
+            0,
+            opcode,
+        ); // pc, micro, opcode
 
         let program = ProgramSpec::new(BASE_REGISTER_ADDRESS);
         verify_execution(&mut stack, trace_step, trace_read, None, opcode, 0, program).unwrap();
@@ -870,14 +1177,20 @@ mod tests {
 
         let trace_read = load_trace_read_in_stack(
             &mut stack,
-            reg_address(rtype.rs1()), 0x0000_1010,
-            reg_address(rtype.rs2()), 0x0000_0103,
-            0x8000_00c0, 0, opcode // pc, micro, opcode
+            reg_address(rtype.rs1()),
+            0x0000_1010,
+            reg_address(rtype.rs2()),
+            0x0000_0103,
+            0x8000_00c0,
+            0,
+            opcode, // pc, micro, opcode
         );
         let trace_step = load_trace_step_in_stack(
             &mut stack,
-            reg_address(rtype.rd()), 0x0000_0F0D,
-            0x8000_00c4, 0 // pc, micro
+            reg_address(rtype.rd()),
+            0x0000_0F0D,
+            0x8000_00c4,
+            0, // pc, micro
         );
 
         let program = ProgramSpec::new(BASE_REGISTER_ADDRESS);
@@ -901,14 +1214,21 @@ mod tests {
 
         assert!(decoded.eq(&Slt(rtype)));
 
-
         // test set to one
         let mut stack = StackTracker::new();
 
         // reg_addr = BASE_REGISTER_ADDRESS + reg_num * 4;
         let trace_step = load_trace_step_in_stack(&mut stack, 0xA000_002C, 0x1, 0x8000_00C4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(&mut stack, 0xA000_0024, 0x3, 0xA000_0028, 0x4, // r1, v1, r2, v2
-            0x8000_00C0, 0, opcode); // pc, micro, opcode
+        let trace_read = load_trace_read_in_stack(
+            &mut stack,
+            0xA000_0024,
+            0x3,
+            0xA000_0028,
+            0x4, // r1, v1, r2, v2
+            0x8000_00C0,
+            0,
+            opcode,
+        ); // pc, micro, opcode
 
         let program = ProgramSpec::new(BASE_REGISTER_ADDRESS);
         verify_execution(&mut stack, trace_step, trace_read, None, opcode, 0, program).unwrap();
@@ -922,8 +1242,16 @@ mod tests {
 
         // reg_addr = BASE_REGISTER_ADDRESS + reg_num * 4;
         let trace_step = load_trace_step_in_stack(&mut stack, 0xA000_002C, 0x0, 0x8000_00C4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(&mut stack, 0xA000_0024, 0x5, 0xA000_0028, 0x4, // r1, v1, r2, v2
-            0x8000_00C0, 0, opcode); // pc, micro, opcode
+        let trace_read = load_trace_read_in_stack(
+            &mut stack,
+            0xA000_0024,
+            0x5,
+            0xA000_0028,
+            0x4, // r1, v1, r2, v2
+            0x8000_00C0,
+            0,
+            opcode,
+        ); // pc, micro, opcode
 
         let program = ProgramSpec::new(BASE_REGISTER_ADDRESS);
         verify_execution(&mut stack, trace_step, trace_read, None, opcode, 0, program).unwrap();
@@ -951,8 +1279,16 @@ mod tests {
 
         // reg_addr = BASE_REGISTER_ADDRESS + reg_num * 4;
         let trace_step = load_trace_step_in_stack(&mut stack, 0xA000_002C, 0x1, 0x8000_00C4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(&mut stack, 0xA000_0024, 0x3, 0xA000_0028, 0x4, // r1, v1, r2, v2
-            0x8000_00C0, 0, opcode); // pc, micro, opcode
+        let trace_read = load_trace_read_in_stack(
+            &mut stack,
+            0xA000_0024,
+            0x3,
+            0xA000_0028,
+            0x4, // r1, v1, r2, v2
+            0x8000_00C0,
+            0,
+            opcode,
+        ); // pc, micro, opcode
 
         let program = ProgramSpec::new(BASE_REGISTER_ADDRESS);
         verify_execution(&mut stack, trace_step, trace_read, None, opcode, 0, program).unwrap();
@@ -966,8 +1302,16 @@ mod tests {
 
         // reg_addr = BASE_REGISTER_ADDRESS + reg_num * 4;
         let trace_step = load_trace_step_in_stack(&mut stack, 0xA000_002C, 0x0, 0x8000_00C4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(&mut stack, 0xA000_0024, 0x5, 0xA000_0028, 0x4, // r1, v1, r2, v2
-            0x8000_00C0, 0, opcode); // pc, micro, opcode
+        let trace_read = load_trace_read_in_stack(
+            &mut stack,
+            0xA000_0024,
+            0x5,
+            0xA000_0028,
+            0x4, // r1, v1, r2, v2
+            0x8000_00C0,
+            0,
+            opcode,
+        ); // pc, micro, opcode
 
         let program = ProgramSpec::new(BASE_REGISTER_ADDRESS);
         verify_execution(&mut stack, trace_step, trace_read, None, opcode, 0, program).unwrap();
@@ -996,15 +1340,24 @@ mod tests {
 
         let read_value_1: u32 = 0b0001_0010_0011_0100_0101_0110_0111_1000;
         let read_value_2: u32 = 0b1001_1010_1011_1100_1101_1110_1111_0000;
-        let write_value: u32 =  0b1000_1000_1000_1000_1000_1000_1000_1000;
+        let write_value: u32 = 0b1000_1000_1000_1000_1000_1000_1000_1000;
 
         assert_eq!(read_value_1, 0x12345678);
         assert_eq!(read_value_2, 0x9ABCDEF0);
         assert_eq!(write_value, 0x88888888);
 
-        let trace_step = load_trace_step_in_stack(&mut stack, write_address, write_value, 0x8000_00c4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(&mut stack, 0xA000_0024, read_value_1, 0xA000_0028, read_value_2, // r1, v1, r2, v2
-            0x8000_00c0, 0, opcode); // pc, micro, opcode
+        let trace_step =
+            load_trace_step_in_stack(&mut stack, write_address, write_value, 0x8000_00c4, 0); // w, v, pc, micro
+        let trace_read = load_trace_read_in_stack(
+            &mut stack,
+            0xA000_0024,
+            read_value_1,
+            0xA000_0028,
+            read_value_2, // r1, v1, r2, v2
+            0x8000_00c0,
+            0,
+            opcode,
+        ); // pc, micro, opcode
 
         let program = ProgramSpec::new(BASE_REGISTER_ADDRESS);
         verify_execution(&mut stack, trace_step, trace_read, None, opcode, 0, program).unwrap();
@@ -1033,15 +1386,24 @@ mod tests {
 
         let read_value_1: u32 = 0b0001_0010_0011_0100_0101_0110_0111_1000;
         let read_value_2: u32 = 0b1001_1010_1011_1100_1101_1110_1111_0000;
-        let write_value: u32 =  0b0001_0010_0011_0100_0101_0110_0111_0000;
+        let write_value: u32 = 0b0001_0010_0011_0100_0101_0110_0111_0000;
 
         assert_eq!(read_value_1, 0x12345678);
         assert_eq!(read_value_2, 0x9ABCDEF0);
-        assert_eq!(write_value,  0x12345670);
+        assert_eq!(write_value, 0x12345670);
 
-        let trace_step = load_trace_step_in_stack(&mut stack, write_address, write_value, 0x8000_00c4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(&mut stack, 0xA000_0024, read_value_1, 0xA000_0028, read_value_2, // r1, v1, r2, v2
-            0x8000_00c0, 0, opcode); // pc, micro, opcode
+        let trace_step =
+            load_trace_step_in_stack(&mut stack, write_address, write_value, 0x8000_00c4, 0); // w, v, pc, micro
+        let trace_read = load_trace_read_in_stack(
+            &mut stack,
+            0xA000_0024,
+            read_value_1,
+            0xA000_0028,
+            read_value_2, // r1, v1, r2, v2
+            0x8000_00c0,
+            0,
+            opcode,
+        ); // pc, micro, opcode
 
         let program = ProgramSpec::new(BASE_REGISTER_ADDRESS);
         verify_execution(&mut stack, trace_step, trace_read, None, opcode, 0, program).unwrap();
@@ -1070,15 +1432,24 @@ mod tests {
 
         let read_value_1: u32 = 0b0001_0010_0011_0100_0101_0110_0111_1000;
         let read_value_2: u32 = 0b1001_1010_1011_1100_1101_1110_1111_0000;
-        let write_value: u32 =  0b1001_1010_1011_1100_1101_1110_1111_1000;
+        let write_value: u32 = 0b1001_1010_1011_1100_1101_1110_1111_1000;
 
         assert_eq!(read_value_1, 0x12345678);
         assert_eq!(read_value_2, 0x9ABCDEF0);
-        assert_eq!(write_value,  0x9ABCDEF8);
+        assert_eq!(write_value, 0x9ABCDEF8);
 
-        let trace_step = load_trace_step_in_stack(&mut stack, write_address, write_value, 0x8000_00c4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(&mut stack, 0xA000_0024, read_value_1, 0xA000_0028, read_value_2, // r1, v1, r2, v2
-            0x8000_00c0, 0, opcode); // pc, micro, opcode
+        let trace_step =
+            load_trace_step_in_stack(&mut stack, write_address, write_value, 0x8000_00c4, 0); // w, v, pc, micro
+        let trace_read = load_trace_read_in_stack(
+            &mut stack,
+            0xA000_0024,
+            read_value_1,
+            0xA000_0028,
+            read_value_2, // r1, v1, r2, v2
+            0x8000_00c0,
+            0,
+            opcode,
+        ); // pc, micro, opcode
 
         let program = ProgramSpec::new(BASE_REGISTER_ADDRESS);
         verify_execution(&mut stack, trace_step, trace_read, None, opcode, 0, program).unwrap();
@@ -1106,9 +1477,18 @@ mod tests {
         let read_1_value = 0b0000_0000_0000_0100;
         let write_value = 0b0000_0000_0100_0000; // left shifted by 4
 
-        let trace_step = load_trace_step_in_stack(&mut stack, 0xA000_002C, write_value, 0x8000_00C4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(&mut stack, 0xA000_0024, read_1_value, 0, 0, // r1, v1, r2, v2
-            0x8000_00C0, 0, opcode); // pc, micro, opcode
+        let trace_step =
+            load_trace_step_in_stack(&mut stack, 0xA000_002C, write_value, 0x8000_00C4, 0); // w, v, pc, micro
+        let trace_read = load_trace_read_in_stack(
+            &mut stack,
+            0xA000_0024,
+            read_1_value,
+            0,
+            0, // r1, v1, r2, v2
+            0x8000_00C0,
+            0,
+            opcode,
+        ); // pc, micro, opcode
 
         let program = ProgramSpec::new(BASE_REGISTER_ADDRESS);
         verify_execution(&mut stack, trace_step, trace_read, None, opcode, 0, program).unwrap();
@@ -1117,7 +1497,6 @@ mod tests {
 
         assert!(stack.run().success);
     }
-
 
     #[test]
     fn test_sll() {
@@ -1136,12 +1515,21 @@ mod tests {
 
         let read_1_value = 0b0000_0000_0000_0100;
         let read_2_value = 0x1;
-        let write_value =  0b0000_0000_0000_1000; // left shifted by 1
+        let write_value = 0b0000_0000_0000_1000; // left shifted by 1
 
         // reg_addr = BASE_REGISTER_ADDRESS + reg_num * 4;
-        let trace_step = load_trace_step_in_stack(&mut stack, 0xA000_002C, write_value, 0x8000_00C4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(&mut stack, 0xA000_0024, read_1_value, 0xA000_0028, read_2_value, // r1, v1, r2, v2
-            0x8000_00C0, 0, opcode); // pc, micro, opcode
+        let trace_step =
+            load_trace_step_in_stack(&mut stack, 0xA000_002C, write_value, 0x8000_00C4, 0); // w, v, pc, micro
+        let trace_read = load_trace_read_in_stack(
+            &mut stack,
+            0xA000_0024,
+            read_1_value,
+            0xA000_0028,
+            read_2_value, // r1, v1, r2, v2
+            0x8000_00C0,
+            0,
+            opcode,
+        ); // pc, micro, opcode
 
         let program = ProgramSpec::new(BASE_REGISTER_ADDRESS);
         verify_execution(&mut stack, trace_step, trace_read, None, opcode, 0, program).unwrap();
@@ -1168,12 +1556,21 @@ mod tests {
 
         let read_1_value = 0b0000_0000_0000_0100;
         let read_2_value = 0x1;
-        let write_value =  0b0000_0000_0000_0010; // right shifted by 1
+        let write_value = 0b0000_0000_0000_0010; // right shifted by 1
 
         // reg_addr = BASE_REGISTER_ADDRESS + reg_num * 4;
-        let trace_step = load_trace_step_in_stack(&mut stack, 0xA000_002C, write_value, 0x8000_00C4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(&mut stack, 0xA000_0024, read_1_value, 0xA000_0028, read_2_value, // r1, v1, r2, v2
-            0x8000_00C0, 0, opcode); // pc, micro, opcode
+        let trace_step =
+            load_trace_step_in_stack(&mut stack, 0xA000_002C, write_value, 0x8000_00C4, 0); // w, v, pc, micro
+        let trace_read = load_trace_read_in_stack(
+            &mut stack,
+            0xA000_0024,
+            read_1_value,
+            0xA000_0028,
+            read_2_value, // r1, v1, r2, v2
+            0x8000_00C0,
+            0,
+            opcode,
+        ); // pc, micro, opcode
 
         let program = ProgramSpec::new(BASE_REGISTER_ADDRESS);
         verify_execution(&mut stack, trace_step, trace_read, None, opcode, 0, program).unwrap();
@@ -1200,12 +1597,21 @@ mod tests {
 
         let read_1_value = 0b10000000000000000000000000000000;
         let read_2_value = 0x1;
-        let write_value =  0b11000000000000000000000000000000; // right-arithmetical shifted by 1
+        let write_value = 0b11000000000000000000000000000000; // right-arithmetical shifted by 1
 
         // reg_addr = BASE_REGISTER_ADDRESS + reg_num * 4;
-        let trace_step = load_trace_step_in_stack(&mut stack, 0xA000_002C, write_value, 0x8000_00C4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(&mut stack, 0xA000_0024, read_1_value, 0xA000_0028, read_2_value, // r1, v1, r2, v2
-            0x8000_00C0, 0, opcode); // pc, micro, opcode
+        let trace_step =
+            load_trace_step_in_stack(&mut stack, 0xA000_002C, write_value, 0x8000_00C4, 0); // w, v, pc, micro
+        let trace_read = load_trace_read_in_stack(
+            &mut stack,
+            0xA000_0024,
+            read_1_value,
+            0xA000_0028,
+            read_2_value, // r1, v1, r2, v2
+            0x8000_00C0,
+            0,
+            opcode,
+        ); // pc, micro, opcode
 
         let program = ProgramSpec::new(BASE_REGISTER_ADDRESS);
         verify_execution(&mut stack, trace_step, trace_read, None, opcode, 0, program).unwrap();
@@ -1218,5 +1624,4 @@ mod tests {
     fn reg_address(addr_num: u32) -> u32 {
         BASE_REGISTER_ADDRESS + addr_num * 4
     }
-
 }

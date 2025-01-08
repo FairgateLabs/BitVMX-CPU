@@ -1,6 +1,5 @@
 use bitcoin_script_stack::stack::{StackTracker, StackVariable};
 
-
 #[derive(Debug, Clone, Copy)]
 pub struct TraceRead {
     pub read_1_add: StackVariable,
@@ -64,10 +63,14 @@ impl Default for TraceStep {
             micro: StackVariable::null(),
         }
     }
-
 }
 impl TraceStep {
-    pub fn new(write_1_add: StackVariable, write_1_value: StackVariable, program_counter: StackVariable, micro: StackVariable) -> TraceStep {
+    pub fn new(
+        write_1_add: StackVariable,
+        write_1_value: StackVariable,
+        program_counter: StackVariable,
+        micro: StackVariable,
+    ) -> TraceStep {
         TraceStep {
             write_1_add,
             write_1_value,
@@ -85,7 +88,7 @@ impl TraceStep {
             stack.from_altstack();
         }
     }
-    
+
     pub fn define(stack: &mut StackTracker) -> TraceStep {
         let write_1_add = stack.define(8, "write_1_add");
         let write_1_value = stack.define(8, "write_1_value");
@@ -95,8 +98,7 @@ impl TraceStep {
             write_1_add,
             write_1_value,
             program_counter,
-            micro
+            micro,
         }
     }
-
 }

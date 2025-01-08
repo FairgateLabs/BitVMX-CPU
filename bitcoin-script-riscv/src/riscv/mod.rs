@@ -1,9 +1,9 @@
+pub mod decoder;
+pub mod instruction_mapping;
 pub mod instructions;
 pub mod instructions_load;
 pub mod instructions_store;
-pub mod instruction_mapping;
 pub mod memory_alignment;
+pub mod operations;
 pub mod script_utils;
 pub mod trace;
-pub mod decoder;
-pub mod operations;

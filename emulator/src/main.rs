@@ -1,5 +1,10 @@
 use bitcoin_script_riscv::riscv::instruction_mapping::create_verification_script_mapping;
-use emulator::{executor::{fetcher::execute_program, utils::FailReads}, loader::program::{generate_rom_commitment, load_elf, Program}, ExecutionResult, constants::REGISTERS_BASE_ADDRESS};
+use emulator::{
+    constants::REGISTERS_BASE_ADDRESS,
+    executor::{fetcher::execute_program, utils::FailReads},
+    loader::program::{generate_rom_commitment, load_elf, Program},
+    ExecutionResult,
+};
 use hex::FromHex;
 
 use clap::{Parser, Subcommand};
@@ -15,12 +20,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-
     ///Generate the instruction mapping
     InstructionMapping,
 
     ///Generate the ROM commitment
-    GenerateRomCommitment{
+    GenerateRomCommitment {
         /// ELF file to load
         #[arg(short, long, value_name = "FILE")]
         elf: String,
@@ -28,13 +32,10 @@ enum Commands {
         /// Show sections
         #[arg(long)]
         sections: bool,
-
     },
 
-
     ///Execute ELF file
-    Execute{
-
+    Execute {
         /// Outputs the trace
         /// ELF file to load
         #[arg(short, long, value_name = "FILE")]
@@ -76,7 +77,7 @@ enum Commands {
         #[arg(long, default_value = "false")]
         no_mapping: bool,
 
-        /// Print program stdout 
+        /// Print program stdout
         #[arg(long)]
         stdout: bool,
 
@@ -119,37 +120,57 @@ enum Commands {
         /// Fail while reading the pc at the given step
         #[arg(long)]
         fail_pc: Option<u64>,
-
     },
-
 }
 
-
 fn main() -> Result<(), ExecutionResult> {
-
     tracing_subscriber::fmt()
-    .without_time()
-    .with_target(false)
-    .with_max_level(Level::DEBUG)
-    .init();
+        .without_time()
+        .with_target(false)
+        .with_max_level(Level::DEBUG)
+        .init();
 
     let cli = Cli::parse();
     match &cli.command {
         Some(Commands::InstructionMapping) => {
             let mapping = create_verification_script_mapping(REGISTERS_BASE_ADDRESS);
             for (key, (script, requires_witness)) in mapping {
-                info!("Key: {}, Script: {:?}, Size: {}, Witness: {}", key, script.to_hex_string(), script.len(), requires_witness);
+                info!(
+                    "Key: {}, Script: {:?}, Size: {}, Witness: {}",
+                    key,
+                    script.to_hex_string(),
+                    script.len(),
+                    requires_witness
+                );
             }
-        },
+        }
         Some(Commands::GenerateRomCommitment { elf, sections }) => {
             let program = load_elf(elf, *sections)?;
             generate_rom_commitment(&program);
-        },
-        Some(Commands::Execute { elf, step, limit, input, input_section,
-            input_as_little, no_hash, trace, verify, no_mapping, stdout , debug, sections,
-            checkpoints, fail_hash, fail_execute, list,
-            fail_read_1: fail_read_1_args, fail_read_2: fail_read_2_args, dump_mem, fail_pc }) => {
-
+        }
+        Some(Commands::Execute {
+            elf,
+            step,
+            limit,
+            input,
+            input_section,
+            input_as_little,
+            no_hash,
+            trace,
+            verify,
+            no_mapping,
+            stdout,
+            debug,
+            sections,
+            checkpoints,
+            fail_hash,
+            fail_execute,
+            list,
+            fail_read_1: fail_read_1_args,
+            fail_read_2: fail_read_2_args,
+            dump_mem,
+            fail_pc,
+        }) => {
             if elf.is_none() && step.is_none() {
                 error!("To execute an elf file or a checkpoint step is required");
                 return Err(ExecutionResult::Error);
@@ -161,48 +182,66 @@ fn main() -> Result<(), ExecutionResult> {
 
             let (mut program, input, checkpoints) = match elf {
                 Some(elf) => {
-                    let input = input.clone().map(|i| Vec::from_hex(i).unwrap()).unwrap_or(Vec::new());
+                    let input = input
+                        .clone()
+                        .map(|i| Vec::from_hex(i).unwrap())
+                        .unwrap_or(Vec::new());
                     let program = load_elf(elf, *sections)?;
                     if *debug {
                         info!("Execute program {} with input: {:?}", elf, input);
                     }
                     (program, input, *checkpoints)
-                },
+                }
                 None => {
                     let step = step.expect("Step is expected");
-                    let program = Program::deserialize_from_file(&format!("checkpoint.{}.json", step));
+                    let program =
+                        Program::deserialize_from_file(&format!("checkpoint.{}.json", step));
                     if *debug {
                         info!("Execute from checkpoint: {} up to: {:?}", step, limit);
                     }
                     (program, vec![], false)
                 }
-
             };
 
             let numbers = match list {
                 Some(list) => {
-                    let numbers: Result<Vec<u64>, _> = list
-                        .split(',')
-                        .map(str::trim)
-                        .map(str::parse)
-                        .collect();
+                    let numbers: Result<Vec<u64>, _> =
+                        list.split(',').map(str::trim).map(str::parse).collect();
                     Some(numbers.unwrap())
-                },
-                None => None
+                }
+                None => None,
             };
 
             let fail_reads = if fail_read_1_args.is_some() || fail_read_2_args.is_some() {
-                Some(FailReads::new(fail_read_1_args.as_ref(), fail_read_2_args.as_ref()))
+                Some(FailReads::new(
+                    fail_read_1_args.as_ref(),
+                    fail_read_2_args.as_ref(),
+                ))
             } else {
                 None
             };
 
-            execute_program(&mut program, input, &input_section.clone().unwrap_or(".input".to_string()),
-                            *input_as_little, checkpoints, *limit, *trace,
-                            *verify, !*no_mapping, *stdout, *debug,
-                            *no_hash, *fail_hash, *fail_execute, numbers, *dump_mem, fail_reads,
-                            *fail_pc)?;
-        },
+            execute_program(
+                &mut program,
+                input,
+                &input_section.clone().unwrap_or(".input".to_string()),
+                *input_as_little,
+                checkpoints,
+                *limit,
+                *trace,
+                *verify,
+                !*no_mapping,
+                *stdout,
+                *debug,
+                *no_hash,
+                *fail_hash,
+                *fail_execute,
+                numbers,
+                *dump_mem,
+                fail_reads,
+                *fail_pc,
+            )?;
+        }
         None => {
             error!("No command specified");
         }
@@ -210,4 +249,3 @@ fn main() -> Result<(), ExecutionResult> {
 
     Ok(())
 }
-
