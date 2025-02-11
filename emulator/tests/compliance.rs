@@ -12,7 +12,7 @@ fn verify_file(
         Vec::new(),
         ".bss",
         false,
-        false,
+        &None,
         None,
         false,
         validate_on_chain,

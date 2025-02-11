@@ -17,7 +17,7 @@ pub fn execute_program(
     input: Vec<u8>,
     input_section: &str,
     little_endian: bool,
-    save_checkpoints: bool,
+    checkpoint_path: &Option<String>,
     limit_step: Option<u64>,
     print_trace: bool,
     validate_on_chain: bool,
@@ -56,8 +56,10 @@ pub fn execute_program(
 
     let mut count = 0;
 
-    if save_checkpoints {
-        Program::serialize_to_file(&program, "checkpoint.0.json");
+    if let Some(path) = &checkpoint_path {
+        //create path if it does not exist
+        std::fs::create_dir_all(path).unwrap();
+        Program::serialize_to_file(&program, &format!("{}/checkpoint.0.json", path));
     }
 
     let ret = loop {
@@ -143,10 +145,13 @@ pub fn execute_program(
             }
         }
 
-        if save_checkpoints
-            && (program.step % CHECKPOINT_SIZE == 0 || trace.is_err() || program.halt)
-        {
-            Program::serialize_to_file(&program, &format!("checkpoint.{}.json", program.step));
+        if let Some(path) = &checkpoint_path {
+            if program.step % CHECKPOINT_SIZE == 0 || trace.is_err() || program.halt {
+                Program::serialize_to_file(
+                    &program,
+                    &format!("{}/checkpoint.{}.json", path, program.step),
+                );
+            }
         }
 
         if trace.is_ok() && validate_on_chain {

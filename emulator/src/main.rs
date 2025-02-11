@@ -89,9 +89,9 @@ enum Commands {
         #[arg(long)]
         sections: bool,
 
-        /// Checkpoints
+        /// Checkpoint path
         #[arg(short, long)]
-        checkpoints: bool,
+        checkpoint_path: Option<String>,
 
         /// Fail producing hash for a specific step
         #[arg(long)]
@@ -162,7 +162,7 @@ fn main() -> Result<(), ExecutionResult> {
             stdout,
             debug,
             sections,
-            checkpoints,
+            checkpoint_path,
             fail_hash,
             fail_execute,
             list,
@@ -180,7 +180,7 @@ fn main() -> Result<(), ExecutionResult> {
                 return Err(ExecutionResult::Error);
             }
 
-            let (mut program, input, checkpoints) = match elf {
+            let (mut program, input) = match elf {
                 Some(elf) => {
                     let input = input
                         .clone()
@@ -190,16 +190,21 @@ fn main() -> Result<(), ExecutionResult> {
                     if *debug {
                         info!("Execute program {} with input: {:?}", elf, input);
                     }
-                    (program, input, *checkpoints)
+                    (program, input)
                 }
                 None => {
                     let step = step.expect("Step is expected");
-                    let program =
-                        Program::deserialize_from_file(&format!("checkpoint.{}.json", step));
+                    let path = checkpoint_path
+                        .as_ref()
+                        .expect("Checkpoint path is expected");
+                    let program = Program::deserialize_from_file(&format!(
+                        "{}/checkpoint.{}.json",
+                        path, step
+                    ));
                     if *debug {
                         info!("Execute from checkpoint: {} up to: {:?}", step, limit);
                     }
-                    (program, vec![], false)
+                    (program, vec![])
                 }
             };
 
@@ -226,7 +231,7 @@ fn main() -> Result<(), ExecutionResult> {
                 input,
                 &input_section.clone().unwrap_or(".input".to_string()),
                 *input_as_little,
-                checkpoints,
+                &checkpoint_path,
                 *limit,
                 *trace,
                 *verify,
