@@ -37,10 +37,15 @@ pub fn pc_next(stack: &mut StackTracker, tables: &StackTables, pc: StackVariable
 
     stack.rename(last, "write_pc");
     stack.join_count(&mut last, 7)
-
 }
 
-pub fn add_with_bit_extension(stack: &mut StackTracker, tables: &StackTables, value: StackVariable, to_add: &mut StackVariable, bit_extension: StackVariable) -> StackVariable {
+pub fn add_with_bit_extension(
+    stack: &mut StackTracker,
+    tables: &StackTables,
+    value: StackVariable,
+    to_add: &mut StackVariable,
+    bit_extension: StackVariable,
+) -> StackVariable {
     stack.set_breakpoint("add_with_bit_extension");
 
     //move the value and split the nibbles
@@ -56,13 +61,12 @@ pub fn add_with_bit_extension(stack: &mut StackTracker, tables: &StackTables, va
 
         if i < add_size {
             stack.move_var_sub_n(to_add, add_size - i - 1);
-        } else if i < 7 { 
-                stack.copy_var(bit_extension);
+        } else if i < 7 {
+            stack.copy_var(bit_extension);
         } else {
             stack.move_var(bit_extension);
         }
 
-        
         stack.op_add();
 
         if i < 7 {
@@ -75,7 +79,6 @@ pub fn add_with_bit_extension(stack: &mut StackTracker, tables: &StackTables, va
             stack.to_altstack();
             stack.get_value_from_table(tables.quotient, None);
         }
-
     }
 
     for _ in 0..7 {
@@ -84,15 +87,17 @@ pub fn add_with_bit_extension(stack: &mut StackTracker, tables: &StackTables, va
 
     stack.rename(last, "add_bit_ext");
     stack.join_count(&mut last, 7)
-
-
 }
 
-
-pub fn sub(stack: &mut StackTracker, tables: &StackTables, value: StackVariable, to_sub: &mut StackVariable) -> StackVariable {
+pub fn sub(
+    stack: &mut StackTracker,
+    tables: &StackTables,
+    value: StackVariable,
+    to_sub: &mut StackVariable,
+) -> StackVariable {
     stack.set_breakpoint("sub");
 
-    stack.move_var(value);                                      // move the value and split nibbles
+    stack.move_var(value); // move the value and split nibbles
     stack.explode(value);
 
     let sub_size = to_sub.size();
@@ -100,50 +105,56 @@ pub fn sub(stack: &mut StackTracker, tables: &StackTables, value: StackVariable,
     for i in 0..8 {
         stack.move_var_sub_n(to_sub, sub_size - i - 1);
 
-        stack.op_sub();                                         // normal sub
+        stack.op_sub(); // normal sub
 
         if i > 0 {
-            stack.from_altstack();                              // get borrow from alt_stack
-            stack.op_sub();                                     // subtracts 0 or 1
+            stack.from_altstack(); // get borrow from alt_stack
+            stack.op_sub(); // subtracts 0 or 1
         }
 
-        stack.op_dup();                                         // save after normal sub to calculate borrow
-        stack.op_dup();                                         // used for op_add
-        stack.op_dup();                                         // used for ifless
-        if_less(stack, 0, 16, 0);                               // check if subtraction goes into negative number
-        stack.op_add();                                         // handle negative subtraction
+        stack.op_dup(); // save after normal sub to calculate borrow
+        stack.op_dup(); // used for op_add
+        stack.op_dup(); // used for ifless
+        if_less(stack, 0, 16, 0); // check if subtraction goes into negative number
+        stack.op_add(); // handle negative subtraction
 
         last = stack.get_value_from_table(tables.modulo, None); // wrap around 16
         if i < 7 {
-            stack.to_altstack();                                // save partial result into alt_stack
-            if_less(stack, 0, 1, 0);                            // calculate borrow with the initial subtraction
-            stack.to_altstack();                                // send borrow to alt_stack
-            stack.op_drop();                                    // drop normal sub
+            stack.to_altstack(); // save partial result into alt_stack
+            if_less(stack, 0, 1, 0); // calculate borrow with the initial subtraction
+            stack.to_altstack(); // send borrow to alt_stack
+            stack.op_drop(); // drop normal sub
         }
     }
 
-    stack.to_altstack();                                        // send last nibble to altstack
-    stack.op_drop();                                            // drop remaining elements 1/2
-    stack.op_drop();                                            // drop remaining elements 2/2
+    stack.to_altstack(); // send last nibble to altstack
+    stack.op_drop(); // drop remaining elements 1/2
+    stack.op_drop(); // drop remaining elements 2/2
 
     for _ in 0..8 {
-        stack.from_altstack();                                  // retrieve nibble from altstack
+        stack.from_altstack(); // retrieve nibble from altstack
     }
 
-    stack.join_count(&mut last, 7)                              // join nibbles to get the final result
+    stack.join_count(&mut last, 7) // join nibbles to get the final result
 }
 
-pub fn logic_with_bit_extension(stack: &mut StackTracker, tables: &StackTables, value: &mut StackVariable, to_add: &mut StackVariable, bit_extension: StackVariable, logic: LogicOperation) -> StackVariable {
+pub fn logic_with_bit_extension(
+    stack: &mut StackTracker,
+    tables: &StackTables,
+    value: &mut StackVariable,
+    to_add: &mut StackVariable,
+    bit_extension: StackVariable,
+    logic: LogicOperation,
+) -> StackVariable {
     stack.set_breakpoint(&format!("logic_{:?}_with_bit_extension", logic));
 
     let add_size = to_add.size();
     let extension_size = 8 - add_size;
 
     for i in 0..8 {
-
         stack.move_var_sub_n(value, 0);
         if i < extension_size {
-            if i < extension_size - 1 { 
+            if i < extension_size - 1 {
                 stack.copy_var(bit_extension);
             } else {
                 stack.move_var(bit_extension);
@@ -160,8 +171,18 @@ pub fn logic_with_bit_extension(stack: &mut StackTracker, tables: &StackTables, 
     stack.join_count(&mut first, 7)
 }
 
-pub fn shift_value_with_bits(stack: &mut StackTracker, value: &mut StackVariable, mut to_shift: StackVariable, right: bool, msb: bool) -> StackVariable {
-    stack.set_breakpoint(&format!("shift_{}{}", if right { "right" } else { "left" }, if msb { "_msb" } else { "" }));
+pub fn shift_value_with_bits(
+    stack: &mut StackTracker,
+    value: &mut StackVariable,
+    mut to_shift: StackVariable,
+    right: bool,
+    msb: bool,
+) -> StackVariable {
+    stack.set_breakpoint(&format!(
+        "shift_{}{}",
+        if right { "right" } else { "left" },
+        if msb { "_msb" } else { "" }
+    ));
 
     stack.move_var(to_shift);
     stack.explode(to_shift);
@@ -179,7 +200,7 @@ pub fn bit_extend(stack: &mut StackTracker, value: StackVariable) -> StackVariab
     stack.copy_var_sub_n(value, 0);
     let mut first = StackVariable::null();
     for i in 0..needed {
-        if i < needed-1 {
+        if i < needed - 1 {
             stack.op_dup();
         }
         let ret = if_greater(stack, 7, 0xF, 0);
@@ -195,8 +216,17 @@ pub fn bit_extend(stack: &mut StackTracker, value: StackVariable) -> StackVariab
     first
 }
 
-pub fn is_lower_than_slti(stack: &mut StackTracker, value: &mut StackVariable, than: StackVariable, unsigned: bool, immediate: bool) -> StackVariable {
-    stack.set_breakpoint(&format!("is_lower_{}", if unsigned { "unsigned" } else { "signed" }));
+pub fn is_lower_than_slti(
+    stack: &mut StackTracker,
+    value: &mut StackVariable,
+    than: StackVariable,
+    unsigned: bool,
+    immediate: bool,
+) -> StackVariable {
+    stack.set_breakpoint(&format!(
+        "is_lower_{}",
+        if unsigned { "unsigned" } else { "signed" }
+    ));
 
     stack.move_var(*value);
 
@@ -206,8 +236,7 @@ pub fn is_lower_than_slti(stack: &mut StackTracker, value: &mut StackVariable, t
         None
     };
 
-    let result = is_lower_than(stack, value, 
-        &mut than_extended.unwrap_or(than), unsigned);
+    let result = is_lower_than(stack, value, &mut than_extended.unwrap_or(than), unsigned);
     let mut first = stack.number(0);
     stack.op_dup();
     stack.op_2dup();
@@ -218,8 +247,19 @@ pub fn is_lower_than_slti(stack: &mut StackTracker, value: &mut StackVariable, t
     first
 }
 
-pub fn shift_value_with_tables(stack: &mut StackTracker, tables: &StackTables, value: &mut StackVariable, to_shift: &mut StackVariable, right: bool, msb: bool) -> StackVariable {
-    stack.set_breakpoint(&format!("shift_{}{}", if right { "right" } else { "left" }, if msb { "_msb" } else { "" }));
+pub fn shift_value_with_tables(
+    stack: &mut StackTracker,
+    tables: &StackTables,
+    value: &mut StackVariable,
+    to_shift: &mut StackVariable,
+    right: bool,
+    msb: bool,
+) -> StackVariable {
+    stack.set_breakpoint(&format!(
+        "shift_{}{}",
+        if right { "right" } else { "left" },
+        if msb { "_msb" } else { "" }
+    ));
 
     //shift the value to shift two nibbles to the right to divide by for and get
     //the ammount of nibbles that needs to be shifted
@@ -229,7 +269,8 @@ pub fn shift_value_with_tables(stack: &mut StackTracker, tables: &StackTables, v
     stack.rename(nibbles_to_shift, "nib_2_shift");
 
     //move the whole value the necessary amount of nibbles to the right
-    if !right { // is left
+    if !right {
+        // is left
         stack.move_var(*value);
     }
     let zero = stack.number(0); //TODO: use msb
@@ -251,12 +292,16 @@ pub fn shift_value_with_tables(stack: &mut StackTracker, tables: &StackTables, v
     }
     for i in (0..8).rev() {
         stack.number(i);
-        if i > 0 { stack.copy_var(nibbles_to_shift); } else { stack.move_var(nibbles_to_shift); }
+        if i > 0 {
+            stack.copy_var(nibbles_to_shift);
+        } else {
+            stack.move_var(nibbles_to_shift);
+        }
         stack.op_add();
         to_shift_parts.push(stack.get_value_from_table(first, None));
     }
     if !right {
-        to_shift_parts.push(stack.number(0)); 
+        to_shift_parts.push(stack.number(0));
     }
     let mut number = stack.join_count(&mut to_shift_parts[0], 8);
 
@@ -276,17 +321,20 @@ pub fn shift_value_with_tables(stack: &mut StackTracker, tables: &StackTables, v
     let mut ret = Vec::new();
     for i in 0..8 {
         stack.move_var_sub_n(&mut number, 0);
-        if i < 7 { stack.copy_var_sub_n(number, 0); } else { stack.move_var_sub_n(&mut number, 0); }
+        if i < 7 {
+            stack.copy_var_sub_n(number, 0);
+        } else {
+            stack.move_var_sub_n(&mut number, 0);
+        }
         stack.from_altstack();
         if i < 7 {
             stack.op_dup();
             stack.to_altstack();
-        } 
+        }
         ret.push(tables.shift_2nb_dynamic(stack, right));
     }
 
     stack.join_count(&mut ret[0], 7)
-
 }
 
 #[cfg(test)]
@@ -295,9 +343,8 @@ mod tests {
 
     use super::*;
 
-   #[test]
+    #[test]
     fn test_bit_extend() {
-
         let mut stack = StackTracker::new();
         let number = stack.byte(0x81);
         let mut extended = bit_extend(&mut stack, number);
@@ -311,12 +358,10 @@ mod tests {
 
         stack.op_true();
         assert!(stack.run().success);
-
     }
 
-   #[test]
+    #[test]
     fn test_shift() {
-
         let mut stack = StackTracker::new();
         let size = stack.get_script().len();
         let tables = StackTables::new(&mut stack, false, false, 0xf, 0xf, LOGIC_MASK_AND);
@@ -329,7 +374,8 @@ mod tests {
 
         let mut to_shift = stack.byte(shift);
 
-        let mut result = shift_value_with_tables(&mut stack, &tables, &mut value, &mut to_shift, true, false);
+        let mut result =
+            shift_value_with_tables(&mut stack, &tables, &mut value, &mut to_shift, true, false);
 
         let mut expected = stack.number_u32(expected);
 
@@ -341,13 +387,10 @@ mod tests {
         stack.op_true();
 
         assert!(stack.run().success);
-
-
     }
 
     #[test]
     fn test_logic_and() {
-
         let mut stack = StackTracker::new();
         let tables = StackTables::new(&mut stack, false, false, 0, 0, LOGIC_MASK_AND);
         let mut value = stack.number_u32(0x12FF_FFFF);
@@ -355,7 +398,14 @@ mod tests {
         let mut to_add = stack.byte(0x82);
         let bit_extension = stack.number(0);
 
-        let mut result = logic_with_bit_extension(&mut stack, &tables, &mut value, &mut to_add, bit_extension, LogicOperation::And);
+        let mut result = logic_with_bit_extension(
+            &mut stack,
+            &tables,
+            &mut value,
+            &mut to_add,
+            bit_extension,
+            LogicOperation::And,
+        );
 
         let mut expected = stack.number_u32(0x82);
 
@@ -366,14 +416,10 @@ mod tests {
         stack.op_true();
 
         assert!(stack.run().success);
-
-
     }
-
 
     #[test]
     fn test_logic_or() {
-
         let mut stack = StackTracker::new();
         let tables = StackTables::new(&mut stack, false, false, 0, 0, LOGIC_MASK_OR);
         let mut value = stack.number_u32(0x12FF_FF0F);
@@ -381,9 +427,16 @@ mod tests {
         let mut to_add = stack.byte(0x82);
         let bit_extension = stack.number(0);
 
-        let start  = stack.get_script().len();
-        let mut result = logic_with_bit_extension(&mut stack, &tables, &mut value, &mut to_add, bit_extension, LogicOperation::Or);
-        let end  = stack.get_script().len();
+        let start = stack.get_script().len();
+        let mut result = logic_with_bit_extension(
+            &mut stack,
+            &tables,
+            &mut value,
+            &mut to_add,
+            bit_extension,
+            LogicOperation::Or,
+        );
+        let end = stack.get_script().len();
         println!("Script size: {}", end - start);
 
         let mut expected = stack.number_u32(0x12FF_FF8F);
@@ -395,13 +448,10 @@ mod tests {
         stack.op_true();
 
         assert!(stack.run().success);
-
     }
-
 
     #[test]
     fn test_logic_xor() {
-
         let mut stack = StackTracker::new();
         let tables = StackTables::new(&mut stack, false, false, 0, 0, LOGIC_MASK_XOR);
         let mut value = stack.number_u32(0x12FF_FF0F);
@@ -409,9 +459,16 @@ mod tests {
         let mut to_add = stack.byte(0x82);
         let bit_extension = stack.number(0);
 
-        let start  = stack.get_script().len();
-        let mut result = logic_with_bit_extension(&mut stack, &tables, &mut value, &mut to_add, bit_extension, LogicOperation::Xor);
-        let end  = stack.get_script().len();
+        let start = stack.get_script().len();
+        let mut result = logic_with_bit_extension(
+            &mut stack,
+            &tables,
+            &mut value,
+            &mut to_add,
+            bit_extension,
+            LogicOperation::Xor,
+        );
+        let end = stack.get_script().len();
         println!("Script size: {}", end - start);
 
         let mut expected = stack.number_u32(0x12FF_FF8D);
@@ -423,7 +480,6 @@ mod tests {
         stack.op_true();
 
         assert!(stack.run().success);
-
     }
 
     #[test]
@@ -447,6 +503,4 @@ mod tests {
 
         assert!(stack.run().success);
     }
-
-
 }

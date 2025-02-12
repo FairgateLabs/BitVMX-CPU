@@ -168,12 +168,66 @@ fn test_load_byte(
 }
 
 #[rstest]
-#[case(rnd_range(), 0x14, rnd_range(), "lh", 0x1234EEEE, 0x12345678, 0xFFFFEEEE, 1)]
-#[case(rnd_range(), 0x14, rnd_range(), "lh", 0x12347D7D, 0x12345678, 0x00007D7D, 1)]
-#[case(rnd_range(), 0x15, rnd_range(), "lh", 0x12EEEE78, 0x12345678, 0xFFFFEEEE, 1)]
-#[case(rnd_range(), 0x16, rnd_range(), "lh", 0xEEEE5678, 0x12345678, 0xFFFFEEEE, 1)]
-#[case(rnd_range(), 0x17, rnd_range(), "lh", 0x0D345678, 0x12345678, 0x0000780D, 4)]
-#[case(rnd_range(), 0x14, rnd_range(), "lhu", 0x1234FDFD, 0x12345678, 0x0000FDFD, 1)]
+#[case(
+    rnd_range(),
+    0x14,
+    rnd_range(),
+    "lh",
+    0x1234EEEE,
+    0x12345678,
+    0xFFFFEEEE,
+    1
+)]
+#[case(
+    rnd_range(),
+    0x14,
+    rnd_range(),
+    "lh",
+    0x12347D7D,
+    0x12345678,
+    0x00007D7D,
+    1
+)]
+#[case(
+    rnd_range(),
+    0x15,
+    rnd_range(),
+    "lh",
+    0x12EEEE78,
+    0x12345678,
+    0xFFFFEEEE,
+    1
+)]
+#[case(
+    rnd_range(),
+    0x16,
+    rnd_range(),
+    "lh",
+    0xEEEE5678,
+    0x12345678,
+    0xFFFFEEEE,
+    1
+)]
+#[case(
+    rnd_range(),
+    0x17,
+    rnd_range(),
+    "lh",
+    0x0D345678,
+    0x12345678,
+    0x0000780D,
+    4
+)]
+#[case(
+    rnd_range(),
+    0x14,
+    rnd_range(),
+    "lhu",
+    0x1234FDFD,
+    0x12345678,
+    0x0000FDFD,
+    1
+)]
 fn test_load_half_word(
     #[case] rd: u32,
     #[case] imm_value: u32,
@@ -213,11 +267,56 @@ fn test_load_half_word(
 }
 
 #[rstest]
-#[case(rnd_range(), 0x14, rnd_range(), "lw", 0x12345678, 0x12345678, 0x12345678, 1)] // 0
-#[case(rnd_range(), 0x14, rnd_range(), "lw", 0x7D7D7D7D, 0x12345678, 0x7D7D7D7D, 1)] // 0
-#[case(rnd_range(), 0x15, rnd_range(), "lw", 0xFFFFFFFF, 0x12345678, 0x78FFFFFF, 4)] // -1
-#[case(rnd_range(), 0x16, rnd_range(), "lw", 0xFFFFFFFF, 0x12345678, 0x5678FFFF, 4)] // -2
-#[case(rnd_range(), 0x17, rnd_range(), "lw", 0xFFFFFFFF, 0x12345678, 0x345678FF, 4)] // -3
+#[case(
+    rnd_range(),
+    0x14,
+    rnd_range(),
+    "lw",
+    0x12345678,
+    0x12345678,
+    0x12345678,
+    1
+)] // 0
+#[case(
+    rnd_range(),
+    0x14,
+    rnd_range(),
+    "lw",
+    0x7D7D7D7D,
+    0x12345678,
+    0x7D7D7D7D,
+    1
+)] // 0
+#[case(
+    rnd_range(),
+    0x15,
+    rnd_range(),
+    "lw",
+    0xFFFFFFFF,
+    0x12345678,
+    0x78FFFFFF,
+    4
+)] // -1
+#[case(
+    rnd_range(),
+    0x16,
+    rnd_range(),
+    "lw",
+    0xFFFFFFFF,
+    0x12345678,
+    0x5678FFFF,
+    4
+)] // -2
+#[case(
+    rnd_range(),
+    0x17,
+    rnd_range(),
+    "lw",
+    0xFFFFFFFF,
+    0x12345678,
+    0x345678FF,
+    4
+)] // -3
 fn test_load_word(
     #[case] rd: u32,
     #[case] imm_value: u32,
