@@ -7,12 +7,10 @@ use super::{
 };
 
 pub fn load_modulo_4_table(stack: &mut StackTracker) -> StackVariable {
-    let mut modulo = Vec::new();
     for i in (0..16).rev() {
-        modulo.push(stack.number(i % 4));
+        stack.number(i % 4);
     }
-    stack.rename(modulo[0], "modulo_4_table");
-    stack.join_count(&mut modulo[0], 15)
+    stack.join_in_stack(16, None, Some("modulo_4_table"))
 }
 
 //get's the memory address to be read, and returns the aligned memory address and the alignment delta
@@ -20,7 +18,7 @@ pub fn align_memory(
     stack: &mut StackTracker,
     mem_address: StackVariable,
 ) -> (StackVariable, StackVariable) {
-    let mut parts = stack.explode(mem_address);
+    let parts = stack.explode(mem_address);
 
     let table = load_modulo_4_table(stack);
 
@@ -38,7 +36,7 @@ pub fn align_memory(
     stack.drop(table);
 
     stack.from_altstack(); // address (x-(x%4)) | (x%4)
-    let aligned = stack.join_count(&mut parts[0], 7);
+    let aligned = stack.join_count(parts[0], 7);
     stack.rename(aligned, "aligned");
     let alignment = stack.from_altstack();
     stack.rename(alignment, "alignment");
@@ -102,9 +100,9 @@ pub fn choose_nibbles(
     }
 
     if unsigned {
-        let mut partial = number_u32_partial(stack, 0x0000_0000, pre_pad);
+        let partial = number_u32_partial(stack, 0x0000_0000, pre_pad);
         stack.move_var(result);
-        stack.join_count(&mut partial, 1)
+        stack.join_count(partial, 1)
     } else {
         bit_extend(stack, result)
     }
@@ -207,11 +205,11 @@ mod tests {
     fn test_align_memory() {
         let mut stack = StackTracker::new();
         let address = stack.number_u32(0x0000_0003);
-        let (mut aligned, _) = align_memory(&mut stack, address);
+        let (aligned, _) = align_memory(&mut stack, address);
         stack.number(3);
         stack.op_equalverify();
-        let mut expected = stack.number_u32(0x0000_0000);
-        stack.equals(&mut aligned, true, &mut expected, true);
+        let expected = stack.number_u32(0x0000_0000);
+        stack.equals(aligned, true, expected, true);
         stack.op_true();
         assert!(stack.run().success);
     }
@@ -220,9 +218,9 @@ mod tests {
         let mut stack = StackTracker::new();
         let value = stack.number_u32(number);
         let alignment = stack.number(alignment);
-        let mut result = choose_nibbles(&mut stack, value, alignment, 2, 0, 6, unsigned, 0);
-        let mut expected = stack.number_u32(expected);
-        stack.equals(&mut result, true, &mut expected, true);
+        let result = choose_nibbles(&mut stack, value, alignment, 2, 0, 6, unsigned, 0);
+        let expected = stack.number_u32(expected);
+        stack.equals(result, true, expected, true);
         stack.op_true();
         assert!(stack.run().success);
     }
@@ -242,9 +240,9 @@ mod tests {
         let mut stack = StackTracker::new();
         let value = stack.number_u32(number);
         let alignment = stack.number(alignment);
-        let mut result = choose_nibbles(&mut stack, value, alignment, 4, 2, 4, unsigned, 0);
-        let mut expected = stack.number_u32(expected);
-        stack.equals(&mut result, true, &mut expected, true);
+        let result = choose_nibbles(&mut stack, value, alignment, 4, 2, 4, unsigned, 0);
+        let expected = stack.number_u32(expected);
+        stack.equals(result, true, expected, true);
         stack.op_true();
         assert!(stack.run().success);
     }
@@ -263,9 +261,9 @@ mod tests {
         let mut stack = StackTracker::new();
         let value = stack.number_u32(number);
         let alignment = stack.number(alignment);
-        let mut result = choose_nibbles(&mut stack, value, alignment, 4, 0, 4, unsigned, 8);
-        let mut expected = stack.number_u32(expected);
-        stack.equals(&mut result, true, &mut expected, true);
+        let result = choose_nibbles(&mut stack, value, alignment, 4, 0, 4, unsigned, 8);
+        let expected = stack.number_u32(expected);
+        stack.equals(result, true, expected, true);
         stack.op_true();
         assert!(stack.run().success);
     }
@@ -288,9 +286,9 @@ mod tests {
         let mut stack = StackTracker::new();
         let value = stack.number_u32(number);
         let alignment = stack.number(alignment);
-        let mut result = choose_nibbles(&mut stack, value, alignment, 8, max_extra, 0, true, post);
-        let mut expected = stack.number_u32(expected);
-        stack.equals(&mut result, true, &mut expected, true);
+        let result = choose_nibbles(&mut stack, value, alignment, 8, max_extra, 0, true, post);
+        let expected = stack.number_u32(expected);
+        stack.equals(result, true, expected, true);
         stack.op_true();
         assert!(stack.run().success);
     }

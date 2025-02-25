@@ -12,7 +12,7 @@ use super::{
 pub fn op_load(
     instruction: &Instruction,
     stack: &mut StackTracker,
-    trace_read: &mut TraceRead,
+    trace_read: &TraceRead,
     micro: u8,
     base_register_address: u32,
 ) -> TraceStep {
@@ -28,7 +28,7 @@ pub fn op_load(
 pub fn op_load_micro_0(
     instruction: &Instruction,
     stack: &mut StackTracker,
-    trace_read: &mut TraceRead,
+    trace_read: &TraceRead,
     micro: u8,
     base_register_address: u32,
 ) -> TraceStep {
@@ -45,12 +45,12 @@ pub fn op_load_micro_0(
 
     stack.set_breakpoint(&format!("op_{:?}", instruction));
 
-    let (mut imm, rs1, rd, bit_extension) =
+    let (imm, rs1, rd, bit_extension) =
         decode_i_type(stack, &tables, trace_read.opcode, func3, 0x3, None);
 
     stack.move_var(trace_read.micro);
-    let mut expected_micro = stack.number(0);
-    stack.equals(&mut trace_read.micro, true, &mut expected_micro, true);
+    let expected_micro = stack.number(0);
+    stack.equals(trace_read.micro, true, expected_micro, true);
 
     // assert rs1 + base_register_address == read_1 address
     validate_register_address(stack, trace_read.read_1_add, rs1, base_register_address);
@@ -58,13 +58,8 @@ pub fn op_load_micro_0(
     move_and_drop(stack, trace_read.read_1_add);
 
     //assert read_2_add = read_1_value + imm
-    let post_mem_to_read = add_with_bit_extension(
-        stack,
-        &tables,
-        trace_read.read_1_value,
-        &mut imm,
-        bit_extension,
-    );
+    let post_mem_to_read =
+        add_with_bit_extension(stack, &tables, trace_read.read_1_value, imm, bit_extension);
 
     //get the aligned memory address and the alignment offset
     let (aligned, alignment) = align_memory(stack, post_mem_to_read);
@@ -85,7 +80,7 @@ pub fn op_load_micro_0(
         rd,
         aligned,
         alignment,
-        *trace_read,
+        trace_read,
         micro,
         base_register_address,
     );
@@ -96,7 +91,7 @@ pub fn op_load_micro_0(
         rd,
         aligned,
         alignment,
-        *trace_read,
+        trace_read,
         micro,
         base_register_address,
     );
@@ -123,9 +118,9 @@ pub fn op_load_micro_0_missaligned(
     stack: &mut StackTracker,
     tables: &StackTables,
     rd: StackVariable,
-    mut aligned: StackVariable,
+    aligned: StackVariable,
     alignment: StackVariable,
-    mut trace_read: TraceRead,
+    trace_read: &TraceRead,
     _micro: u8,
     base_register_address: u32,
 ) -> TraceStep {
@@ -142,7 +137,7 @@ pub fn op_load_micro_0_missaligned(
     stack.to_altstack();
     //assert read_2_add with expected memory read
 
-    stack.equals(&mut trace_read.read_2_add, true, &mut aligned, true);
+    stack.equals(trace_read.read_2_add, true, aligned, true);
 
     //generate the write address
     let write_addr = stack.number_u32(base_register_address + 0x80); //address of AUX1
@@ -184,9 +179,9 @@ pub fn op_load_micro_0_aligned(
     stack: &mut StackTracker,
     tables: &StackTables,
     rd: StackVariable,
-    mut aligned: StackVariable,
+    aligned: StackVariable,
     alignment: StackVariable,
-    mut trace_read: TraceRead,
+    trace_read: &TraceRead,
     _micro: u8,
     base_register_address: u32,
 ) -> TraceStep {
@@ -203,12 +198,12 @@ pub fn op_load_micro_0_aligned(
     stack.to_altstack();
     //assert read_2_add with expected memory read
 
-    stack.equals(&mut trace_read.read_2_add, true, &mut aligned, true);
+    stack.equals(trace_read.read_2_add, true, aligned, true);
 
     //generate the write address
-    let mut write_addr = number_u32_partial(stack, base_register_address, 6);
+    let write_addr = number_u32_partial(stack, base_register_address, 6);
     stack.move_var(rd);
-    stack.join(&mut write_addr);
+    stack.join(write_addr);
     stack.rename(write_addr, "write_add");
 
     //calculate the byte to be stored (with proper bit extension)
@@ -241,7 +236,7 @@ pub fn op_load_micro_0_aligned(
 pub fn op_load_micro_1(
     instruction: &Instruction,
     stack: &mut StackTracker,
-    trace_read: &mut TraceRead,
+    trace_read: &TraceRead,
     _micro: u8,
     base_register_address: u32,
 ) -> TraceStep {
@@ -256,12 +251,12 @@ pub fn op_load_micro_1(
 
     stack.set_breakpoint(&format!("op_{:?}", instruction));
 
-    let (mut imm, rs1, rd, bit_extension) =
+    let (imm, rs1, rd, bit_extension) =
         decode_i_type(stack, &tables, trace_read.opcode, func3, 0x3, None);
 
     stack.move_var(trace_read.micro);
-    let mut expected_micro = stack.number(1);
-    stack.equals(&mut trace_read.micro, true, &mut expected_micro, true);
+    let expected_micro = stack.number(1);
+    stack.equals(trace_read.micro, true, expected_micro, true);
 
     validate_register_address(stack, trace_read.read_1_add, rs1, base_register_address);
     move_and_drop(stack, rs1); //This should be consumed
@@ -273,26 +268,20 @@ pub fn op_load_micro_1(
     move_and_drop(stack, rd);
 
     //assert read_2_add = read_1_value + imm
-    let post_mem_to_read = add_with_bit_extension(
-        stack,
-        &tables,
-        trace_read.read_1_value,
-        &mut imm,
-        bit_extension,
-    );
+    let post_mem_to_read =
+        add_with_bit_extension(stack, &tables, trace_read.read_1_value, imm, bit_extension);
 
     //get the aligned memory address and the alignment offset
     let (aligned, alignment) = align_memory(stack, post_mem_to_read);
     //save the alignment
     stack.to_altstack();
     //assert read_2_add with expected memory read
-    let mut add_4 = stack.number(4);
+    let add_4 = stack.number(4);
     let bit_extension = stack.number(0);
 
-    let mut algined_plus_4 =
-        add_with_bit_extension(stack, &tables, aligned, &mut add_4, bit_extension);
+    let algined_plus_4 = add_with_bit_extension(stack, &tables, aligned, add_4, bit_extension);
 
-    stack.equals(&mut trace_read.read_2_add, true, &mut algined_plus_4, true);
+    stack.equals(trace_read.read_2_add, true, algined_plus_4, true);
 
     //calculate the byte to be stored (with proper bit extension)
     stack.move_var(trace_read.read_2_value);
@@ -325,7 +314,7 @@ pub fn op_load_micro_1(
 pub fn op_load_micro_2(
     instruction: &Instruction,
     stack: &mut StackTracker,
-    trace_read: &mut TraceRead,
+    trace_read: &TraceRead,
     _micro: u8,
     base_register_address: u32,
 ) -> TraceStep {
@@ -342,19 +331,19 @@ pub fn op_load_micro_2(
         decode_i_type(stack, &tables, trace_read.opcode, func3, 0x3, None);
 
     stack.move_var(trace_read.micro);
-    let mut expected_micro = stack.number(2);
-    stack.equals(&mut trace_read.micro, true, &mut expected_micro, true);
+    let expected_micro = stack.number(2);
+    stack.equals(trace_read.micro, true, expected_micro, true);
 
     move_and_drop(stack, rs1);
     move_and_drop(stack, rd);
     move_and_drop(stack, imm);
     move_and_drop(stack, bit_extension);
 
-    let mut expected_read_1 = stack.number_u32(base_register_address + 0x80);
-    stack.equals(&mut trace_read.read_1_add, true, &mut expected_read_1, true);
+    let expected_read_1 = stack.number_u32(base_register_address + 0x80);
+    stack.equals(trace_read.read_1_add, true, expected_read_1, true);
 
-    let mut expected_read_2 = stack.number_u32(base_register_address + 0x84);
-    stack.equals(&mut trace_read.read_2_add, true, &mut expected_read_2, true);
+    let expected_read_2 = stack.number_u32(base_register_address + 0x84);
+    stack.equals(trace_read.read_2_add, true, expected_read_2, true);
 
     //generate the write address
     let write_addr = stack.number_u32(base_register_address + 0x80); //address of AUX1
@@ -363,8 +352,8 @@ pub fn op_load_micro_2(
     let write_value = logic_with_bit_extension(
         stack,
         &tables,
-        &mut trace_read.read_1_value,
-        &mut trace_read.read_2_value,
+        trace_read.read_1_value,
+        trace_read.read_2_value,
         StackVariable::null(),
         LogicOperation::Or,
     );
@@ -386,7 +375,7 @@ pub fn op_load_micro_2(
 pub fn op_load_micro_3(
     instruction: &Instruction,
     stack: &mut StackTracker,
-    trace_read: &mut TraceRead,
+    trace_read: &TraceRead,
     _micro: u8,
     base_register_address: u32,
 ) -> TraceStep {
@@ -409,30 +398,20 @@ pub fn op_load_micro_3(
     stack.from_altstack();
 
     stack.move_var(trace_read.micro);
-    let mut expected_micro = stack.number(3);
-    stack.equals(&mut trace_read.micro, true, &mut expected_micro, true);
+    let expected_micro = stack.number(3);
+    stack.equals(trace_read.micro, true, expected_micro, true);
 
-    let mut expected_read_1 = stack.number_u32(base_register_address + 0x80);
-    stack.equals(&mut trace_read.read_1_add, true, &mut expected_read_1, true);
+    let expected_read_1 = stack.number_u32(base_register_address + 0x80);
+    stack.equals(trace_read.read_1_add, true, expected_read_1, true);
 
-    let mut expected_read_2_addr = stack.number_u32(0);
-    stack.equals(
-        &mut trace_read.read_2_add,
-        true,
-        &mut expected_read_2_addr,
-        true,
-    );
-    let mut expected_read_2_value = stack.number_u32(0);
-    stack.equals(
-        &mut trace_read.read_2_value,
-        true,
-        &mut expected_read_2_value,
-        true,
-    );
+    let expected_read_2_addr = stack.number_u32(0);
+    stack.equals(trace_read.read_2_add, true, expected_read_2_addr, true);
+    let expected_read_2_value = stack.number_u32(0);
+    stack.equals(trace_read.read_2_value, true, expected_read_2_value, true);
 
-    let mut write_addr = number_u32_partial(stack, base_register_address, 6);
+    let write_addr = number_u32_partial(stack, base_register_address, 6);
     stack.move_var(rd);
-    stack.join(&mut write_addr);
+    stack.join(write_addr);
     stack.rename(write_addr, "write_add");
 
     let write_value = stack.move_var(trace_read.read_1_value);

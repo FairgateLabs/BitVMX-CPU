@@ -25,16 +25,16 @@ pub fn reverse_4_from_stack(stack: &mut StackTracker) {
     stack.op_swap();
 }
 
-pub fn reverse(stack: &mut StackTracker, var: &mut StackVariable) -> StackVariable {
-    let size = var.size();
-    let var_name = stack.get_var_name(*var);
+pub fn reverse(stack: &mut StackTracker, var: StackVariable) -> StackVariable {
+    let size = stack.get_size(var);
+    let var_name = stack.get_var_name(var);
     let mut ret = Vec::new();
     for i in (0..size).rev() {
         ret.push(stack.move_var_sub_n(var, i));
     }
     let size_join = ret.len() - 1;
     stack.rename(ret[0], &format!("reversed({})", var_name));
-    stack.join_count(&mut ret[0], size_join as u32)
+    stack.join_count(ret[0], size_join as u32)
 }
 
 //leaves the result in the stack in reverse order
@@ -70,7 +70,7 @@ pub fn nib_to_bin(stack: &mut StackTracker) {
 pub fn shift_number(
     stack: &mut StackTracker,
     mut to_shift: StackVariable,
-    number: &mut StackVariable,
+    number: StackVariable,
     right: bool,
     msb: bool,
 ) -> StackVariable {
@@ -136,8 +136,8 @@ pub fn shift_number(
         stack.op_2drop();
     }
 
-    let mut shifted = stack.from_altstack_joined(8, "shift_left");
-    reverse(stack, &mut shifted)
+    let shifted = stack.from_altstack_joined(8, "shift_left");
+    reverse(stack, shifted)
 }
 
 pub fn if_greater(stack: &mut StackTracker, than: u8, then: u8, else_: u8) -> StackVariable {
@@ -242,14 +242,14 @@ pub fn number_u32_partial(stack: &mut StackTracker, number: u32, nibbles: u8) ->
     }
     stack.rename(ret[0], &format!("number_0x{:08x}[0:{}]", number, nibbles));
     if nibbles > 1 {
-        stack.join_count(&mut ret[0], (nibbles - 1) as u32)
+        stack.join_count(ret[0], (nibbles - 1) as u32)
     } else {
         ret[0]
     }
 }
 
 pub fn quotient_table(stack: &mut StackTracker) -> StackVariable {
-    let mut table = stack.number(1);
+    let table = stack.number(1);
     stack.op_dup();
     stack.op_2dup();
     stack.op_3dup();
@@ -264,7 +264,7 @@ pub fn quotient_table(stack: &mut StackTracker) -> StackVariable {
     stack.op_3dup();
     stack.op_3dup();
     stack.rename(table, "quotient_table");
-    stack.join_count(&mut table, 31)
+    stack.join_count(table, 31)
 }
 
 pub fn quotient_table_ex(stack: &mut StackTracker, max: u32) -> StackVariable {
@@ -273,7 +273,7 @@ pub fn quotient_table_ex(stack: &mut StackTracker, max: u32) -> StackVariable {
         modulo.push(stack.number(i / 16));
     }
     stack.rename(modulo[0], &format!("quotient_table_{}", max));
-    stack.join_count(&mut modulo[0], max - 1)
+    stack.join_count(modulo[0], max - 1)
 }
 
 pub fn modulo_table(stack: &mut StackTracker, max: u32) -> StackVariable {
@@ -282,7 +282,7 @@ pub fn modulo_table(stack: &mut StackTracker, max: u32) -> StackVariable {
         modulo.push(stack.number(i % 16));
     }
     stack.rename(modulo[0], &format!("modulo_table_{}", max));
-    stack.join_count(&mut modulo[0], max - 1)
+    stack.join_count(modulo[0], max - 1)
 }
 
 pub fn rshift_table(stack: &mut StackTracker, n: u8) -> StackVariable {
@@ -291,7 +291,7 @@ pub fn rshift_table(stack: &mut StackTracker, n: u8) -> StackVariable {
         parts.push(stack.number(i >> n));
     }
     stack.rename(parts[0], &format!("shiftr_{}", n));
-    stack.join_count(&mut parts[0], 15)
+    stack.join_count(parts[0], 15)
 }
 
 pub fn shift_lookup(stack: &mut StackTracker) -> StackVariable {
@@ -301,7 +301,7 @@ pub fn shift_lookup(stack: &mut StackTracker) -> StackVariable {
         parts.push(stack.number(i * 16 + 5));
     }
     stack.rename(parts[0], "shift_lookup");
-    stack.join_count(&mut parts[0], 4)
+    stack.join_count(parts[0], 4)
 }
 
 pub fn lshift_table(stack: &mut StackTracker, n: u8) -> StackVariable {
@@ -310,7 +310,7 @@ pub fn lshift_table(stack: &mut StackTracker, n: u8) -> StackVariable {
         parts.push(stack.number((i << n) & 0xF));
     }
     stack.rename(parts[0], &format!("shiftl_{}", n));
-    stack.join_count(&mut parts[0], 15)
+    stack.join_count(parts[0], 15)
 }
 
 pub fn half_lookup(stack: &mut StackTracker) -> StackVariable {
@@ -321,13 +321,13 @@ pub fn half_lookup(stack: &mut StackTracker) -> StackVariable {
         prev = 16 + prev - i;
         parts.push(prev);
     }
-    let mut parts = parts
+    let parts = parts
         .iter()
         .rev()
         .map(|x| stack.number(*x))
         .collect::<Vec<_>>();
     stack.rename(parts[0], "half_lookup");
-    stack.join_count(&mut parts[0], 15)
+    stack.join_count(parts[0], 15)
 }
 
 #[derive(Debug)]
@@ -354,7 +354,7 @@ pub fn logic_table(stack: &mut StackTracker, logic: LogicOperation) -> StackVari
         }
     }
     stack.rename(parts[0], &format!("logic_{:?}", logic));
-    stack.join_count(&mut parts[0], 135)
+    stack.join_count(parts[0], 135)
 }
 
 pub struct StackLogicTables {
@@ -631,14 +631,14 @@ pub fn is_equal_to(
 
 pub fn is_lower_than(
     stack: &mut StackTracker,
-    value: &mut StackVariable,
-    than: &mut StackVariable,
+    value: StackVariable,
+    than: StackVariable,
     unsigned: bool,
 ) -> StackVariable {
     if !unsigned {
-        stack.copy_var_sub_n(*value, 0);
+        stack.copy_var_sub_n(value, 0);
         if_greater(stack, 7, 1, 0); //1 if negative
-        stack.copy_var_sub_n(*than, 0);
+        stack.copy_var_sub_n(than, 0);
         if_greater(stack, 7, 1, 0); //1 if negative
         stack.op_2dup();
         stack.op_equal();
@@ -714,12 +714,12 @@ pub fn mulitply_by_8(stack: &mut StackTracker) {
 
 pub fn mask_value(
     stack: &mut StackTracker,
-    mut value: StackVariable,
-    mut mask: StackVariable,
+    value: StackVariable,
+    mask: StackVariable,
 ) -> StackVariable {
     for _ in 0..8 {
-        stack.move_var_sub_n(&mut value, 0);
-        stack.move_var_sub_n(&mut mask, 0);
+        stack.move_var_sub_n(value, 0);
+        stack.move_var_sub_n(mask, 0);
         stack.custom(
             script! {
                 OP_IF
@@ -735,7 +735,7 @@ pub fn mask_value(
         );
     }
 
-    stack.join_count(&mut stack.get_var_from_stack(7), 7)
+    stack.join_in_stack(8, None, Some("masked"))
 }
 pub struct WordTable {
     table: StackVariable,
@@ -747,8 +747,9 @@ impl WordTable {
             stack.number_u32(*element);
         }
         let size = elements.len() as u32;
-        let table = stack.join_count(&mut stack.get_var_from_stack(size - 1), size - 1);
-        WordTable { table }
+        WordTable {
+            table: stack.join_in_stack(size, None, Some("word_table")),
+        }
     }
 
     pub fn drop(&self, stack: &mut StackTracker) {
@@ -776,7 +777,7 @@ impl WordTable {
             stack.op_pick();
         }
 
-        stack.join_count(&mut stack.get_var_from_stack(7), 7)
+        stack.join_in_stack(8, None, None)
     }
 }
 
@@ -989,7 +990,7 @@ pub fn twos_complement(
         stack.from_altstack();
     }
 
-    stack.join_count(&mut stack.get_var_from_stack(size - 1), size - 1)
+    stack.join_in_stack(size, None, None)
 }
 
 pub fn twos_complement_conditional(
@@ -1006,8 +1007,7 @@ pub fn twos_complement_conditional(
         1,
         vec![(size, "twos_complement".to_string())],
         0,
-    );
-    stack.get_var_from_stack(0)
+    )[0]
 }
 
 pub fn is_negative(stack: &mut StackTracker, value: StackVariable) -> StackVariable {
@@ -1064,7 +1064,7 @@ pub fn mulh(
         stack.op_2drop();
     }
 
-    stack.join_count(&mut stack.get_var_from_stack(7), 7)
+    stack.join_in_stack(8, None, None)
 }
 
 pub fn div_check(
@@ -1076,9 +1076,9 @@ pub fn div_check(
     remainder: StackVariable,
 ) {
     //this part asserts that the remainder is lower than the divisor
-    let mut remainder_check = stack.copy_var(remainder);
-    let mut divisor_check = stack.copy_var(divisor);
-    is_lower_than(stack, &mut remainder_check, &mut divisor_check, true);
+    let remainder_check = stack.copy_var(remainder);
+    let divisor_check = stack.copy_var(divisor);
+    is_lower_than(stack, remainder_check, divisor_check, true);
     stack.op_verify();
 
     let result = multiply(stack, divisor, quotient, false, false);
@@ -1092,8 +1092,8 @@ pub fn div_check(
     }
 
     // asserts dividend = divisor * quotient + remainder
-    let mut div_round = stack.from_altstack_joined(8, "dividen_round");
-    let diff = sub(stack, tables, dividend, &mut div_round);
+    let div_round = stack.from_altstack_joined(8, "dividen_round");
+    let diff = sub(stack, tables, dividend, div_round);
     stack.move_var(remainder);
     is_equal_to(stack, &remainder, &diff);
     stack.op_verify();
@@ -1408,22 +1408,22 @@ mod tests {
         let tables = StackTables::new(&mut stack, true, true, 0, 0, 0);
         let value = stack.number_u32(0xaaaa_aaab);
         stack.number(1);
-        let mut result = twos_complement_conditional(&mut stack, &tables, value, 8);
+        let result = twos_complement_conditional(&mut stack, &tables, value, 8);
         stack.to_altstack();
         tables.drop(&mut stack);
         stack.from_altstack();
-        let mut expected = stack.number_u32(0x5555_5555);
-        stack.equals(&mut result, true, &mut expected, true);
+        let expected = stack.number_u32(0x5555_5555);
+        stack.equals(result, true, expected, true);
 
         let tables = StackTables::new(&mut stack, true, true, 0, 0, 0);
         let value = stack.number_u32(0xaaaa_aaab);
         stack.number(0);
-        let mut result = twos_complement_conditional(&mut stack, &tables, value, 8);
+        let result = twos_complement_conditional(&mut stack, &tables, value, 8);
         stack.to_altstack();
         tables.drop(&mut stack);
         stack.from_altstack();
-        let mut expected = stack.number_u32(0xaaaa_aaab);
-        stack.equals(&mut result, true, &mut expected, true);
+        let expected = stack.number_u32(0xaaaa_aaab);
+        stack.equals(result, true, expected, true);
 
         stack.op_true();
         assert!(stack.run().success);
@@ -1436,14 +1436,14 @@ mod tests {
 
         let value = stack.number_u32(0xaaaa_aaab);
         let size = stack.get_script().len();
-        let mut result = twos_complement(&mut stack, &tables, value, 8);
+        let result = twos_complement(&mut stack, &tables, value, 8);
         println!("Consumed: {}", stack.get_script().len() - size);
         stack.to_altstack();
         tables.drop(&mut stack);
         stack.from_altstack();
 
-        let mut expected = stack.number_u32(0x5555_5555);
-        stack.equals(&mut result, true, &mut expected, true);
+        let expected = stack.number_u32(0x5555_5555);
+        stack.equals(result, true, expected, true);
         stack.op_true();
         assert!(stack.run().success);
     }
@@ -1456,19 +1456,19 @@ mod tests {
 
         let start = stack.get_script().len();
 
-        multiply(&mut stack, a, b, false, false);
+        let mult = multiply(&mut stack, a, b, false, false);
 
         println!("Consumed: {}", stack.get_script().len() - start);
 
-        stack.explode(stack.get_var_from_stack(0));
-        let mut res_high = stack.join_count(&mut stack.get_var_from_stack(15), 7);
-        let mut res_low = stack.join_count(&mut stack.get_var_from_stack(7), 7);
+        stack.explode(mult);
+        let res_high = stack.join_in_stack(16, Some(8), Some("high"));
+        let res_low = stack.join_in_stack(8, None, Some("low"));
 
-        let mut exp_low = stack.number_u32(low);
-        stack.equals(&mut res_low, true, &mut exp_low, true);
+        let exp_low = stack.number_u32(low);
+        stack.equals(res_low, true, exp_low, true);
 
-        let mut exp_high = stack.number_u32(high);
-        stack.equals(&mut res_high, true, &mut exp_high, true);
+        let exp_high = stack.number_u32(high);
+        stack.equals(res_high, true, exp_high, true);
 
         stack.op_true();
 
@@ -1486,9 +1486,9 @@ mod tests {
         let mut stack = StackTracker::new();
         let value = stack.number_u32(value);
         let rotate = stack.number(rotate);
-        let mut result = left_rotate(&mut stack, value, rotate);
-        let mut expected = stack.number_u32(expected);
-        stack.equals(&mut result, true, &mut expected, true);
+        let result = left_rotate(&mut stack, value, rotate);
+        let expected = stack.number_u32(expected);
+        stack.equals(result, true, expected, true);
         stack.op_true();
         assert!(stack.run().success);
     }
@@ -1505,9 +1505,9 @@ mod tests {
         let mut stack = StackTracker::new();
         let word_table = WordTable::new(&mut stack, values);
         stack.number(index);
-        let mut result = word_table.peek(&mut stack);
-        let mut expected = stack.number_u32(expected);
-        stack.equals(&mut result, true, &mut expected, true);
+        let result = word_table.peek(&mut stack);
+        let expected = stack.number_u32(expected);
+        stack.equals(result, true, expected, true);
         word_table.drop(&mut stack);
         stack.op_true();
         assert!(stack.run().success);
@@ -1523,9 +1523,9 @@ mod tests {
         let mut stack = StackTracker::new();
         let value = stack.number_u32(number);
         let mask = stack.number_u32(mask);
-        let mut result = mask_value(&mut stack, value, mask);
-        let mut expected = stack.number_u32(expected);
-        stack.equals(&mut result, true, &mut expected, true);
+        let result = mask_value(&mut stack, value, mask);
+        let expected = stack.number_u32(expected);
+        stack.equals(result, true, expected, true);
         stack.op_true();
         assert!(stack.run().success);
     }
@@ -1542,11 +1542,11 @@ mod tests {
     fn test_shift_case(value: u32, shift: u32, right: bool, msb: bool, expected: u32) {
         let mut stack = StackTracker::new();
         let to_shift = stack.number(shift);
-        let mut number = stack.number_u32(value);
-        let mut shifted = shift_number(&mut stack, to_shift, &mut number, right, msb);
+        let number = stack.number_u32(value);
+        let shifted = shift_number(&mut stack, to_shift, number, right, msb);
         println!("Size:  {} ", stack.get_script().len());
-        let mut expected = stack.number_u32(expected);
-        stack.equals(&mut shifted, true, &mut expected, true);
+        let expected = stack.number_u32(expected);
+        stack.equals(shifted, true, expected, true);
         stack.op_true();
         assert!(stack.run().success);
     }
@@ -1573,9 +1573,9 @@ mod tests {
 
     fn test_lower_helper(value: u32, than: u32, expected: u32, unsigned: bool) {
         let mut stack = StackTracker::new();
-        let mut value = stack.number_u32(value);
-        let mut than = stack.number_u32(than);
-        is_lower_than(&mut stack, &mut value, &mut than, unsigned);
+        let value = stack.number_u32(value);
+        let than = stack.number_u32(than);
+        is_lower_than(&mut stack, value, than, unsigned);
         stack.number(expected);
         stack.op_equal();
         assert!(stack.run().success);
@@ -1668,17 +1668,17 @@ mod tests {
     fn test_if_less() {
         let mut stack = StackTracker::new();
         stack.number(4);
-        let mut res = if_less(&mut stack, 5, 1, 0);
-        let mut expected = stack.number(1);
-        stack.equals(&mut expected, true, &mut res, true);
+        let res = if_less(&mut stack, 5, 1, 0);
+        let expected = stack.number(1);
+        stack.equals(expected, true, res, true);
         stack.op_true();
         assert!(stack.run().success);
 
         stack = StackTracker::new();
         stack.number(5);
-        let mut res = if_less(&mut stack, 5, 1, 0);
-        let mut expected = stack.number(0);
-        stack.equals(&mut expected, true, &mut res, true);
+        let res = if_less(&mut stack, 5, 1, 0);
+        let expected = stack.number(0);
+        stack.equals(expected, true, res, true);
         stack.op_true();
         assert!(stack.run().success);
     }

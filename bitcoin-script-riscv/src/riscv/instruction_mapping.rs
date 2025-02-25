@@ -201,7 +201,7 @@ pub fn generate_verification_script(
 ) -> Script {
     let mut stack = StackTracker::new();
     let program = ProgramSpec::new(base_register_address);
-    let mut trace_step = TraceStep::define(&mut stack);
+    let trace_step = TraceStep::define(&mut stack);
     let witness = match witness {
         true => Some(stack.define(8, "witness")),
         false => None,
@@ -210,7 +210,7 @@ pub fn generate_verification_script(
     let trace_read = TraceRead::define(&mut stack);
     let mut result = execute_step(
         &mut stack,
-        trace_read,
+        &trace_read,
         &trace_step,
         witness,
         &instruction,
@@ -218,7 +218,7 @@ pub fn generate_verification_script(
         program,
     )
     .unwrap();
-    compare_trace_step(&mut stack, &mut trace_step, &mut result);
+    compare_trace_step(&mut stack, &trace_step, &mut result);
     stack.get_script()
 }
 

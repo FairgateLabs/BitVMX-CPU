@@ -19,7 +19,7 @@ pub fn get_register_address(
     low: StackVariable,
 ) -> StackVariable {
     stack.copy_var(high);
-    let mut ret_high = stack.get_value_from_table(tables.rshift.shift_1, None);
+    let ret_high = stack.get_value_from_table(tables.rshift.shift_1, None);
 
     stack.move_var(high);
     stack.get_value_from_table(tables.lshift.shift_3, None);
@@ -29,7 +29,7 @@ pub fn get_register_address(
 
     stack.op_add();
 
-    stack.join(&mut ret_high);
+    stack.join(ret_high);
     ret_high
 }
 
@@ -47,12 +47,12 @@ pub fn get_register_address_rs2(
     stack.op_dup();
     stack.to_altstack();
     stack.get_value_from_table(tables.rshift.shift_2, None);
-    let mut ret_high = stack.op_add();
+    let ret_high = stack.op_add();
 
     stack.from_altstack();
     stack.get_value_from_table(tables.lshift.shift_2, None);
 
-    stack.join(&mut ret_high);
+    stack.join(ret_high);
     ret_high
 }
 
@@ -93,7 +93,7 @@ pub fn decode_i_type(
 ) -> (StackVariable, StackVariable, StackVariable, StackVariable) {
     stack.set_breakpoint("decode_i_type");
     stack.move_var(opcode);
-    let mut op_nibbles = stack.explode(opcode);
+    let op_nibbles = stack.explode(opcode);
 
     // stack: 0 1 2 3 4 5 6 7
     let expected = stack.byte(expected_opcode); // ..... 6 7   expected_6  expected_7
@@ -136,14 +136,11 @@ pub fn decode_i_type(
         stack.number((func7 >> 3) as u32);
         stack.op_equalverify();
 
-        (
-            stack.join_count(&mut op_nibbles[1], 1),
-            StackVariable::null(),
-        )
+        (stack.join_count(op_nibbles[1], 1), StackVariable::null())
     } else {
         stack.copy_var(op_nibbles[0]);
         let bit = if_greater(stack, 7, 0xf, 0);
-        (stack.join_count(&mut op_nibbles[0], 2), bit)
+        (stack.join_count(op_nibbles[0], 2), bit)
     };
     stack.rename(imm, "immediate");
 
@@ -210,7 +207,7 @@ pub fn decode_b_type(
 
     //imm use bit 12 from pos 31 as signed bit. It needs to fill 5 positions
     stack.copy_var(op_nibbles[0]);
-    let mut bit = if_greater(stack, 7, 0xf, 0);
+    let bit = if_greater(stack, 7, 0xf, 0);
     stack.op_dup();
     stack.op_2dup();
     stack.op_dup();
@@ -233,7 +230,7 @@ pub fn decode_b_type(
     stack.from_altstack();
     stack.get_value_from_table(tables.lshift.shift_1, None); //shift 1-4 bits to the left
 
-    stack.join_count(&mut bit, 7);
+    stack.join_count(bit, 7);
     stack.rename(bit, "imm");
 
     let rs1 = get_register_address(stack, tables, op_nibbles[3], op_nibbles[4]);
@@ -348,7 +345,7 @@ pub fn decode_s_type(
     stack.rename(bit, "bit_extension");
 
     // generate the full immediate value
-    let mut imm = stack.move_var(op_nibbles[0]); // imm[11:8]
+    let imm = stack.move_var(op_nibbles[0]); // imm[11:8]
     stack.copy_var(op_nibbles[1]); // imm[7:5]+1bit garbage
     stack.get_value_from_table(tables.rshift.shift_1, None);
     stack.get_value_from_table(tables.lshift.shift_1, None); //  remove the garbage
@@ -360,7 +357,7 @@ pub fn decode_s_type(
     stack.move_var(op_nibbles[6]);
     if_greater(stack, 7, 1, 0);
     stack.op_add();
-    stack.join_count(&mut imm, 2);
+    stack.join_count(imm, 2);
     stack.rename(imm, "immediate");
 
     // decode rs1
@@ -403,7 +400,7 @@ pub fn decode_j_type(
     stack.rename(rd, "rd");
 
     stack.copy_var(op_nibbles[0]);
-    let mut bit = if_greater(stack, 7, 0xf, 0x0); //imm[20] as bit extension
+    let bit = if_greater(stack, 7, 0xf, 0x0); //imm[20] as bit extension
     stack.op_dup();
     stack.op_dup(); //complete u32 with bit extension
 
@@ -427,7 +424,7 @@ pub fn decode_j_type(
     stack.from_altstack();
     stack.op_sub(); // imm[3:0]
 
-    let imm = stack.join_count(&mut bit, 7);
+    let imm = stack.join_count(bit, 7);
     stack.rename(imm, "immediate");
     stack.move_var(rd);
 
@@ -447,7 +444,7 @@ pub fn decode_u_type(
 ) -> (StackVariable, StackVariable) {
     stack.set_breakpoint("decode_u_type");
     stack.move_var(opcode);
-    let mut op_nibbles = stack.explode(opcode);
+    let op_nibbles = stack.explode(opcode);
 
     // stack: 0 1 2 3 4 5 6 7
     let expected = stack.byte(expected_opcode); // ..... 6 7   expected_6  expected_7
@@ -459,7 +456,7 @@ pub fn decode_u_type(
     mask_4bit(stack); //      6  expected_6  6_masked
     stack.op_equalverify(); //      6  assert(expected_6 == 6_masked)
 
-    let imm = stack.join_count(&mut op_nibbles[0], 4);
+    let imm = stack.join_count(op_nibbles[0], 4);
     stack.rename(imm, "immediate");
 
     let rd = get_register_address(stack, tables, op_nibbles[5], op_nibbles[6]);
@@ -467,11 +464,11 @@ pub fn decode_u_type(
 
     //The lower 12 bits of the Uimmediate, which are always zero.
     stack.move_var(imm);
-    let mut imm_exp = stack.explode(imm);
+    let imm_exp = stack.explode(imm);
     stack.number(0);
     stack.number(0);
     stack.number(0);
-    let imm = stack.join_count(&mut imm_exp[0], 7);
+    let imm = stack.join_count(imm_exp[0], 7);
     stack.rename(imm, "immediate");
     stack.move_var(rd);
 
@@ -500,24 +497,24 @@ mod tests {
         let tables = StackTables::new(&mut stack, true, true, 0x7, 0x7, 0);
         let opcode = stack.number_u32(opcode);
 
-        let (bit, imm, mut rs1, mut rs2) = decode_s_type(&mut stack, &tables, opcode, 0x2);
+        let (bit, imm, rs1, rs2) = decode_s_type(&mut stack, &tables, opcode, 0x2);
 
         stack.move_var(bit);
         stack.drop(bit);
 
-        let mut expected_rs2 = stack.byte(stype.rs2() as u8 * 4);
-        stack.equals(&mut rs2, true, &mut expected_rs2, true);
+        let expected_rs2 = stack.byte(stype.rs2() as u8 * 4);
+        stack.equals(rs2, true, expected_rs2, true);
 
-        let mut expected_rs1 = stack.byte(stype.rs1() as u8 * 4);
-        stack.equals(&mut rs1, true, &mut expected_rs1, true);
+        let expected_rs1 = stack.byte(stype.rs1() as u8 * 4);
+        stack.equals(rs1, true, expected_rs1, true);
 
-        let mut leadingzeros = number_u32_partial(&mut stack, 0, 5);
+        let leadingzeros = number_u32_partial(&mut stack, 0, 5);
         stack.move_var(imm);
-        stack.join(&mut leadingzeros);
+        stack.join(leadingzeros);
 
         let extended = ((stype.imm() as i32) << 19) >> 19;
-        let mut expected_imm = stack.number_u32(extended as u32);
-        stack.equals(&mut leadingzeros, true, &mut expected_imm, true);
+        let expected_imm = stack.number_u32(extended as u32);
+        stack.equals(leadingzeros, true, expected_imm, true);
 
         tables.drop(&mut stack);
 
@@ -535,17 +532,17 @@ mod tests {
         let tables = StackTables::new(&mut stack, true, true, 0x7, 0x7, 0);
         let opcode = stack.number_u32(opcode);
 
-        let (mut imm, mut rs1, mut rs2) = decode_b_type(&mut stack, &tables, opcode, 0x0);
+        let (imm, rs1, rs2) = decode_b_type(&mut stack, &tables, opcode, 0x0);
 
-        let mut expected_rs2 = stack.byte(btype.rs2() as u8 * 4);
-        stack.equals(&mut rs2, true, &mut expected_rs2, true);
+        let expected_rs2 = stack.byte(btype.rs2() as u8 * 4);
+        stack.equals(rs2, true, expected_rs2, true);
 
-        let mut expected_rs1 = stack.byte(btype.rs1() as u8 * 4);
-        stack.equals(&mut rs1, true, &mut expected_rs1, true);
+        let expected_rs1 = stack.byte(btype.rs1() as u8 * 4);
+        stack.equals(rs1, true, expected_rs1, true);
 
         let extended = ((btype.imm() as i32) << 19) >> 19;
-        let mut expected_imm = stack.number_u32(extended as u32);
-        stack.equals(&mut imm, true, &mut expected_imm, true);
+        let expected_imm = stack.number_u32(extended as u32);
+        stack.equals(imm, true, expected_imm, true);
 
         tables.drop(&mut stack);
 
@@ -573,19 +570,18 @@ mod tests {
 
         // decode
 
-        let (mut d_rs1, mut d_rs2, mut d_rd) =
-            decode_r_type(&mut stack, &tables, opcode_var, 0x0, 0x33, 0x00);
+        let (d_rs1, d_rs2, d_rd) = decode_r_type(&mut stack, &tables, opcode_var, 0x0, 0x33, 0x00);
 
         // asserts
 
-        let mut expected_rs2 = stack.byte(rtype.rs2() as u8 * 4);
-        stack.equals(&mut d_rs2, true, &mut expected_rs2, true);
+        let expected_rs2 = stack.byte(rtype.rs2() as u8 * 4);
+        stack.equals(d_rs2, true, expected_rs2, true);
 
-        let mut expected_rs1 = stack.byte(rtype.rs1() as u8 * 4);
-        stack.equals(&mut d_rs1, true, &mut expected_rs1, true);
+        let expected_rs1 = stack.byte(rtype.rs1() as u8 * 4);
+        stack.equals(d_rs1, true, expected_rs1, true);
 
-        let mut expected_rd = stack.byte(rtype.rd() as u8 * 4);
-        stack.equals(&mut d_rd, true, &mut expected_rd, true);
+        let expected_rd = stack.byte(rtype.rd() as u8 * 4);
+        stack.equals(d_rd, true, expected_rd, true);
 
         // clean remaning elements
 
@@ -615,14 +611,14 @@ mod tests {
 
         // decode
 
-        let (mut imm, mut d_rd) = decode_u_type(&mut stack, &tables, opcode_var, 0x17);
+        let (imm, d_rd) = decode_u_type(&mut stack, &tables, opcode_var, 0x17);
 
         //asserts
-        let mut expected_rd = stack.byte(utype.rd() as u8 * 4);
-        stack.equals(&mut d_rd, true, &mut expected_rd, true);
+        let expected_rd = stack.byte(utype.rd() as u8 * 4);
+        stack.equals(d_rd, true, expected_rd, true);
 
-        let mut expected_imm = stack.number_u32(utype.imm() as u32);
-        stack.equals(&mut imm, true, &mut expected_imm, true);
+        let expected_imm = stack.number_u32(utype.imm() as u32);
+        stack.equals(imm, true, expected_imm, true);
 
         stack.set_breakpoint("before ende");
 
@@ -651,15 +647,15 @@ mod tests {
         stack.rename(opcode_var, "opcode_var");
 
         // decode
-        let (mut rd, mut imm) = decode_j_type(&mut stack, &tables, opcode_var);
+        let (rd, imm) = decode_j_type(&mut stack, &tables, opcode_var);
 
         //asserts
-        let mut expected_rd = stack.byte(jtype.rd() as u8 * 4);
-        stack.equals(&mut rd, true, &mut expected_rd, true);
+        let expected_rd = stack.byte(jtype.rd() as u8 * 4);
+        stack.equals(rd, true, expected_rd, true);
 
         let extended = ((jtype.imm() as i32) << 11) >> 11;
-        let mut expected_imm = stack.number_u32(extended as u32);
-        stack.equals(&mut imm, true, &mut expected_imm, true);
+        let expected_imm = stack.number_u32(extended as u32);
+        stack.equals(imm, true, expected_imm, true);
 
         // clean remaning elements
         tables.drop(&mut stack);
