@@ -1,5 +1,5 @@
 use crate::loader::program::{ProgramCounter, Registers};
-use sha2::{digest::FixedOutputReset, Digest, Sha256};
+use blake3::Hasher;
 
 //TODO: Define INITIAL_STATE for last_step
 
@@ -166,22 +166,23 @@ impl TraceRWStep {
 }
 
 pub fn compute_step_hash(
-    hasher: &mut Sha256,
-    previous_hash: &[u8; 32],
+    hasher: &mut Hasher,
+    previous_hash: &[u8; 20],
     write_trace: &Vec<u8>,
-) -> [u8; 32] {
-    // Compute the SHA-256 hash
-    //let mut hasher = Sha256::new();
+) -> [u8; 20] {
+    // Compute the Blake3 hash
     hasher.update(previous_hash);
     hasher.update(write_trace);
-    hasher.finalize_fixed_reset().into()
+    let mut output = [0u8; 20];
+    hasher.finalize_xof().fill(&mut output);
+    output
 }
 
 pub fn generate_initial_step_hash() -> Vec<u8> {
     // Convert "ff" to bytes
     let initial_bytes = hex::decode("ff").expect("Invalid hex string");
-    // Compute the SHA-256 hash
-    let mut hasher = Sha256::new();
-    hasher.update(initial_bytes);
-    hasher.finalize().to_vec()
+    // Compute the Blake3 hash
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&initial_bytes);
+    hasher.finalize().as_bytes()[..20].to_vec()
 }

@@ -9,7 +9,6 @@ use riscv_decode::{
     types::*,
     Instruction::{self, *},
 };
-use sha2::{Digest, Sha256};
 use tracing::{error, info};
 
 pub fn execute_program(
@@ -52,7 +51,7 @@ pub fn execute_program(
         false => None,
     };
 
-    let mut hasher = Sha256::new();
+    let mut hasher = blake3::Hasher::new();
 
     let mut count = 0;
 

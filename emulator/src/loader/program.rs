@@ -124,7 +124,7 @@ pub struct Program {
     pub registers: Registers,
     pub pc: ProgramCounter,
     pub step: u64,
-    pub hash: [u8; 32],
+    pub hash: [u8; 20],
     pub halt: bool,
 }
 
