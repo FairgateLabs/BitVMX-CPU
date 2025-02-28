@@ -38,8 +38,6 @@ pub fn entry_point_challenge(stack: &mut StackTracker, entry_point: u32) {
 // NOTE: the verifiers provides an step back of the agreed step.
 // hash_funcion ( UNSIGNED_VERIFIER_HASH_PREV_PREV_STEP:64 | UNSIGINED_VERIFIER_WRITE_ADD_PREV:8 | UNSIGINED_VERIFIER_WRITE_DATA_PREV:8 | UNSIGNED_VERIFIER_WRITE_PC_PREV:8 | UNSIGNED_VERIFIER_WRITE_MICRO_PREV:2 ) == WOTS_PROVER_HASH_PREV_STEP:64
 // && WOTS_PROVER_TRACE_PC:8 | WOTS_PROVER_TRACE_MICRO:2 != UNSIGNED_VERIFIER_WRITE_PC_PREV | UNSIGNED_VERIFIER_WRITE_MICRO_PREV
-// Assumes input as:
-// [ ]
 pub fn program_counter_challenge(stack: &mut StackTracker) -> StackVariable {
     stack.clear_definitions();
 
@@ -71,10 +69,28 @@ pub fn program_counter_challenge(stack: &mut StackTracker) -> StackVariable {
     sha256::sha256(stack, 64 + 8 + 8 + 8 + 2)
 }
 
-// When the prover commits the last step as halt but it's is not a halt-success instruction the verifier can challenge it.
+// When the prover commits the final step as halt but it's is not a halt-success instruction the verifier can challenge it.
 // TODO CHECK: The opcode needs to be provided and compared with the static opcode given by the PC on the proper leaf when expanding the trace
-// WOTS_PROVER_LAST_STEP:16 == WOTS_PROVER_TRACE_STEP:16 && ( WOTS_PROVER_READ_VALUE_1:8 | WOTS_PROVER_READ_VALUE_2:8 | WOTS_PROVER_OPCODE:8 !=  93 | 0 | 115 )
-pub fn halt_challenge() {}
+// WOTS_PROVER_FINAL_STEP:16 == WOTS_PROVER_TRACE_STEP:16 && ( WOTS_PROVER_READ_VALUE_1:8 | WOTS_PROVER_READ_VALUE_2:8 | WOTS_PROVER_OPCODE:8 !=  93 | 0 | 115 )
+pub fn halt_challenge(stack: &mut StackTracker) {
+    stack.clear_definitions();
+    let final_step = stack.define(16, "final_step");
+    let trace_step = stack.define(16, "trace_step");
+    let provided = stack.define(8, "read_value_1");
+    stack.define(8, "read_value_2");
+    stack.define(8, "opcode");
+
+    stack.join_count(provided, 2);
+
+    let expected = stack.number_u32(93);
+    stack.number_u32(0);
+    stack.number_u32(115);
+    stack.join_count(expected, 2);
+
+    stack.not_equal(provided, true, expected, true);
+
+    stack.equals(final_step, true, trace_step, true);
+}
 
 // When the prover expands the trace it could happen that  HASH( hash_prev_step | trace_write ) != hash_step
 // in that case the verifier can win the challenge executing:
@@ -187,5 +203,34 @@ mod tests {
             0x00,
             "6f3b19780c4725df6c78a81de90064769a1d7cd4665d5d56a0b375aeaa3d0dd0"
         ));
+    }
+
+    fn test_halt_challenge_aux(
+        final_step: u64,
+        trace_step: u64,
+        read_value_1: u32,
+        read_value_2: u32,
+        opcode: u32,
+    ) -> bool {
+        let mut stack = StackTracker::new();
+
+        stack.number_u64(final_step);
+        stack.number_u64(trace_step);
+        stack.number_u32(read_value_1);
+        stack.number_u32(read_value_2);
+        stack.number_u32(opcode);
+
+        halt_challenge(&mut stack);
+        stack.op_true();
+        stack.run().success
+    }
+
+    #[test]
+    fn test_halt_challenge() {
+        assert!(test_halt_challenge_aux(0x0, 0x0, 93, 1, 115));
+        assert!(test_halt_challenge_aux(0x0, 0x0, 92, 0, 115));
+        assert!(test_halt_challenge_aux(0x0, 0x0, 93, 0, 114));
+        assert!(!test_halt_challenge_aux(0x0, 0x0, 93, 0, 115));
+        assert!(!test_halt_challenge_aux(0x0, 0x1, 93, 0, 114));
     }
 }
