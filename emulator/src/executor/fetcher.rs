@@ -135,7 +135,7 @@ pub fn execute_program(
                 info!(
                     "{};{};{}",
                     trace.as_ref().unwrap().to_csv(),
-                    trace_str,
+                    trace_str, // this is a helper with the concatenated trace step
                     program
                         .hash
                         .iter()

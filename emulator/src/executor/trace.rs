@@ -147,7 +147,7 @@ impl TraceRWStep {
     pub fn to_csv(&self) -> String {
         //"read1_address;read1_value;read1_last_step;read2_address;read2_value;read2_last_step;read_pc_address;read_pc_micro;read_pc_opcode;write_address;write_value;write_pc;write_micro;write_trace;step_hash;step".to_string()
         format!(
-            "{};{};{};{};{};{};{};{};{};{};{};{};{}",
+            "{:08x};{:08x};{:016x};{:08x};{:08x};{:016x};{:08x};{:02x};{:08x};{:08x};{:08x};{:08x};{:02x}",
             self.read_1.address,
             self.read_1.value,
             self.read_1.last_step,
