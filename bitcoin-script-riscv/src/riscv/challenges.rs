@@ -1,5 +1,5 @@
-use bitcoin_script_functions::hash::sha256;
-use bitcoin_script_stack::stack::{StackTracker, StackVariable};
+use bitcoin_script_functions::hash::blake3;
+use bitcoin_script_stack::stack::StackTracker;
 
 // TODO: Value commited in WOTS_PROVER_LAST_STEP should not be greater than the MAX_STEP_CONSTANT_VALUE
 // the script should block this.
@@ -38,10 +38,10 @@ pub fn entry_point_challenge(stack: &mut StackTracker, entry_point: u32) {
 // NOTE: the verifiers provides an step back of the agreed step.
 // hash_funcion ( UNSIGNED_VERIFIER_HASH_PREV_PREV_STEP:64 | UNSIGINED_VERIFIER_WRITE_ADD_PREV:8 | UNSIGINED_VERIFIER_WRITE_DATA_PREV:8 | UNSIGNED_VERIFIER_WRITE_PC_PREV:8 | UNSIGNED_VERIFIER_WRITE_MICRO_PREV:2 ) == WOTS_PROVER_HASH_PREV_STEP:64
 // && WOTS_PROVER_TRACE_PC:8 | WOTS_PROVER_TRACE_MICRO:2 != UNSIGNED_VERIFIER_WRITE_PC_PREV | UNSIGNED_VERIFIER_WRITE_MICRO_PREV
-pub fn program_counter_challenge(stack: &mut StackTracker) -> StackVariable {
+pub fn program_counter_challenge(stack: &mut StackTracker) {
     stack.clear_definitions();
 
-    let prev_prev_hash = stack.define(64, "prev_prev_hash");
+    let prev_prev_hash = stack.define(40, "prev_prev_hash");
     let prev_write_add = stack.define(8, "prev_write_add");
     let prev_write_data = stack.define(8, "prev_write_data");
     let prev_write_pc = stack.define(8, "prev_write_pc");
@@ -49,6 +49,10 @@ pub fn program_counter_challenge(stack: &mut StackTracker) -> StackVariable {
 
     let prover_pc = stack.define(8, "prover_pc");
     let _prover_micro = stack.define(2, "prover_micro");
+    let prev_hash = stack.define(40, "prev_hash");
+
+    //save the hash to compare
+    stack.to_altstack();
 
     stack.join(prover_pc); //joins the prover_pc with the prover micro
 
@@ -66,7 +70,9 @@ pub fn program_counter_challenge(stack: &mut StackTracker) -> StackVariable {
     stack.explode(prev_write_pc);
     stack.explode(prev_write_micro);
 
-    sha256::sha256(stack, 64 + 8 + 8 + 8 + 2)
+    let result = blake3::blake3(stack, (40 + 8 + 8 + 8 + 2) / 2, 5);
+    stack.from_altstack();
+    stack.equals(result, true, prev_hash, true);
 }
 
 // When the prover commits the final step as halt but it's is not a halt-success instruction the verifier can challenge it.
@@ -155,12 +161,9 @@ mod tests {
         stack.number_u32(prover_pc);
         stack.byte(prover_micro);
 
-        let result = program_counter_challenge(&mut stack);
+        stack.hexstr_as_nibbles(pre_hash);
 
-        //the prev_hash needs to be decoded from winternitz after hashing the previous step
-        //to avoid using unnecessary stack space
-        let prev_hash = stack.hexstr_as_nibbles(pre_hash);
-        stack.equals(result, true, prev_hash, true);
+        program_counter_challenge(&mut stack);
 
         stack.op_true();
         stack.run().success
@@ -169,39 +172,41 @@ mod tests {
     #[test]
     fn test_program_counter_challenge() {
         //verifier provides valid trace that matches the hash and prover provided invalid pc
+        let pre_pre_hash = "e2f115006467b4b1b2b27612bbfd40ed3bc8299b";
+        let pre_hash = "345721506e79c53d2549fc63d02ba8fc3b17efa4";
         assert!(test_program_counter_challenge_aux(
-            "3e3155d262a64bc174017cfd65d022d2f04273642c32a39323be61b0dc7e8c06",
+            pre_pre_hash,
             0xf0000028,
             0x00000001,
             0x8000010c,
             0x00,
             0x80000100,
             0x00,
-            "6f3b19780c4725df6c78a81de90064769a1d7cd4665d5d56a0b375aeaa3d0dd0"
+            pre_hash
         ));
 
         //verifier provides valid trace that matches the hash but the prover provided valid pc
         assert!(!test_program_counter_challenge_aux(
-            "3e3155d262a64bc174017cfd65d022d2f04273642c32a39323be61b0dc7e8c06",
+            pre_pre_hash,
             0xf0000028,
             0x00000001,
             0x8000010c,
             0x00,
             0x8000010c,
             0x00,
-            "6f3b19780c4725df6c78a81de90064769a1d7cd4665d5d56a0b375aeaa3d0dd0"
+            pre_hash
         ));
 
         //verifier provides invalid trace that does not match the hash
         assert!(!test_program_counter_challenge_aux(
-            "3e3155d262a64bc174017cfd65d022d2f04273642c32a39323be61b0dc7e8c06",
+            pre_pre_hash,
             0xf0000028,
             0x00000001,
             0x80000100,
             0x00,
             0x8000010c,
             0x00,
-            "6f3b19780c4725df6c78a81de90064769a1d7cd4665d5d56a0b375aeaa3d0dd0"
+            pre_hash
         ));
     }
 

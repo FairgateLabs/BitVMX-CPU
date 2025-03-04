@@ -1,3 +1,5 @@
+use core::hash;
+
 use crate::loader::program::{ProgramCounter, Registers};
 use blake3::Hasher;
 
@@ -171,6 +173,7 @@ pub fn compute_step_hash(
     write_trace: &Vec<u8>,
 ) -> [u8; 20] {
     // Compute the Blake3 hash
+    hasher.reset();
     hasher.update(previous_hash);
     hasher.update(write_trace);
     let mut output = [0u8; 20];
