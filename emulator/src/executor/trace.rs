@@ -1,5 +1,3 @@
-use core::hash;
-
 use crate::loader::program::{ProgramCounter, Registers};
 use blake3::Hasher;
 
