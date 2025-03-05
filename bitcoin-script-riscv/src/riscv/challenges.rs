@@ -101,7 +101,30 @@ pub fn halt_challenge(stack: &mut StackTracker) {
 // When the prover expands the trace it could happen that  HASH( hash_prev_step | trace_write ) != hash_step
 // in that case the verifier can win the challenge executing:
 //  hash_funcion ( WOTS_PROVER_HASH_STEP_PREV:64 | WOTS_PROVER_WRITE_ADD:8 | WOTS_PROVER_WRITE_DATA:8 | WOTS_PROVER_WRITE_PC:8 | WOTS_PROVER_WRITE_MICRO:2 ) != WOTS_PROVER_HASH:64
-pub fn trace_hash_challenge() {}
+pub fn trace_hash_challenge(stack: &mut StackTracker) {
+    stack.clear_definitions();
+
+    let prev_hash = stack.define(40, "prev_hash");
+    let write_add = stack.define(8, "write_add");
+    let write_data = stack.define(8, "write_data");
+    let write_pc = stack.define(8, "write_pc");
+    let write_micro = stack.define(2, "write_micro");
+
+    let hash = stack.define(40, "hash");
+
+    //save the hash to compare
+    stack.to_altstack();
+
+    stack.explode(prev_hash);
+    stack.explode(write_add);
+    stack.explode(write_data);
+    stack.explode(write_pc);
+    stack.explode(write_micro);
+
+    let result = blake3::blake3(stack, (40 + 8 + 8 + 8 + 2) / 2, 5);
+    stack.from_altstack();
+    stack.not_equal(result, true, hash, true);
+}
 
 //TODO: memory section challenge
 //TODO: program crash challenge - this might be more about finding the right place to challenge that a challenge itself
@@ -237,5 +260,45 @@ mod tests {
         assert!(test_halt_challenge_aux(0x0, 0x0, 93, 0, 114));
         assert!(!test_halt_challenge_aux(0x0, 0x0, 93, 0, 115));
         assert!(!test_halt_challenge_aux(0x0, 0x1, 93, 0, 114));
+    }
+
+    fn test_trace_hash_aux(
+        pre_hash: &str,
+        write_add: u32,
+        write_value: u32,
+        pc: u32,
+        micro: u8,
+        hash: &str,
+    ) -> bool {
+        let mut stack = StackTracker::new();
+
+        stack.hexstr_as_nibbles(pre_hash);
+        stack.number_u32(write_add);
+        stack.number_u32(write_value);
+        stack.number_u32(pc);
+        stack.byte(micro);
+
+        stack.hexstr_as_nibbles(hash);
+
+        trace_hash_challenge(&mut stack);
+
+        stack.op_true();
+        stack.run().success
+    }
+
+    #[test]
+    fn test_trace_hash() {
+        let pre_hash = "e2f115006467b4b1b2b27612bbfd40ed3bc8299b";
+        let hash = "345721506e79c53d2549fc63d02ba8fc3b17efa4";
+
+        //prover provided valid hash, verifier loses
+        assert!(!test_trace_hash_aux(
+            pre_hash, 0xf0000028, 0x00000001, 0x8000010c, 0x00, hash
+        ));
+
+        //prover provided invalid hash, verifier wins
+        assert!(test_trace_hash_aux(
+            pre_hash, 0xf0000028, 0x00000001, 0x8000010c, 0x01, hash
+        ));
     }
 }
