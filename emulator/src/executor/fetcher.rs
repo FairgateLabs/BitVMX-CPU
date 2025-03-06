@@ -739,7 +739,7 @@ pub fn op_store(
             if micro == 0 && word && reads == 0 {
                 let read_2 = TraceRead::new_from(&program.registers, x.rs2());
                 let value = program.registers.get(x.rs2());
-                program.write_mem(dest_mem, value);
+                program.write_mem(dest_mem, value)?;
                 program.pc.next_address();
 
                 return Ok((read_1, read_2, TraceWrite::new(dest_mem, value)));
@@ -828,7 +828,7 @@ pub fn op_store(
             if micro == 7 {
                 dest_mem += 4;
             }
-            program.write_mem(dest_mem, value);
+            program.write_mem(dest_mem, value)?;
             let write_1 = TraceWrite::new(dest_mem, value);
 
             if reads == 1 || micro == 7 {

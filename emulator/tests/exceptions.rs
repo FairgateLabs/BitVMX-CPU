@@ -42,6 +42,12 @@ fn exception_cases() {
         ExecutionResult::SectionNotFound("Address 0x00000000 not found in any section".to_string()),
     );
     test_cases.insert("pc_reg.elf", ExecutionResult::RegistersSectionFail);
+    test_cases.insert("write_reg.elf", ExecutionResult::RegistersSectionFail);
+    test_cases.insert(
+        "write_invalid.elf",
+        ExecutionResult::SectionNotFound("Address 0x00000000 not found in any section".to_string()),
+    );
+    test_cases.insert("write_protected.elf", ExecutionResult::WriteToCodeSection);
 
     let path = "../docker-riscv32/riscv32/build/exceptions";
     let paths = std::fs::read_dir(path).unwrap();

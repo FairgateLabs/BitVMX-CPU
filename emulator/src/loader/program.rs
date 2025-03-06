@@ -289,14 +289,15 @@ impl Program {
         section.last_step[(address - section.start) as usize / 4]
     }
 
-    pub fn write_mem(&mut self, address: u32, value: u32) {
+    pub fn write_mem(&mut self, address: u32, value: u32) -> Result<(), ExecutionResult> {
         let step = self.step;
-        let section = self.find_section_mut(address).expect(&format!(
-            "Address 0x{:08x} not found in any section",
-            address
-        ));
+        let section = self.find_section_mut(address)?;
+        if section.is_code {
+            return Err(ExecutionResult::WriteToCodeSection);
+        }
         section.data[(address - section.start) as usize / 4] = value.to_be();
-        section.last_step[(address - section.start) as usize / 4] = step
+        section.last_step[(address - section.start) as usize / 4] = step;
+        Ok(())
     }
 
     pub fn dump_memory(&self) {
@@ -558,6 +559,16 @@ mod tests {
         assert_eq!(
             program.find_section_mut(0),
             Err(ExecutionResult::RegistersSectionFail)
+        );
+    }
+
+    #[test]
+    fn test_write_to_code_section() {
+        let mut program = Program::new(0, 0, 0);
+        program.add_section(Section::new("code", 0, 10, true, false));
+        assert_eq!(
+            program.write_mem(0, 123),
+            Err(ExecutionResult::WriteToCodeSection)
         );
     }
 }

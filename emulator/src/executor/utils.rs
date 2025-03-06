@@ -49,7 +49,9 @@ impl FailRead {
         }
 
         if program.find_section(self.address_original).is_ok() {
-            program.write_mem(self.address_original, self.value);
+            program
+                .write_mem(self.address_original, self.value)
+                .unwrap();
             return;
         }
     }

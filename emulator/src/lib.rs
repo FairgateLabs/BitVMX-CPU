@@ -29,6 +29,9 @@ pub enum ExecutionResult {
 
     #[error("Can't load the program {0}")]
     CantLoadPorgram(String),
+
+    #[error("Can't write into the code section")]
+    WriteToCodeSection,
 }
 
 pub mod constants {
