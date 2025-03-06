@@ -10,7 +10,7 @@ use tracing::{error, info};
 
 use crate::{constants::*, executor::trace::generate_initial_step_hash, ExecutionResult};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Section {
     pub name: String,
     pub data: Vec<u32>,
@@ -216,9 +216,10 @@ impl Program {
         self.sections.insert(pos, section);
     }
 
-    fn find_section_idx(&self, address: u32) -> Option<usize> {
+    fn find_section_idx(&self, address: u32) -> Result<usize, ExecutionResult> {
         // Binary search to find the appropriate section
-        self.sections
+        Ok(self
+            .sections
             .binary_search_by(|section| {
                 if address < section.start {
                     Ordering::Greater
@@ -228,18 +229,42 @@ impl Program {
                     Ordering::Equal
                 }
             })
-            .ok()
+            .map_err(|_| {
+                ExecutionResult::SectionNotFound(format!(
+                    "Address 0x{:08x} not found in any section",
+                    address
+                ))
+            })?)
     }
 
     // Find the section that contains the given address
-    pub fn find_section(&self, address: u32) -> Option<&Section> {
-        self.sections.get(self.find_section_idx(address)?)
+    pub fn find_section(&self, address: u32) -> Result<&Section, ExecutionResult> {
+        let section_idx = self.find_section_idx(address)?;
+        let section = self.sections.get(section_idx).ok_or_else(|| {
+            ExecutionResult::SectionNotFound(format!(
+                "Address 0x{:08x} not found in any section",
+                address
+            ))
+        })?;
+        if section.registers {
+            return Err(ExecutionResult::RegistersSectionFail);
+        }
+        Ok(section)
     }
 
     // Find the section that contains the given address
-    pub fn find_section_mut(&mut self, address: u32) -> Option<&mut Section> {
-        let idx = self.find_section_idx(address)?;
-        self.sections.get_mut(idx)
+    pub fn find_section_mut(&mut self, address: u32) -> Result<&mut Section, ExecutionResult> {
+        let section_idx = self.find_section_idx(address)?;
+        let section = self.sections.get_mut(section_idx).ok_or_else(|| {
+            ExecutionResult::SectionNotFound(format!(
+                "Address 0x{:08x} not found in any section",
+                address
+            ))
+        })?;
+        if section.registers {
+            return Err(ExecutionResult::RegistersSectionFail);
+        }
+        Ok(section)
     }
 
     pub fn find_section_by_name(&mut self, name: &str) -> Option<&mut Section> {
@@ -249,15 +274,14 @@ impl Program {
     }
 
     //TODO: handle errors
-    pub fn read_mem(&self, address: u32) -> u32 {
+    pub fn read_mem(&self, address: u32) -> Result<u32, ExecutionResult> {
         if cfg!(target_endian = "big") {
             panic!("Big endian machine not supported");
         }
-        let section = self.find_section(address).expect(&format!(
-            "Address 0x{:08x} not found in any section",
-            address
-        ));
-        u32::from_be(section.data[(address - section.start) as usize / 4])
+        let section = self.find_section(address)?;
+        Ok(u32::from_be(
+            section.data[(address - section.start) as usize / 4],
+        ))
     }
 
     pub fn get_last_step(&self, address: u32) -> u64 {
@@ -444,7 +468,7 @@ pub struct RomCommitment {
     pub zero_initialized: Vec<(u32, u32)>, //start, size
 }
 
-pub fn generate_rom_commitment(program: &Program) -> RomCommitment {
+pub fn generate_rom_commitment(program: &Program) -> Result<RomCommitment, ExecutionResult> {
     let mut rom_commitment = RomCommitment {
         entrypoint: program.pc.get_address(),
         code: Vec::new(),
@@ -456,7 +480,7 @@ pub fn generate_rom_commitment(program: &Program) -> RomCommitment {
         if section.is_code {
             for i in 0..section.size / 4 {
                 let position = section.start + i * 4;
-                let data = program.read_mem(position);
+                let data = program.read_mem(position)?;
 
                 let instruction = riscv_decode::decode(data).expect(&format!(
                     "code section with undecodeable instruction: 0x{:08x} at position: 0x{:08x}",
@@ -483,7 +507,7 @@ pub fn generate_rom_commitment(program: &Program) -> RomCommitment {
         if !section.is_code && section.initialized {
             for i in 0..section.size / 4 {
                 let position = section.start + i * 4;
-                let data = program.read_mem(position);
+                let data = program.read_mem(position)?;
                 info!("Address: 0x{:08x} value: 0x{:08x}", position, data);
                 rom_commitment.constants.push((position, data));
             }
@@ -503,7 +527,7 @@ pub fn generate_rom_commitment(program: &Program) -> RomCommitment {
 
     info!("Entrypoint: 0x{:08x}", program.pc.get_address());
 
-    rom_commitment
+    Ok(rom_commitment)
 }
 
 #[cfg(test)]
@@ -520,6 +544,20 @@ mod tests {
             Err(ExecutionResult::CantLoadPorgram(
                 "Overlapping sections: test_1 and test_2".to_string()
             ))
+        );
+    }
+
+    #[test]
+    fn test_invalid_use_of_registers_section() {
+        let mut program = Program::new(0, 0, 0);
+        program.add_section(Section::new("registers", 0, 10, false, true));
+        assert_eq!(
+            program.find_section(0),
+            Err(ExecutionResult::RegistersSectionFail)
+        );
+        assert_eq!(
+            program.find_section_mut(0),
+            Err(ExecutionResult::RegistersSectionFail)
         );
     }
 }

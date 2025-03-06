@@ -18,6 +18,9 @@ pub enum ExecutionResult {
     #[error("Section: {0} not found")]
     SectionNotFound(String),
 
+    #[error("Registers section can not be accessed")]
+    RegistersSectionFail,
+
     #[error("Not implemented {0} {1}")]
     InstructionNotImplemented(u32, String),
 

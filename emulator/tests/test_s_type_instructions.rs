@@ -109,11 +109,13 @@ fn test_store_word(
     }
 
     assert_eq!(
-        program.read_mem(start_address + imm_value),
+        program.read_mem(start_address + imm_value).unwrap(),
         expected_reg_aux_1
     );
     assert_eq!(
-        program.read_mem(start_address + imm_value + mem_aux_2_byte_offset),
+        program
+            .read_mem(start_address + imm_value + mem_aux_2_byte_offset)
+            .unwrap(),
         expected_reg_aux_2
     );
 }
@@ -157,11 +159,13 @@ fn test_store_half_word(
     }
 
     assert_eq!(
-        program.read_mem(start_address + imm_value),
+        program.read_mem(start_address + imm_value).unwrap(),
         expected_reg_aux_1
     );
     assert_eq!(
-        program.read_mem(start_address + imm_value + mem_aux_2_byte_offset),
+        program
+            .read_mem(start_address + imm_value + mem_aux_2_byte_offset)
+            .unwrap(),
         expected_reg_aux_2
     );
 }
@@ -203,5 +207,8 @@ fn test_store_byte(
         let _ = op_store(&instruction, &x, &mut program);
     }
 
-    assert_eq!(program.read_mem(start_address + imm_value), expected);
+    assert_eq!(
+        program.read_mem(start_address + imm_value).unwrap(),
+        expected
+    );
 }

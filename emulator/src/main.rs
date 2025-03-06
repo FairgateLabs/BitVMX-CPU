@@ -146,7 +146,7 @@ fn main() -> Result<(), ExecutionResult> {
         }
         Some(Commands::GenerateRomCommitment { elf, sections }) => {
             let program = load_elf(elf, *sections)?;
-            generate_rom_commitment(&program);
+            generate_rom_commitment(&program)?;
         }
         Some(Commands::Execute {
             elf,

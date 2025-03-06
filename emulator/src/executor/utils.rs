@@ -48,7 +48,7 @@ impl FailRead {
             program.registers.set(idx, self.value, program.step);
         }
 
-        if program.find_section(self.address_original).is_some() {
+        if program.find_section(self.address_original).is_ok() {
             program.write_mem(self.address_original, self.value);
             return;
         }
@@ -163,7 +163,7 @@ mod utils_tests {
         program.step = 9;
         fail_reads.patch_mem(&mut program);
 
-        assert_eq!(program.read_mem(4096), 10);
+        assert_eq!(program.read_mem(4096).unwrap(), 10);
     }
 
     #[test]
@@ -190,7 +190,7 @@ mod utils_tests {
         program.step = 9;
         fail_reads.patch_mem(&mut program);
 
-        assert_eq!(program.read_mem(4100), 11);
+        assert_eq!(program.read_mem(4100).unwrap(), 11);
     }
 
     #[test]
@@ -210,6 +210,6 @@ mod utils_tests {
         program.step = 10;
         fail_reads.patch_mem(&mut program);
 
-        assert_eq!(program.read_mem(4100), 0);
+        assert_eq!(program.read_mem(4100).unwrap(), 0);
     }
 }

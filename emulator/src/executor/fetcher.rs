@@ -33,8 +33,6 @@ pub fn execute_program(
 ) -> Result<(Vec<String>, ExecutionResult), ExecutionResult> {
     let trace_set: Option<HashSet<u64>> = trace_list.map(|vec| vec.into_iter().collect());
 
-    //TOOD: This is a hack to copy the input into the bss section
-    //copy into bss section the input
     if !input.is_empty() {
         let section = program
             .find_section_by_name(input_section)
@@ -227,7 +225,7 @@ pub fn execute_step(
 ) -> Result<TraceRWStep, ExecutionResult> {
     let pc = program.pc.clone();
 
-    let opcode = program.read_mem(pc.get_address());
+    let opcode = program.read_mem(pc.get_address())?;
     let instruction = riscv_decode::decode(opcode).unwrap();
 
     if debug && program.step % 100000000 < 10000 {
@@ -264,8 +262,8 @@ pub fn execute_step(
         Sll(x) | Srl(x) | Sra(x) | Slt(x) | Sltu(x) => op_shift_sl(&instruction, &x, program),
         Slli(x) | Srli(x) | Srai(x) => op_shift_imm(&instruction, &x, program),
         Slti(x) | Sltiu(x) => op_sl_imm(&instruction, &x, program),
-        Sb(x) | Sh(x) | Sw(x) => op_store(&instruction, &x, program),
-        Lbu(x) | Lb(x) | Lh(x) | Lhu(x) | Lw(x) => op_load(&instruction, &x, program),
+        Sb(x) | Sh(x) | Sw(x) => op_store(&instruction, &x, program)?,
+        Lbu(x) | Lb(x) | Lh(x) | Lhu(x) | Lw(x) => op_load(&instruction, &x, program)?,
         Auipc(x) | Lui(x) => op_upper(&instruction, &x, program),
         Beq(x) | Bne(x) | Blt(x) | Bge(x) | Bltu(x) | Bgeu(x) => {
             op_conditional(&instruction, &x, program)
@@ -304,7 +302,7 @@ pub fn op_ecall(
     match syscall {
         116 => {
             if print_program_stdout {
-                let x = program.read_mem(0xA000_1000) >> 24;
+                let x = program.read_mem(0xA000_1000).unwrap_or(0) >> 24;
                 print!("{}", x as u8 as char);
             }
             program.pc.next_address();
@@ -723,10 +721,10 @@ pub fn op_store(
     instruction: &Instruction,
     x: &SType,
     program: &mut Program,
-) -> (TraceRead, TraceRead, TraceWrite) {
+) -> Result<(TraceRead, TraceRead, TraceWrite), ExecutionResult> {
     let micro = program.pc.get_micro();
 
-    match micro {
+    Ok(match micro {
         0 | 4 => {
             let (read_1, mut dest_mem, alignment) = get_dest_mem(&program.registers, x);
             let (word, _half, _byte, reads) =
@@ -742,7 +740,7 @@ pub fn op_store(
                 program.write_mem(dest_mem, value);
                 program.pc.next_address();
 
-                return (read_1, read_2, TraceWrite::new(dest_mem, value));
+                return Ok((read_1, read_2, TraceWrite::new(dest_mem, value)));
             }
 
             let (mask_dst, _mask_src, _move_masked) = if micro == 0 {
@@ -758,7 +756,7 @@ pub fn op_store(
             if micro == 4 {
                 dest_mem += 4;
             }
-            let value = program.read_mem(dest_mem);
+            let value = program.read_mem(dest_mem)?;
             let read_2 = TraceRead::new(dest_mem, value, program.get_last_step(dest_mem));
 
             let masked = mask_dst & value;
@@ -842,7 +840,7 @@ pub fn op_store(
         _ => {
             panic!("Unreachable");
         }
-    }
+    })
 }
 
 pub fn get_src_mem(registers: &Registers, x: &IType) -> (TraceRead, u32, u32) {
@@ -855,14 +853,14 @@ pub fn op_load(
     instruction: &Instruction,
     x: &IType,
     program: &mut Program,
-) -> (TraceRead, TraceRead, TraceWrite) {
+) -> Result<(TraceRead, TraceRead, TraceWrite), ExecutionResult> {
     if x.rd() == REGISTER_ZERO as u32 {
         program.pc.next_address();
-        return (
+        return Ok((
             TraceRead::default(),
             TraceRead::default(),
             TraceWrite::default(),
-        );
+        ));
     }
 
     let micro = program.pc.get_micro();
@@ -870,7 +868,7 @@ pub fn op_load(
     let (read_1, mut src_mem, alignment) = get_src_mem(&program.registers, x);
     let (_word, _half, _byte, reads) = get_type_and_read_from_instruction(instruction, alignment);
 
-    match micro {
+    Ok(match micro {
         1 | 0 => {
             // micro 0:
             //  alligned =>
@@ -884,7 +882,7 @@ pub fn op_load(
                 src_mem += 4;
             }
 
-            let value = program.read_mem(src_mem);
+            let value = program.read_mem(src_mem)?;
             let last_step = program.get_last_step(src_mem);
             let read_2 = TraceRead::new(src_mem, value, last_step);
 
@@ -950,7 +948,7 @@ pub fn op_load(
         _ => {
             panic!("Unreachable");
         }
-    }
+    })
 }
 
 pub fn op_upper(
