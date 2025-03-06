@@ -6,7 +6,7 @@ use thiserror::Error;
 pub enum ExecutionResult {
     #[error("Ok")]
     Ok,
-    #[error("Program terminated successfully")]
+    #[error("Program terminated successfully ret:{0}")]
     Halt(u32),
 
     #[error("Step limit reached")]

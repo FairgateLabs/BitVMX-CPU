@@ -396,7 +396,7 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Result<Program, ExecutionRe
 
     program.add_section(Section::new(
         "registers",
-        REGISTERS_BASE_ADDRESS,
+        program.registers.get_base_address(),
         ((RISCV32_REGISTERS + AUX_REGISTERS) * 4) as u32,
         false,
         true,

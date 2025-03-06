@@ -226,26 +226,30 @@ fn main() -> Result<(), ExecutionResult> {
                 None
             };
 
-            execute_program(
-                &mut program,
-                input,
-                &input_section.clone().unwrap_or(".input".to_string()),
-                *input_as_little,
-                &checkpoint_path,
-                *limit,
-                *trace,
-                *verify,
-                !*no_mapping,
-                *stdout,
-                *debug,
-                *no_hash,
-                *fail_hash,
-                *fail_execute,
-                numbers,
-                *dump_mem,
-                fail_reads,
-                *fail_pc,
-            )?;
+            let debugvar = *debug;
+            info!(
+                "{}",
+                execute_program(
+                    &mut program,
+                    input,
+                    &input_section.clone().unwrap_or(".input".to_string()),
+                    *input_as_little,
+                    &checkpoint_path,
+                    *limit,
+                    *trace,
+                    *verify,
+                    !*no_mapping,
+                    *stdout,
+                    debugvar,
+                    *no_hash,
+                    *fail_hash,
+                    *fail_execute,
+                    numbers,
+                    *dump_mem,
+                    fail_reads,
+                    *fail_pc,
+                )
+            );
         }
         None => {
             error!("No command specified");

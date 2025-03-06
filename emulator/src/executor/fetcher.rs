@@ -14,7 +14,7 @@ use tracing::{error, info};
 pub fn execute_program(
     program: &mut Program,
     input: Vec<u8>,
-    input_section: &str,
+    input_section_name: &str,
     little_endian: bool,
     checkpoint_path: &Option<String>,
     limit_step: Option<u64>,
@@ -30,16 +30,17 @@ pub fn execute_program(
     mem_dump: Option<u64>,
     fail_reads: Option<FailReads>,
     fail_pc: Option<u64>,
-) -> Result<(Vec<String>, ExecutionResult), ExecutionResult> {
+) -> ExecutionResult {
     let trace_set: Option<HashSet<u64>> = trace_list.map(|vec| vec.into_iter().collect());
 
     if !input.is_empty() {
-        let section = program
-            .find_section_by_name(input_section)
-            .ok_or(ExecutionResult::SectionNotFound(input_section.to_string()))?;
-        let input_as_u32 = vec_u8_to_vec_u32(&input, little_endian);
-        for (i, byte) in input_as_u32.iter().enumerate() {
-            section.data[i] = *byte;
+        if let Some(section) = program.find_section_by_name(input_section_name) {
+            let input_as_u32 = vec_u8_to_vec_u32(&input, little_endian);
+            for (i, byte) in input_as_u32.iter().enumerate() {
+                section.data[i] = *byte;
+            }
+        } else {
+            return ExecutionResult::SectionNotFound(input_section_name.to_string());
         }
     }
     let instruction_mapping = match validate_on_chain && use_instruction_mapping {
@@ -83,15 +84,16 @@ pub fn execute_program(
             }
 
             if debug && !input.is_empty() {
-                let bss = program
-                    .find_section_by_name(input_section)
-                    .ok_or(ExecutionResult::SectionNotFound(input_section.to_string()))?;
-                for (idx, value) in bss.data.iter().enumerate().take(10) {
-                    info!(
-                        "{:x}:  {:08x} ",
-                        (idx * 4) + bss.start as usize,
-                        value.to_be()
-                    );
+                if let Some(input_section) = program.find_section_by_name(input_section_name) {
+                    for (idx, value) in input_section.data.iter().enumerate().take(10) {
+                        info!(
+                            "{:x}:  {:08x} ",
+                            (idx * 4) + input_section.start as usize,
+                            value.to_be()
+                        );
+                    }
+                } else {
+                    return ExecutionResult::SectionNotFound(input_section_name.to_string());
                 }
             }
         }
@@ -193,7 +195,7 @@ pub fn execute_program(
         );
     }
 
-    Ok((vec![], ret))
+    ret
 }
 
 pub fn wrapping_add(value: u32, x: u32, mask: u8) -> u32 {
