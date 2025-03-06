@@ -150,6 +150,7 @@ mod utils_tests {
             size: 16,
             is_code: false,
             initialized: true,
+            registers: false,
         });
         let fail_read_1_args = vec![
             "10".to_string(),
@@ -176,6 +177,7 @@ mod utils_tests {
             size: 16,
             is_code: false,
             initialized: true,
+            registers: false,
         });
         let fail_read_2_args = vec![
             "10".to_string(),
@@ -202,6 +204,7 @@ mod utils_tests {
             size: 16,
             is_code: false,
             initialized: true,
+            registers: false,
         });
         let fail_reads = FailReads::new(None, None);
         program.step = 10;

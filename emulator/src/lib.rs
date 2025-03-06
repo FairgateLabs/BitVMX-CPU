@@ -2,7 +2,7 @@ pub mod executor;
 pub mod loader;
 
 use thiserror::Error;
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum ExecutionResult {
     #[error("Ok")]
     Ok,

@@ -116,7 +116,7 @@ pub fn get_key_from_instruction_and_micro(instruction: &Instruction, micro: u8) 
         Ecall => "ecall".to_string(),
         Ebreak => "nop".to_string(),
 
-        _ => panic!("Instruction not supported"),
+        _ => panic!("Instruction not supported {:?}", instruction),
     }
 }
 

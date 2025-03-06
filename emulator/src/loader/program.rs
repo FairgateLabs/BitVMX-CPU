@@ -19,6 +19,42 @@ pub struct Section {
     pub size: u32,
     pub is_code: bool,
     pub initialized: bool,
+    pub registers: bool, // special section for registers
+}
+
+impl Section {
+    pub fn new(name: &str, start: u32, size: u32, is_code: bool, registers: bool) -> Section {
+        Section {
+            name: name.to_string(),
+            data: vec![0; size as usize / 4],
+            last_step: vec![LAST_STEP_INIT; size as usize / 4],
+            start,
+            size,
+            is_code,
+            initialized: false,
+            registers,
+        }
+    }
+
+    pub fn new_with_data(
+        name: &str,
+        data: Vec<u32>,
+        start: u32,
+        size: u32,
+        is_code: bool,
+        initialized: bool,
+    ) -> Section {
+        Section {
+            name: name.to_string(),
+            data,
+            last_step: vec![LAST_STEP_INIT; size as usize / 4],
+            start,
+            size,
+            is_code,
+            initialized,
+            registers: false,
+        }
+    }
 }
 
 pub const CHECKPOINT_SIZE: u64 = 50_000_000;
@@ -151,6 +187,25 @@ impl Program {
                 .expect("Invalid hash size"),
             halt: false,
         }
+    }
+
+    pub fn sanity_check(&self) -> Result<(), ExecutionResult> {
+        //check overlapping sections
+        for i in 0..self.sections.len() {
+            for j in i + 1..self.sections.len() {
+                let section1 = &self.sections[i];
+                let section2 = &self.sections[j];
+                if section1.start < section2.start + section2.size
+                    && section1.start + section1.size > section2.start
+                {
+                    return Err(ExecutionResult::CantLoadPorgram(format!(
+                        "Overlapping sections: {} and {}",
+                        section1.name, section2.name
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn add_section(&mut self, section: Section) {
@@ -315,6 +370,17 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Result<Program, ExecutionRe
         ExecutionResult::CantLoadPorgram(format!("Can't read headers for: {}", fname))
     })?;
 
+    program.add_section(Section::new(
+        "registers",
+        REGISTERS_BASE_ADDRESS,
+        ((RISCV32_REGISTERS + AUX_REGISTERS) * 4) as u32,
+        false,
+        true,
+    ));
+    if show_sections {
+        info!("Loading section: {} Start: 0x{:08x} Size: 0x{:08x} Initialized: {} Flags: {:0b} Type: {:0b} ", "registers", REGISTERS_BASE_ADDRESS, ((RISCV32_REGISTERS + AUX_REGISTERS) * 4) as u32, false, 0, 0);
+    }
+
     sections.iter().for_each(|phdr| {
 
         if phdr.sh_flags as u32 & elf::abi::SHF_ALLOC != elf::abi::SHF_ALLOC {
@@ -354,16 +420,10 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Result<Program, ExecutionRe
             info!("Loading section: {} Start: 0x{:08x} Size: 0x{:08x} Initialized: {} Flags: {:0b} Type: {:0b} ", name, start, size, initialized, phdr.sh_flags, phdr.sh_type);
         }
 
-        program.add_section(Section {
-            name,
-            data,
-            last_step: vec![LAST_STEP_INIT; size as usize / 4],
-            start,
-            size,
-            is_code: phdr.sh_flags as u32 & SHF_EXECINSTR == SHF_EXECINSTR,
-            initialized: initialized,
-        })
+        program.add_section(Section::new_with_data(&name, data, start, size, phdr.sh_flags as u32 & SHF_EXECINSTR == SHF_EXECINSTR, initialized));
     });
+
+    program.sanity_check()?;
 
     Ok(program)
 }
@@ -444,4 +504,22 @@ pub fn generate_rom_commitment(program: &Program) -> RomCommitment {
     info!("Entrypoint: 0x{:08x}", program.pc.get_address());
 
     rom_commitment
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_overlap_sections() {
+        let mut program = Program::new(0, 0, 0);
+        program.add_section(Section::new("test_1", 0, 10, false, false));
+        program.add_section(Section::new("test_2", 9, 5, false, false));
+        assert_eq!(
+            program.sanity_check(),
+            Err(ExecutionResult::CantLoadPorgram(
+                "Overlapping sections: test_1 and test_2".to_string()
+            ))
+        );
+    }
 }

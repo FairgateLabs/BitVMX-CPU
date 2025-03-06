@@ -65,6 +65,7 @@ pub fn get_new_section() -> Section {
         size: 20 * 4,
         is_code: false,
         initialized: true,
+        registers: false,
     }
 }
 
