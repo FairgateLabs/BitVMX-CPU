@@ -12,6 +12,7 @@ hex = "0.4.3"
 thiserror = "1.0.61"
 blake3 = "1.6.1"
 bitcoin-script-riscv = { path = "../bitcoin-script-riscv" }
+bitvmx-cpu-definitions = { path = "../definitions" }
 clap = "4.5.8"
 
 tracing = "0.1.40"

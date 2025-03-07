@@ -1,7 +1,6 @@
 use crate::loader::program::{ProgramCounter, Registers};
+use bitvmx_cpu_definitions::MemoryWitness;
 use blake3::Hasher;
-
-//TODO: Define INITIAL_STATE for last_step
 
 #[derive(Debug, Default)]
 pub struct TraceRead {
@@ -117,6 +116,7 @@ pub struct TraceRWStep {
     pub(crate) read_pc: TraceReadPC,
     pub(crate) trace_step: TraceStep,
     pub(crate) witness: Option<u32>,
+    pub(crate) mem_witness: MemoryWitness,
 }
 
 impl TraceRWStep {
@@ -126,6 +126,7 @@ impl TraceRWStep {
         read_pc: TraceReadPC,
         trace_step: TraceStep,
         witness: Option<u32>,
+        mem_witness: MemoryWitness,
     ) -> TraceRWStep {
         TraceRWStep {
             read_1,
@@ -133,6 +134,7 @@ impl TraceRWStep {
             read_pc,
             trace_step,
             witness,
+            mem_witness,
         }
     }
 
@@ -147,7 +149,7 @@ impl TraceRWStep {
     pub fn to_csv(&self) -> String {
         //"read1_address;read1_value;read1_last_step;read2_address;read2_value;read2_last_step;read_pc_address;read_pc_micro;read_pc_opcode;write_address;write_value;write_pc;write_micro;write_trace;step_hash;step".to_string()
         format!(
-            "{:08x};{:08x};{:016x};{:08x};{:08x};{:016x};{:08x};{:02x};{:08x};{:08x};{:08x};{:08x};{:02x}",
+            "{:08x};{:08x};{:016x};{:08x};{:08x};{:016x};{:08x};{:02x};{:08x};{:08x};{:08x};{:08x};{:02x};{:08x};{:02x}",
             self.read_1.address,
             self.read_1.value,
             self.read_1.last_step,
@@ -161,6 +163,8 @@ impl TraceRWStep {
             self.trace_step.get_write().value,
             self.trace_step.get_pc().get_address(),
             self.trace_step.get_pc().get_micro(),
+            self.witness.unwrap_or(0),
+            self.mem_witness.byte()
         )
     }
 }

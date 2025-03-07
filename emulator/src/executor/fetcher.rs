@@ -5,6 +5,7 @@ use crate::{
     executor::alignment_masks::*, executor::trace::*, loader::program::*, ExecutionResult,
 };
 use bitcoin_script_riscv::riscv::instruction_mapping::create_verification_script_mapping;
+use bitvmx_cpu_definitions::{MemoryAccessType, MemoryWitness};
 use riscv_decode::{
     types::*,
     Instruction::{self, *},
@@ -243,13 +244,14 @@ pub fn execute_step(
 
     let mut witness = None;
 
-    let (read_1, read_2, write_1) = match instruction {
+    let (read_1, read_2, write_1, mem_witness) = match instruction {
         Ebreak | Fence(_) => {
             program.pc.next_address();
             (
                 TraceRead::default(),
                 TraceRead::default(),
                 TraceWrite::default(),
+                MemoryWitness::default(),
             )
         }
         Ecall => op_ecall(program, print_program_stdout, debug),
@@ -285,6 +287,7 @@ pub fn execute_step(
         TraceReadPC::new(pc, opcode),
         TraceStep::new(write_1, TraceWritePC::new(&program.pc)),
         witness,
+        mem_witness,
     );
 
     program.step += 1;
@@ -295,7 +298,7 @@ pub fn op_ecall(
     program: &mut Program,
     print_program_stdout: bool,
     debug: bool,
-) -> (TraceRead, TraceRead, TraceWrite) {
+) -> (TraceRead, TraceRead, TraceWrite, MemoryWitness) {
     let syscall = program.registers.get(REGISTER_A7_ECALL_ARG as u32);
     let value_2 = program.registers.get(REGISTER_A0 as u32);
     let read_1 = TraceRead::new_from(&program.registers, REGISTER_A7_ECALL_ARG as u32);
@@ -308,7 +311,12 @@ pub fn op_ecall(
                 print!("{}", x as u8 as char);
             }
             program.pc.next_address();
-            (read_1, read_2, TraceWrite::default())
+            (
+                read_1,
+                read_2,
+                TraceWrite::default(),
+                MemoryWitness::no_write(),
+            )
         }
         93 => {
             if debug {
@@ -327,13 +335,19 @@ pub fn op_ecall(
                 read_1,
                 read_2,
                 TraceWrite::new_from(&program.registers, REGISTER_A0 as u32),
+                MemoryWitness::registers(),
             )
             //Intenttionally PC is not modified and remains in this instruction
         }
         _ => {
             error!("Unimplemented syscall: {}", syscall);
             program.pc.next_address();
-            (read_1, read_2, TraceWrite::default())
+            (
+                read_1,
+                read_2,
+                TraceWrite::default(),
+                MemoryWitness::no_write(),
+            )
         }
     }
 }
@@ -342,7 +356,7 @@ pub fn op_conditional(
     instruction: &Instruction,
     x: &BType,
     program: &mut Program,
-) -> (TraceRead, TraceRead, TraceWrite) {
+) -> (TraceRead, TraceRead, TraceWrite, MemoryWitness) {
     let value_1 = program.registers.get(x.rs1());
     let value_2 = program.registers.get(x.rs2());
     let read_1 = TraceRead::new_from(&program.registers, x.rs1());
@@ -366,56 +380,92 @@ pub fn op_conditional(
         program.pc.next_address();
     }
 
-    (read_1, read_2, TraceWrite::default())
+    (
+        read_1,
+        read_2,
+        TraceWrite::default(),
+        MemoryWitness::no_write(),
+    )
 }
 
-pub fn op_jal(x: &JType, program: &mut Program) -> (TraceRead, TraceRead, TraceWrite) {
+pub fn op_jal(
+    x: &JType,
+    program: &mut Program,
+) -> (TraceRead, TraceRead, TraceWrite, MemoryWitness) {
     let pc = program.pc.clone();
     let dest_register = x.rd();
 
-    let write_1 = if dest_register == REGISTER_ZERO as u32 {
+    let (write_1, mem_witness) = if dest_register == REGISTER_ZERO as u32 {
         //used by direct jumps without return address
-        TraceWrite::default()
+        (TraceWrite::default(), MemoryWitness::no_write())
     } else {
         //state modification
         program
             .registers
             .set(dest_register, pc.get_address() + 4, program.step);
-        TraceWrite::new_from(&program.registers, dest_register)
+        (
+            TraceWrite::new_from(&program.registers, dest_register),
+            MemoryWitness::new(
+                MemoryAccessType::Unused,
+                MemoryAccessType::Unused,
+                MemoryAccessType::Register,
+            ),
+        )
     };
 
     program.pc.jump(wrapping_add_jtype(pc.get_address(), x));
 
-    (TraceRead::default(), TraceRead::default(), write_1)
+    (
+        TraceRead::default(),
+        TraceRead::default(),
+        write_1,
+        mem_witness,
+    )
 }
 
-pub fn op_jalr(x: &IType, program: &mut Program) -> (TraceRead, TraceRead, TraceWrite) {
+pub fn op_jalr(
+    x: &IType,
+    program: &mut Program,
+) -> (TraceRead, TraceRead, TraceWrite, MemoryWitness) {
     let pc = program.pc.clone();
     let dest_register = x.rd();
     let src_value = program.registers.get(x.rs1());
     let read_1 = TraceRead::new_from(&program.registers, x.rs1());
 
-    let write_1 = if dest_register == REGISTER_ZERO as u32 {
+    let (write_1, mem_witness) = if dest_register == REGISTER_ZERO as u32 {
         //used by rets
-        TraceWrite::default()
+        (
+            TraceWrite::default(),
+            MemoryWitness::new(
+                MemoryAccessType::Register,
+                MemoryAccessType::Unused,
+                MemoryAccessType::Unused,
+            ),
+        )
     } else {
         //state modification
         program
             .registers
             .set(dest_register, pc.get_address() + 4, program.step);
-        TraceWrite::new_from(&program.registers, dest_register)
+        (
+            TraceWrite::new_from(&program.registers, dest_register),
+            MemoryWitness::rur(),
+        )
     };
 
     program.pc.jump(wrapping_add_itype(src_value, x));
 
-    (read_1, TraceRead::default(), write_1)
+    (read_1, TraceRead::default(), write_1, mem_witness)
 }
 
 pub fn op_arithmetic(
     instruction: &Instruction,
     x: &RType,
     program: &mut Program,
-) -> ((TraceRead, TraceRead, TraceWrite), Option<u32>) {
+) -> (
+    (TraceRead, TraceRead, TraceWrite, MemoryWitness),
+    Option<u32>,
+) {
     if x.rd() == REGISTER_ZERO as u32 {
         program.pc.next_address();
         return (
@@ -423,6 +473,7 @@ pub fn op_arithmetic(
                 TraceRead::default(),
                 TraceRead::default(),
                 TraceWrite::default(),
+                MemoryWitness::default(),
             ),
             None,
         );
@@ -518,6 +569,7 @@ pub fn op_arithmetic(
             read_1,
             read_2,
             TraceWrite::new_from(&program.registers, x.rd()),
+            MemoryWitness::registers(),
         ),
         witness,
     )
@@ -527,7 +579,7 @@ pub fn op_arithmetic_imm(
     instruction: &Instruction,
     x: &IType,
     program: &mut Program,
-) -> (TraceRead, TraceRead, TraceWrite) {
+) -> (TraceRead, TraceRead, TraceWrite, MemoryWitness) {
     let rd = x.rd();
 
     // special cases
@@ -539,6 +591,7 @@ pub fn op_arithmetic_imm(
             TraceRead::default(),
             TraceRead::default(),
             TraceWrite::default(),
+            MemoryWitness::default(),
         );
     }
 
@@ -565,14 +618,14 @@ pub fn op_arithmetic_imm(
 
     let write = TraceWrite::new_from(&program.registers, rd);
 
-    (read_1, TraceRead::default(), write)
+    (read_1, TraceRead::default(), write, MemoryWitness::rur())
 }
 
 pub fn op_shift_sl(
     instruction: &Instruction,
     x: &RType,
     program: &mut Program,
-) -> (TraceRead, TraceRead, TraceWrite) {
+) -> (TraceRead, TraceRead, TraceWrite, MemoryWitness) {
     let read_1 = TraceRead::new_from(&program.registers, x.rs1());
     let read_2 = TraceRead::new_from(&program.registers, x.rs2());
     let value_1 = program.registers.get(x.rs1());
@@ -584,6 +637,7 @@ pub fn op_shift_sl(
             TraceRead::default(),
             TraceRead::default(),
             TraceWrite::default(),
+            MemoryWitness::default(),
         );
     }
 
@@ -616,6 +670,7 @@ pub fn op_shift_sl(
         read_1,
         read_2,
         TraceWrite::new_from(&program.registers, x.rd()),
+        MemoryWitness::registers(),
     )
 }
 
@@ -623,13 +678,14 @@ pub fn op_shift_imm(
     instruction: &Instruction,
     x: &ShiftType,
     program: &mut Program,
-) -> (TraceRead, TraceRead, TraceWrite) {
+) -> (TraceRead, TraceRead, TraceWrite, MemoryWitness) {
     if x.rd() == REGISTER_ZERO as u32 {
         program.pc.next_address();
         return (
             TraceRead::default(),
             TraceRead::default(),
             TraceWrite::default(),
+            MemoryWitness::default(),
         );
     }
 
@@ -650,6 +706,7 @@ pub fn op_shift_imm(
         read_1,
         TraceRead::default(),
         TraceWrite::new_from(&program.registers, x.rd()),
+        MemoryWitness::rur(),
     )
 }
 
@@ -657,13 +714,14 @@ pub fn op_sl_imm(
     instruction: &Instruction,
     x: &IType,
     program: &mut Program,
-) -> (TraceRead, TraceRead, TraceWrite) {
+) -> (TraceRead, TraceRead, TraceWrite, MemoryWitness) {
     if x.rd() == REGISTER_ZERO as u32 {
         program.pc.next_address();
         return (
             TraceRead::default(),
             TraceRead::default(),
             TraceWrite::default(),
+            MemoryWitness::default(),
         );
     }
 
@@ -697,6 +755,7 @@ pub fn op_sl_imm(
         read_1,
         TraceRead::default(),
         TraceWrite::new_from(&program.registers, x.rd()),
+        MemoryWitness::rur(),
     )
 }
 pub fn get_dest_mem(registers: &Registers, x: &SType) -> (TraceRead, u32, u32) {
@@ -723,7 +782,7 @@ pub fn op_store(
     instruction: &Instruction,
     x: &SType,
     program: &mut Program,
-) -> Result<(TraceRead, TraceRead, TraceWrite), ExecutionResult> {
+) -> Result<(TraceRead, TraceRead, TraceWrite, MemoryWitness), ExecutionResult> {
     let micro = program.pc.get_micro();
 
     Ok(match micro {
@@ -742,7 +801,16 @@ pub fn op_store(
                 program.write_mem(dest_mem, value)?;
                 program.pc.next_address();
 
-                return Ok((read_1, read_2, TraceWrite::new(dest_mem, value)));
+                return Ok((
+                    read_1,
+                    read_2,
+                    TraceWrite::new(dest_mem, value),
+                    MemoryWitness::new(
+                        MemoryAccessType::Register,
+                        MemoryAccessType::Register,
+                        MemoryAccessType::Memory,
+                    ),
+                ));
             }
 
             let (mask_dst, _mask_src, _move_masked) = if micro == 0 {
@@ -769,6 +837,11 @@ pub fn op_store(
                 read_1,
                 read_2,
                 TraceWrite::new_from(&program.registers, AUX_REGISTER_1),
+                MemoryWitness::new(
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Memory,
+                    MemoryAccessType::Register,
+                ),
             )
         }
         5 | 1 => {
@@ -799,6 +872,7 @@ pub fn op_store(
                 read_1,
                 read_2,
                 TraceWrite::new_from(&program.registers, AUX_REGISTER_2),
+                MemoryWitness::registers(),
             )
         }
         6 | 2 => {
@@ -814,7 +888,7 @@ pub fn op_store(
             program.pc.next_micro();
             let write_1 = TraceWrite::new_from(&program.registers, AUX_REGISTER_1);
 
-            (read_1, read_2, write_1)
+            (read_1, read_2, write_1, MemoryWitness::registers())
         }
         7 | 3 => {
             //micro step
@@ -837,7 +911,16 @@ pub fn op_store(
                 program.pc.next_micro();
             }
 
-            (read_1, read_2, write_1)
+            (
+                read_1,
+                read_2,
+                write_1,
+                MemoryWitness::new(
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Memory,
+                ),
+            )
         }
         _ => {
             panic!("Unreachable");
@@ -855,13 +938,14 @@ pub fn op_load(
     instruction: &Instruction,
     x: &IType,
     program: &mut Program,
-) -> Result<(TraceRead, TraceRead, TraceWrite), ExecutionResult> {
+) -> Result<(TraceRead, TraceRead, TraceWrite, MemoryWitness), ExecutionResult> {
     if x.rd() == REGISTER_ZERO as u32 {
         program.pc.next_address();
         return Ok((
             TraceRead::default(),
             TraceRead::default(),
             TraceWrite::default(),
+            MemoryWitness::default(),
         ));
     }
 
@@ -917,7 +1001,16 @@ pub fn op_load(
                 TraceWrite::new_from(&program.registers, dest)
             };
 
-            (read_1, read_2, write_1)
+            (
+                read_1,
+                read_2,
+                write_1,
+                MemoryWitness::new(
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Memory,
+                    MemoryAccessType::Register,
+                ),
+            )
         }
         2 => {
             // micro 2:
@@ -933,7 +1026,7 @@ pub fn op_load(
             program.pc.next_micro();
             let write_1 = TraceWrite::new_from(&program.registers, AUX_REGISTER_1);
 
-            (read_1, read_2, write_1)
+            (read_1, read_2, write_1, MemoryWitness::registers())
         }
         3 => {
             // micro 3:
@@ -945,7 +1038,7 @@ pub fn op_load(
             program.pc.next_address();
             let write_1 = TraceWrite::new_from(&program.registers, x.rd());
 
-            (read_1, TraceRead::default(), write_1)
+            (read_1, TraceRead::default(), write_1, MemoryWitness::rur())
         }
         _ => {
             panic!("Unreachable");
@@ -957,7 +1050,7 @@ pub fn op_upper(
     instruction: &Instruction,
     x: &UType,
     program: &mut Program,
-) -> (TraceRead, TraceRead, TraceWrite) {
+) -> (TraceRead, TraceRead, TraceWrite, MemoryWitness) {
     let dest_register = x.rd();
     if dest_register == REGISTER_ZERO as u32 {
         program.pc.next_address();
@@ -965,6 +1058,7 @@ pub fn op_upper(
             TraceRead::default(),
             TraceRead::default(),
             TraceWrite::default(),
+            MemoryWitness::default(),
         );
     }
 
@@ -982,5 +1076,10 @@ pub fn op_upper(
         TraceRead::default(),
         TraceRead::default(),
         TraceWrite::new_from(&program.registers, dest_register),
+        MemoryWitness::new(
+            MemoryAccessType::Unused,
+            MemoryAccessType::Unused,
+            MemoryAccessType::Register,
+        ),
     )
 }
