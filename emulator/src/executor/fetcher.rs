@@ -131,11 +131,9 @@ pub fn execute_program(
 
         if print_trace && trace.is_ok() {
             if trace_set.is_none() || trace_set.as_ref().unwrap().contains(&program.step) {
-                let trace_str = trace.as_ref().unwrap().trace_step.to_hex_string();
                 info!(
-                    "{};{};{}",
+                    "{};{}",
                     trace.as_ref().unwrap().to_csv(),
-                    trace_str, // this is a helper with the concatenated trace step
                     program
                         .hash
                         .iter()
@@ -282,6 +280,7 @@ pub fn execute_step(
     };
 
     let trace = TraceRWStep::new(
+        program.step,
         read_1,
         read_2,
         TraceReadPC::new(pc, opcode),

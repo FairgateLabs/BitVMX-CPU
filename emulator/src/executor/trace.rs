@@ -88,16 +88,6 @@ impl TraceStep {
         &self.write_pc.pc
     }
 
-    pub fn to_hex_string(&self) -> String {
-        format!(
-            "{:08x}{:08x}{:08x}{:02x}",
-            self.write_1.address,
-            self.write_1.value,
-            self.write_pc.pc.get_address(),
-            self.write_pc.pc.get_micro()
-        )
-    }
-
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend(&self.write_1.address.to_be_bytes());
@@ -111,6 +101,7 @@ impl TraceStep {
 #[derive(Debug, Default)]
 #[allow(unused)]
 pub struct TraceRWStep {
+    pub(crate) step_number: u64,
     pub(crate) read_1: TraceRead,
     pub(crate) read_2: TraceRead,
     pub(crate) read_pc: TraceReadPC,
@@ -121,6 +112,7 @@ pub struct TraceRWStep {
 
 impl TraceRWStep {
     pub fn new(
+        step_number: u64,
         read_1: TraceRead,
         read_2: TraceRead,
         read_pc: TraceReadPC,
@@ -129,6 +121,7 @@ impl TraceRWStep {
         mem_witness: MemoryWitness,
     ) -> TraceRWStep {
         TraceRWStep {
+            step_number,
             read_1,
             read_2,
             read_pc,
@@ -142,14 +135,11 @@ impl TraceRWStep {
         &self.trace_step
     }
 
-    pub fn to_write_trace(&self) -> String {
-        self.trace_step.to_hex_string()
-    }
-
     pub fn to_csv(&self) -> String {
         //"read1_address;read1_value;read1_last_step;read2_address;read2_value;read2_last_step;read_pc_address;read_pc_micro;read_pc_opcode;write_address;write_value;write_pc;write_micro;write_trace;step_hash;step".to_string()
         format!(
-            "{:08x};{:08x};{:016x};{:08x};{:08x};{:016x};{:08x};{:02x};{:08x};{:08x};{:08x};{:08x};{:02x};{:08x};{:02x}",
+            "{:016x};{:08x};{:08x};{:016x};{:08x};{:08x};{:016x};{:08x};{:02x};{:08x};{:08x};{:08x};{:08x};{:02x};{:08x};{:02x}",
+            self.step_number,
             self.read_1.address,
             self.read_1.value,
             self.read_1.last_step,
