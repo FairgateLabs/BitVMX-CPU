@@ -273,7 +273,6 @@ impl Program {
             .find(|section| section.name == name)
     }
 
-    //TODO: handle errors
     pub fn read_mem(&self, address: u32) -> Result<u32, ExecutionResult> {
         if cfg!(target_endian = "big") {
             panic!("Big endian machine not supported");

@@ -310,14 +310,16 @@ pub fn op_ecall(
                 print!("{}", x as u8 as char);
             }
             program.pc.next_address();
+            //treat any syscall as a nop
             (
-                read_1,
-                read_2,
+                TraceRead::default(),
+                TraceRead::default(),
                 TraceWrite::default(),
-                MemoryWitness::no_write(),
+                MemoryWitness::default(),
             )
         }
         93 => {
+            //halt opcode
             if debug {
                 info!("Exit code: 0x{:08x}", value_2);
                 for i in 0..32 {
@@ -342,10 +344,10 @@ pub fn op_ecall(
             error!("Unimplemented syscall: {}", syscall);
             program.pc.next_address();
             (
-                read_1,
-                read_2,
+                TraceRead::default(),
+                TraceRead::default(),
                 TraceWrite::default(),
-                MemoryWitness::no_write(),
+                MemoryWitness::default(),
             )
         }
     }

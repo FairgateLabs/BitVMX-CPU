@@ -1,6 +1,9 @@
 use bitcoin_script_functions::hash::blake3;
 use bitcoin_script_stack::stack::StackTracker;
 
+// TODO: hash initial challenge
+// given the "agreement" about the initial hash, the verifier needs to challenge this value in an special way
+
 // TODO: Value commited in WOTS_PROVER_LAST_STEP should not be greater than the MAX_STEP_CONSTANT_VALUE
 // the script should block this.
 

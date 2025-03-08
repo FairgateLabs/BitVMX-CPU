@@ -2,6 +2,7 @@ use bitcoin_script_stack::stack::{StackTracker, StackVariable};
 
 #[derive(Debug, Clone, Copy)]
 pub struct TraceRead {
+    pub mem_witness: StackVariable,
     pub read_1_add: StackVariable,
     pub read_1_value: StackVariable,
     pub read_2_add: StackVariable,
@@ -14,6 +15,7 @@ pub struct TraceRead {
 impl Default for TraceRead {
     fn default() -> Self {
         TraceRead {
+            mem_witness: StackVariable::null(),
             read_1_add: StackVariable::null(),
             read_1_value: StackVariable::null(),
             read_2_add: StackVariable::null(),
@@ -27,6 +29,7 @@ impl Default for TraceRead {
 
 impl TraceRead {
     pub fn define(stack: &mut StackTracker) -> TraceRead {
+        let mem_witness = stack.define(2, "mem_witness");
         let read_1_add = stack.define(8, "read_1_add");
         let read_1_value = stack.define(8, "read_1_value");
         let read_2_add = stack.define(8, "read_2_add");
@@ -35,6 +38,7 @@ impl TraceRead {
         let micro = stack.define(1, "read_micro");
         let opcode = stack.define(8, "read_opcode");
         TraceRead {
+            mem_witness,
             read_1_add,
             read_1_value,
             read_2_add,

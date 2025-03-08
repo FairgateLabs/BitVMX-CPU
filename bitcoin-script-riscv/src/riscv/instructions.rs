@@ -1,5 +1,7 @@
 use bitcoin_script_stack::stack::{StackTracker, StackVariable};
 
+use bitvmx_cpu_definitions::MemoryAccessType;
+use bitvmx_cpu_definitions::MemoryWitness;
 use riscv_decode::Instruction;
 use riscv_decode::Instruction::*;
 
@@ -40,8 +42,17 @@ pub fn validate_register_address(
     }
 }
 
+pub fn verify_memory_witness(
+    stack: &mut StackTracker,
+    mem_witness: StackVariable,
+    expected_witness: MemoryWitness,
+) {
+    let witness = stack.byte(expected_witness.byte());
+    stack.equals(mem_witness, true, witness, true);
+}
+
 pub fn op_nop(stack: &mut StackTracker, trace_read: &TraceRead) -> TraceStep {
-    //TODO: Need to assert opcode and zeros ?
+    verify_memory_witness(stack, trace_read.mem_witness, MemoryWitness::default());
 
     move_and_drop(stack, trace_read.opcode);
     move_and_drop(stack, trace_read.micro);
@@ -85,6 +96,13 @@ pub fn op_ecall(
     //any opcode other than halt (93) is treated as a nop
     op_nop(&mut stack_if_false, trace_read);
 
+    //verify the memory witness
+    verify_memory_witness(
+        &mut stack_halt,
+        trace_read.mem_witness,
+        MemoryWitness::registers(),
+    );
+
     //asserts opcode
     let ecall = stack_halt.number_u32(0x00000073);
     stack_halt.equals(trace_read.opcode, true, ecall, true);
@@ -127,7 +145,7 @@ pub fn op_ecall(
     let ret = stack.end_if(
         stack_halt,
         stack_if_false,
-        7,
+        8,
         vec![
             (8, "write_address".to_string()),
             (8, "write_value".to_string()),
@@ -160,6 +178,8 @@ pub fn op_conditional(
     stack.set_breakpoint(&format!("op_{:?}", instruction));
 
     let (imm, rs1, rs2) = decode_b_type(stack, &tables, trace_read.opcode, func3);
+
+    verify_memory_witness(stack, trace_read.mem_witness, MemoryWitness::no_write());
 
     //micro is not used
     move_and_drop(stack, trace_read.micro);
@@ -236,7 +256,11 @@ pub fn store_if_not_zero(
     rd: StackVariable,
     program_counter: StackVariable,
     base_register_address: u32,
+    mem_witness: StackVariable,
+    expected_if_zero: MemoryWitness,
+    expected: MemoryWitness,
 ) -> (StackVariable, StackVariable) {
+    stack.move_var(mem_witness);
     stack.move_var(program_counter);
     stack.move_var(rd);
 
@@ -250,11 +274,13 @@ pub fn store_if_not_zero(
     let (mut stack_if_true, mut stack_if_false) = stack.open_if();
 
     // if dest is zero, write data and value are zero
+    verify_memory_witness(&mut stack_if_true, mem_witness, expected_if_zero);
     stack_if_true.drop(rd);
     stack_if_true.drop(program_counter);
     stack_if_true.number_u32(0);
     stack_if_true.number_u32(0);
 
+    verify_memory_witness(&mut stack_if_false, mem_witness, expected);
     let write_add = number_u32_partial(&mut stack_if_false, base_register_address, 6);
     stack_if_false.move_var(rd);
     stack_if_false.join(write_add);
@@ -266,7 +292,7 @@ pub fn store_if_not_zero(
     let ret = stack.end_if(
         stack_if_true,
         stack_if_false,
-        2,
+        3,
         vec![
             (8, "write_address".to_string()),
             (8, "write_value".to_string()),
@@ -303,6 +329,13 @@ pub fn op_jal(
         rd,
         trace_read.program_counter,
         base_register_address,
+        trace_read.mem_witness,
+        MemoryWitness::no_write(),
+        MemoryWitness::new(
+            MemoryAccessType::Unused,
+            MemoryAccessType::Unused,
+            MemoryAccessType::Register,
+        ),
     );
 
     let write_pc = add_with_bit_extension(stack, &tables, pc, imm, StackVariable::null());
@@ -348,6 +381,13 @@ pub fn op_jalr(
         rd,
         trace_read.program_counter,
         base_register_address,
+        trace_read.mem_witness,
+        MemoryWitness::new(
+            MemoryAccessType::Register,
+            MemoryAccessType::Unused,
+            MemoryAccessType::Unused,
+        ),
+        MemoryWitness::rur(),
     );
 
     let write_pc =
@@ -395,6 +435,8 @@ pub fn op_arithmetic_imm(
     move_and_drop(stack, trace_read.read_2_add);
     move_and_drop(stack, trace_read.read_2_value);
     move_and_drop(stack, trace_read.micro);
+
+    verify_memory_witness(stack, trace_read.mem_witness, MemoryWitness::rur());
 
     // assert rs1 + base_register_address == read_1 address
     validate_register_address(stack, trace_read.read_1_add, rs1, base_register_address);
@@ -490,6 +532,8 @@ pub fn op_arithmetic(
         R_TYPE_OPCODE,
         func7,
     );
+
+    verify_memory_witness(stack, trace_read.mem_witness, MemoryWitness::registers());
 
     //these value are not used. can be droped or we can avoid to commit them
     move_and_drop(stack, trace_read.micro);
@@ -665,12 +709,23 @@ pub fn op_upper(
     };
 
     let (imm, rd) = decode_u_type(stack, &tables, trace_read.opcode, expected_opcode);
+
     // These value are not used
     move_and_drop(stack, trace_read.read_2_add);
     move_and_drop(stack, trace_read.read_2_value);
     move_and_drop(stack, trace_read.micro);
     move_and_drop(stack, trace_read.read_1_add);
     move_and_drop(stack, trace_read.read_1_value);
+
+    verify_memory_witness(
+        stack,
+        trace_read.mem_witness,
+        MemoryWitness::new(
+            MemoryAccessType::Unused,
+            MemoryAccessType::Unused,
+            MemoryAccessType::Register,
+        ),
+    );
 
     let write_addr = number_u32_partial(stack, base_register_address, 6);
     stack.move_var(rd);
@@ -736,13 +791,19 @@ pub fn execute_step(
             program.base_register_address,
         )),
 
-        Lh(_) | Lhu(_) | Lw(_) | Lbu(_) | Lb(_) => Ok(op_load(
-            instruction,
-            stack,
-            trace_read,
-            micro,
-            program.base_register_address,
-        )),
+        Lh(x) | Lhu(x) | Lw(x) | Lbu(x) | Lb(x) => {
+            if x.rd() == 0 {
+                Ok(op_nop(stack, trace_read))
+            } else {
+                Ok(op_load(
+                    instruction,
+                    stack,
+                    trace_read,
+                    micro,
+                    program.base_register_address,
+                ))
+            }
+        }
 
         Sb(_) | Sh(_) | Sw(_) => Ok(op_store(
             instruction,
@@ -826,6 +887,7 @@ pub fn execute_step(
 #[allow(clippy::too_many_arguments)]
 pub fn load_trace_read_in_stack(
     stack: &mut StackTracker,
+    mw: u8,
     r1: u32,
     v1: u32,
     r2: u32,
@@ -834,6 +896,8 @@ pub fn load_trace_read_in_stack(
     micro: u8,
     opcode: u32,
 ) -> TraceRead {
+    let mem_witness = stack.byte(mw);
+    stack.rename(mem_witness, "mem_witness");
     let read_1_add = stack.number_u32(r1);
     stack.rename(read_1_add, "read_1_add");
     let read_1_value = stack.number_u32(v1);
@@ -849,6 +913,7 @@ pub fn load_trace_read_in_stack(
     let opcode = stack.number_u32(opcode);
     stack.rename(opcode, "read_opcode");
     TraceRead {
+        mem_witness,
         read_1_add,
         read_1_value,
         read_2_add,
@@ -886,6 +951,7 @@ pub fn load_trace_step_in_stack(
 pub fn verify(
     instruction_mapping: &Option<InstructionMapping>,
     program: ProgramSpec,
+    mw: u8,
     r1: u32,
     v1: u32,
     r2: u32,
@@ -913,7 +979,7 @@ pub fn verify(
         None => None,
     };
 
-    let trace_read = load_trace_read_in_stack(&mut stack, r1, v1, r2, v2, pc, micro, opcode);
+    let trace_read = load_trace_read_in_stack(&mut stack, mw, r1, v1, r2, v2, pc, micro, opcode);
 
     if let Some(mapping) = instruction_mapping {
         let instruction = riscv_decode::decode(opcode).unwrap();
@@ -991,6 +1057,7 @@ pub fn compare_trace_step(
 #[cfg(test)]
 mod tests {
 
+    use bitvmx_cpu_definitions::MemoryWitness;
     use riscv_decode::types::{BType, RType, ShiftType};
 
     use crate::riscv::decoder::get_register_address;
@@ -1005,11 +1072,14 @@ mod tests {
         let opcode = 0x06f5C0e3; //beq
         let btype = BType(opcode);
         let instruction = Blt(btype);
+        let x = btype.imm() as i32;
 
-        //let program = ProgramSpec::new(0xA000_0000);
-        //let trace_step = load_trace_step_in_stack(&mut stack, 0xA000_0008, 0xDFFF_FFA0, 0x8000_00c4, 0);
+        let pc = 0x8000_0000 as u32;
+        let next_pc = pc.wrapping_add(x as u32);
+        let trace_step = load_trace_step_in_stack(&mut stack, 0, 0, next_pc as u32, 0);
         let mut trace_read = load_trace_read_in_stack(
             &mut stack,
+            MemoryWitness::no_write().byte(),
             0xA000_002c,
             0x0000_0001,
             0xA000_003c,
@@ -1018,12 +1088,18 @@ mod tests {
             0,
             opcode,
         );
-        op_conditional(
+        let ret = op_conditional(
             &instruction,
             &mut stack,
             &mut trace_read,
             BASE_REGISTER_ADDRESS,
         );
+        stack.join_count(ret.write_1_add, 3);
+        stack.join_count(trace_step.write_1_add, 3);
+        stack.equals(trace_step.write_1_add, true, ret.write_1_add, true);
+        stack.op_true();
+
+        assert!(stack.run().success);
     }
 
     #[test]
@@ -1076,6 +1152,7 @@ mod tests {
             load_trace_step_in_stack(&mut stack, 0xA000_0008, 0xDFFF_FFA0, 0x8000_00c4, 0);
         let trace_read = load_trace_read_in_stack(
             &mut stack,
+            MemoryWitness::rur().byte(),
             0xA000_0008,
             0xE000_0000,
             0,
@@ -1103,6 +1180,7 @@ mod tests {
             load_trace_step_in_stack(&mut stack, write_address, 0x0000_0007, 0x8000_00c4, 0); // w, v, pc, micro
         let trace_read = load_trace_read_in_stack(
             &mut stack,
+            MemoryWitness::registers().byte(),
             0xA000_0024,
             0x0000_0004,
             0xA000_0028,
@@ -1137,6 +1215,7 @@ mod tests {
 
         let trace_read = load_trace_read_in_stack(
             &mut stack,
+            MemoryWitness::registers().byte(),
             reg_address(rtype.rs1()),
             0x0000_1010,
             reg_address(rtype.rs2()),
@@ -1181,6 +1260,7 @@ mod tests {
         let trace_step = load_trace_step_in_stack(&mut stack, 0xA000_002C, 0x1, 0x8000_00C4, 0); // w, v, pc, micro
         let trace_read = load_trace_read_in_stack(
             &mut stack,
+            MemoryWitness::registers().byte(),
             0xA000_0024,
             0x3,
             0xA000_0028,
@@ -1204,6 +1284,7 @@ mod tests {
         let trace_step = load_trace_step_in_stack(&mut stack, 0xA000_002C, 0x0, 0x8000_00C4, 0); // w, v, pc, micro
         let trace_read = load_trace_read_in_stack(
             &mut stack,
+            MemoryWitness::registers().byte(),
             0xA000_0024,
             0x5,
             0xA000_0028,
@@ -1241,6 +1322,7 @@ mod tests {
         let trace_step = load_trace_step_in_stack(&mut stack, 0xA000_002C, 0x1, 0x8000_00C4, 0); // w, v, pc, micro
         let trace_read = load_trace_read_in_stack(
             &mut stack,
+            MemoryWitness::registers().byte(),
             0xA000_0024,
             0x3,
             0xA000_0028,
@@ -1264,6 +1346,7 @@ mod tests {
         let trace_step = load_trace_step_in_stack(&mut stack, 0xA000_002C, 0x0, 0x8000_00C4, 0); // w, v, pc, micro
         let trace_read = load_trace_read_in_stack(
             &mut stack,
+            MemoryWitness::registers().byte(),
             0xA000_0024,
             0x5,
             0xA000_0028,
@@ -1310,6 +1393,7 @@ mod tests {
             load_trace_step_in_stack(&mut stack, write_address, write_value, 0x8000_00c4, 0); // w, v, pc, micro
         let trace_read = load_trace_read_in_stack(
             &mut stack,
+            MemoryWitness::registers().byte(),
             0xA000_0024,
             read_value_1,
             0xA000_0028,
@@ -1356,6 +1440,7 @@ mod tests {
             load_trace_step_in_stack(&mut stack, write_address, write_value, 0x8000_00c4, 0); // w, v, pc, micro
         let trace_read = load_trace_read_in_stack(
             &mut stack,
+            MemoryWitness::registers().byte(),
             0xA000_0024,
             read_value_1,
             0xA000_0028,
@@ -1402,6 +1487,7 @@ mod tests {
             load_trace_step_in_stack(&mut stack, write_address, write_value, 0x8000_00c4, 0); // w, v, pc, micro
         let trace_read = load_trace_read_in_stack(
             &mut stack,
+            MemoryWitness::registers().byte(),
             0xA000_0024,
             read_value_1,
             0xA000_0028,
@@ -1441,6 +1527,7 @@ mod tests {
             load_trace_step_in_stack(&mut stack, 0xA000_002C, write_value, 0x8000_00C4, 0); // w, v, pc, micro
         let trace_read = load_trace_read_in_stack(
             &mut stack,
+            MemoryWitness::rur().byte(),
             0xA000_0024,
             read_1_value,
             0,
@@ -1482,6 +1569,7 @@ mod tests {
             load_trace_step_in_stack(&mut stack, 0xA000_002C, write_value, 0x8000_00C4, 0); // w, v, pc, micro
         let trace_read = load_trace_read_in_stack(
             &mut stack,
+            MemoryWitness::registers().byte(),
             0xA000_0024,
             read_1_value,
             0xA000_0028,
@@ -1523,6 +1611,7 @@ mod tests {
             load_trace_step_in_stack(&mut stack, 0xA000_002C, write_value, 0x8000_00C4, 0); // w, v, pc, micro
         let trace_read = load_trace_read_in_stack(
             &mut stack,
+            MemoryWitness::registers().byte(),
             0xA000_0024,
             read_1_value,
             0xA000_0028,
@@ -1564,6 +1653,7 @@ mod tests {
             load_trace_step_in_stack(&mut stack, 0xA000_002C, write_value, 0x8000_00C4, 0); // w, v, pc, micro
         let trace_read = load_trace_read_in_stack(
             &mut stack,
+            MemoryWitness::registers().byte(),
             0xA000_0024,
             read_1_value,
             0xA000_0028,

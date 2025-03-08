@@ -1,10 +1,11 @@
 use bitcoin_script_stack::stack::{StackTracker, StackVariable};
+use bitvmx_cpu_definitions::{MemoryAccessType, MemoryWitness};
 use riscv_decode::Instruction::{self, *};
 
 use crate::riscv::{decoder::decode_s_type, operations::*, script_utils::*};
 
 use super::{
-    instructions::validate_register_address,
+    instructions::{validate_register_address, verify_memory_witness},
     memory_alignment::*,
     trace::{TraceRead, TraceStep},
 };
@@ -57,6 +58,7 @@ pub fn op_store_micro_0(
     stack.move_var(trace_read.read_2_add);
     stack.move_var(trace_read.read_2_value);
     stack.move_var(trace_read.program_counter);
+    stack.move_var(trace_read.mem_witness);
 
     //mem_to_write = read_1_value + imm
     let mem_to_write =
@@ -77,6 +79,26 @@ pub fn op_store_micro_0(
     stack.number(if_alignment_less);
     stack.op_lessthan(); //branch if alignment < if_alignment_less
     let (mut if_true, mut if_false) = stack.open_if();
+
+    verify_memory_witness(
+        &mut if_true,
+        trace_read.mem_witness,
+        MemoryWitness::new(
+            MemoryAccessType::Register,
+            MemoryAccessType::Register,
+            MemoryAccessType::Memory,
+        ),
+    );
+
+    verify_memory_witness(
+        &mut if_false,
+        trace_read.mem_witness,
+        MemoryWitness::new(
+            MemoryAccessType::Register,
+            MemoryAccessType::Memory,
+            MemoryAccessType::Register,
+        ),
+    );
 
     op_store_sw_aligned(
         &mut if_true,
@@ -99,7 +121,7 @@ pub fn op_store_micro_0(
     let ret = stack.end_if(
         if_true,
         if_false,
-        6,
+        7,
         vec![
             (8, "write_add".to_string()),
             (8, "write_value".to_string()),
@@ -196,6 +218,8 @@ pub fn op_store_micro_1(
     let tables = StackTables::new(stack, true, true, 3, 7, 0);
     let (bit_extension, imm, rs1, rs2) = decode_s_type(stack, &tables, trace_read.opcode, func3);
 
+    verify_memory_witness(stack, trace_read.mem_witness, MemoryWitness::registers());
+
     //assert micro
     stack.move_var(trace_read.micro);
     let expected_micro = stack.number(micro);
@@ -278,6 +302,8 @@ pub fn op_store_micro_2(
     let tables = StackTables::new(stack, true, true, 3, 7, 0);
     let (bit_extension, imm, rs1, rs2) = decode_s_type(stack, &tables, trace_read.opcode, func3);
 
+    verify_memory_witness(stack, trace_read.mem_witness, MemoryWitness::registers());
+
     //assert micro
     stack.move_var(trace_read.micro);
     let expected_micro = stack.number(micro);
@@ -337,6 +363,16 @@ pub fn op_store_micro_3(
 
     let tables = StackTables::new(stack, true, true, 3, 7, 0);
     let (bit_extension, imm, rs1, rs2) = decode_s_type(stack, &tables, trace_read.opcode, func3);
+
+    verify_memory_witness(
+        stack,
+        trace_read.mem_witness,
+        MemoryWitness::new(
+            MemoryAccessType::Register,
+            MemoryAccessType::Register,
+            MemoryAccessType::Memory,
+        ),
+    );
 
     //assert micro
     stack.move_var(trace_read.micro);

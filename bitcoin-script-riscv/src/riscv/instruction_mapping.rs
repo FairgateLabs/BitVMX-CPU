@@ -253,6 +253,10 @@ mod tests {
         for (instruction, micro) in sample {
             let key = get_key_from_instruction_and_micro(&instruction, micro);
             const REGISTERS_BASE_ADDRESS: u32 = 0xF000_0000;
+            println!(
+                "Instruction: {:?}, Micro: {}, Key: {},",
+                instruction, micro, key
+            );
             let script = generate_verification_script(
                 &instruction,
                 micro,

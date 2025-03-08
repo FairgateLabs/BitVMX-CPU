@@ -1,10 +1,11 @@
 use bitcoin_script_stack::stack::{StackTracker, StackVariable};
+use bitvmx_cpu_definitions::{MemoryAccessType, MemoryWitness};
 use riscv_decode::Instruction::{self, *};
 
 use crate::riscv::{decoder::decode_i_type, operations::*, script_utils::*};
 
 use super::{
-    instructions::validate_register_address,
+    instructions::{validate_register_address, verify_memory_witness},
     memory_alignment::*,
     trace::{TraceRead, TraceStep},
 };
@@ -47,6 +48,16 @@ pub fn op_load_micro_0(
 
     let (imm, rs1, rd, bit_extension) =
         decode_i_type(stack, &tables, trace_read.opcode, func3, 0x3, None);
+
+    verify_memory_witness(
+        stack,
+        trace_read.mem_witness,
+        MemoryWitness::new(
+            MemoryAccessType::Register,
+            MemoryAccessType::Memory,
+            MemoryAccessType::Register,
+        ),
+    );
 
     stack.move_var(trace_read.micro);
     let expected_micro = stack.number(0);
@@ -254,6 +265,16 @@ pub fn op_load_micro_1(
     let (imm, rs1, rd, bit_extension) =
         decode_i_type(stack, &tables, trace_read.opcode, func3, 0x3, None);
 
+    verify_memory_witness(
+        stack,
+        trace_read.mem_witness,
+        MemoryWitness::new(
+            MemoryAccessType::Register,
+            MemoryAccessType::Memory,
+            MemoryAccessType::Register,
+        ),
+    );
+
     stack.move_var(trace_read.micro);
     let expected_micro = stack.number(1);
     stack.equals(trace_read.micro, true, expected_micro, true);
@@ -330,6 +351,7 @@ pub fn op_load_micro_2(
     let (imm, rs1, rd, bit_extension) =
         decode_i_type(stack, &tables, trace_read.opcode, func3, 0x3, None);
 
+    verify_memory_witness(stack, trace_read.mem_witness, MemoryWitness::registers());
     stack.move_var(trace_read.micro);
     let expected_micro = stack.number(2);
     stack.equals(trace_read.micro, true, expected_micro, true);
@@ -391,6 +413,7 @@ pub fn op_load_micro_3(
     let (imm, rs1, rd, bit_extension) =
         decode_i_type(stack, &tables, trace_read.opcode, func3, 0x3, None);
 
+    verify_memory_witness(stack, trace_read.mem_witness, MemoryWitness::rur());
     stack.to_altstack(); // save rd
     stack.drop(rs1);
     stack.drop(bit_extension);

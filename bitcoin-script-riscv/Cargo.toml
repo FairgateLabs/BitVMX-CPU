@@ -14,3 +14,4 @@ bitcoin = "=0.32.1"
 bitcoin-script = { git = "https://github.com/FairgateLabs/rust-bitcoin-script", branch = "bitvmx" }
 riscv-decode = "0.2.1"
 thiserror = "1.0.61"
+bitvmx-cpu-definitions = { path = "../definitions" }
