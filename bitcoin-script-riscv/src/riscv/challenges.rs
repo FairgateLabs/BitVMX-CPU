@@ -11,8 +11,6 @@ use bitcoin_script_stack::stack::StackTracker;
 // is important if the other changes it. Probably in several transaction this is not a problem as the destination tx is the same. But in the case where choosing one leaf can lead to another part of the DAG
 // then it's mandatory
 
-// TODO: For unsinged data we still need to validate ranges for nibbles (0-15)
-
 // If the prover executes step = 1 and entry_point != valid entry point
 // the verifier can execute this equivocation and win the challenge
 // [WOTS_PROVER_TRACE_PC:8 | WOTS_PROVER_TRACE_MICRO:2 | WOTS_PROVER_TRACE_STEP:16]
@@ -44,15 +42,24 @@ pub fn entry_point_challenge(stack: &mut StackTracker, entry_point: u32) {
 pub fn program_counter_challenge(stack: &mut StackTracker) {
     stack.clear_definitions();
 
+    // verifier values (unsigned)
     let prev_prev_hash = stack.define(40, "prev_prev_hash");
     let prev_write_add = stack.define(8, "prev_write_add");
     let prev_write_data = stack.define(8, "prev_write_data");
     let prev_write_pc = stack.define(8, "prev_write_pc");
     let prev_write_micro = stack.define(2, "prev_write_micro");
 
+    // santize the stack
+    stack.verify_range_var_u4(prev_prev_hash);
+    stack.verify_range_var_u4(prev_write_add);
+    stack.verify_range_var_u4(prev_write_data);
+    stack.verify_range_var_u4(prev_write_pc);
+    stack.verify_range_var_u4(prev_write_micro);
+
+    // prover values decoded from WOTS
     let prover_pc = stack.define(8, "prover_pc");
     let _prover_micro = stack.define(2, "prover_micro");
-    let prev_hash = stack.define(40, "prev_hash");
+    let prover_prev_hash = stack.define(40, "prover_prev_hash");
 
     //save the hash to compare
     stack.to_altstack();
@@ -75,7 +82,7 @@ pub fn program_counter_challenge(stack: &mut StackTracker) {
 
     let result = blake3::blake3(stack, (40 + 8 + 8 + 8 + 2) / 2, 5);
     stack.from_altstack();
-    stack.equals(result, true, prev_hash, true);
+    stack.equals(result, true, prover_prev_hash, true);
 }
 
 // When the prover commits the final step as halt but it's is not a halt-success instruction the verifier can challenge it.
