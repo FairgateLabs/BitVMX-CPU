@@ -30,6 +30,14 @@ impl NArySearchDefinition {
         }
     }
 
+    pub fn bits_nary(&self) -> u8 {
+        f64::log2(self.nary as f64) as u8
+    }
+
+    pub fn bits_last_round(&self) -> u8 {
+        f64::log2(self.nary_last_round as f64) as u8
+    }
+
     pub fn required_steps(&self, round: u8, start: u64) -> Vec<u64> {
         let mut steps = Vec::new();
 
@@ -45,6 +53,27 @@ impl NArySearchDefinition {
         }
         steps
     }
+
+    // on each round we need to be able to send the specific bits of the number
+    // if we are on the full rounds, the number of bits required is the bits_nary()
+    // if we are on the last round, the number of bits required is the bits_last_round()
+    // the step number should be masked and shifted apropiately
+    pub fn step_bits_for_round(&self, round: u8, step: u64) -> u32 {
+        if round <= self.full_rounds {
+            let shift = (self.full_rounds - round) * self.bits_nary() + self.bits_last_round();
+            let mask = ((self.nary - 1) as u64) << shift;
+            ((step & mask) >> shift) as u32
+        } else {
+            let mask = (self.nary_last_round - 1) as u64;
+            (step & mask) as u32
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ExecutionHashes {
+    pub hashes: Vec<Vec<u8>>,
+    pub steps: Vec<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -64,12 +93,6 @@ pub fn need_to_challenge(prover_claim: &ProgramResult, my_result: &ProgramResult
         return None;
     }
     Some(prover_claim.steps.min(my_result.steps))
-}
-
-#[derive(Debug, Clone)]
-pub struct ExecutionHashes {
-    pub hashes: Vec<Vec<u8>>,
-    pub steps: Vec<u64>,
 }
 
 #[cfg(test)]
@@ -106,14 +129,20 @@ mod tests {
         let nary_search = NArySearchDefinition::new(max_steps_aprox, 8);
         assert_eq!(nary_search.full_rounds, 9);
         assert_eq!(nary_search.nary_last_round, 4);
+        assert_eq!(nary_search.bits_nary(), 3);
+        assert_eq!(nary_search.bits_last_round(), 2);
 
         let nary_search = NArySearchDefinition::new(64, 8);
         assert_eq!(nary_search.full_rounds, 2);
         assert_eq!(nary_search.nary_last_round, 0);
+        assert_eq!(nary_search.bits_nary(), 3);
+        assert_eq!(nary_search.bits_last_round(), 0);
 
         let nary_search = NArySearchDefinition::new(128, 8);
         assert_eq!(nary_search.full_rounds, 2);
         assert_eq!(nary_search.nary_last_round, 2);
+        assert_eq!(nary_search.bits_nary(), 3);
+        assert_eq!(nary_search.bits_last_round(), 1);
 
         let nary_search = NArySearchDefinition::new(256, 8);
         assert_eq!(nary_search.full_rounds, 2);
@@ -151,5 +180,24 @@ mod tests {
 
         let steps = nary_search.required_steps(3, 40);
         assert_eq!(steps, vec![41, 42, 43]);
+    }
+
+    #[test]
+    fn test_bits_for_round() {
+        let nary_search = NArySearchDefinition::new(64, 8);
+        assert_eq!(nary_search.step_bits_for_round(1, 0), 0);
+        assert_eq!(nary_search.step_bits_for_round(1, 8), 1);
+        assert_eq!(nary_search.step_bits_for_round(1, 9), 1);
+        assert_eq!(nary_search.step_bits_for_round(1, 58), 7);
+
+        assert_eq!(nary_search.step_bits_for_round(2, 0), 0);
+        assert_eq!(nary_search.step_bits_for_round(2, 8), 0);
+        assert_eq!(nary_search.step_bits_for_round(2, 9), 1);
+        assert_eq!(nary_search.step_bits_for_round(2, 58), 2);
+
+        let nary_search = NArySearchDefinition::new(128, 8);
+        assert_eq!(nary_search.step_bits_for_round(1, 75), 4);
+        assert_eq!(nary_search.step_bits_for_round(2, 75), 5);
+        assert_eq!(nary_search.step_bits_for_round(3, 75), 1);
     }
 }
