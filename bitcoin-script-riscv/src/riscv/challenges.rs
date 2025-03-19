@@ -311,4 +311,21 @@ mod tests {
             pre_hash, 0xf0000028, 0x00000001, 0x8000010c, 0x01, hash
         ));
     }
+
+    #[test]
+    fn test_padding_hash() {
+        let pre_hash = "006942ae363a1a52823aa28eebe597d32b9d92e9";
+        let hash = "3e87b9ecc502799716c371d74afeefb830191400";
+
+        assert!(!test_trace_hash_aux(
+            pre_hash, 0xf0000038, 0x0000001e, 0x80000060, 0x00, hash
+        ));
+
+        let pre_hash = "3e87b9ecc502799716c371d74afeefb830191400";
+        let hash = "b26883b2c7c5582cecc3394a2071725470048264";
+
+        assert!(!test_trace_hash_aux(
+            pre_hash, 0xf000003c, 0x0000003f, 0x80000064, 0x00, hash
+        ));
+    }
 }
