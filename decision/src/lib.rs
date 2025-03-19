@@ -1,4 +1,4 @@
-pub const MAX_STEPS: u64 = 2u64.pow(29); //500M steps
+use tracing::error;
 
 #[derive(Debug, Clone)]
 pub struct NArySearchDefinition {
@@ -38,6 +38,22 @@ impl NArySearchDefinition {
         f64::log2(self.nary_last_round as f64) as u8
     }
 
+    pub fn bits_for_round(&self, round: u8) -> u8 {
+        if round <= self.full_rounds {
+            self.bits_nary()
+        } else {
+            self.bits_last_round()
+        }
+    }
+
+    pub fn hashes_for_round(&self, round: u8) -> u8 {
+        if round <= self.full_rounds {
+            self.nary - 1
+        } else {
+            self.nary_last_round - 1
+        }
+    }
+
     pub fn required_steps(&self, round: u8, start: u64) -> Vec<u64> {
         let mut steps = Vec::new();
 
@@ -68,12 +84,32 @@ impl NArySearchDefinition {
             (step & mask) as u32
         }
     }
+
+    pub fn step_from_base_and_bits(&self, round: u8, base: u64, bits: u32) -> u64 {
+        if round <= self.full_rounds {
+            let shift = (self.full_rounds - round) * self.bits_nary() + self.bits_last_round();
+            base + ((bits as u64) << shift)
+        } else {
+            base + (bits as u64)
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct ExecutionHashes {
     pub hashes: Vec<Vec<u8>>,
-    pub steps: Vec<u64>,
+}
+
+impl ExecutionHashes {
+    pub fn new(hashes: Vec<Vec<u8>>) -> ExecutionHashes {
+        ExecutionHashes { hashes }
+    }
+}
+
+impl Into<ExecutionHashes> for Vec<Vec<u8>> {
+    fn into(self) -> ExecutionHashes {
+        ExecutionHashes::new(self)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -93,6 +129,47 @@ pub fn need_to_challenge(prover_claim: &ProgramResult, my_result: &ProgramResult
         return None;
     }
     Some(prover_claim.steps.min(my_result.steps))
+}
+
+// we assume that the previous hash to the list provided is agreed by both parties
+pub fn choose_segment(
+    nary_defs: &NArySearchDefinition,
+    base_step: u64,
+    selected_step: u64,
+    round: u8,
+    prover_hashes: &ExecutionHashes,
+    my_hashes: &ExecutionHashes,
+) -> (u32, u64, u64) {
+    if prover_hashes.hashes.len() != my_hashes.hashes.len() {
+        error!("Prover and my hashes should have the same length");
+    }
+
+    // finds if there is any difference in the hashes
+    let mut selection = prover_hashes.hashes.len() + 1;
+    for i in 0..prover_hashes.hashes.len() {
+        let prover_hash = &prover_hashes.hashes[i];
+        let my_hash = &my_hashes.hashes[i];
+        if prover_hash != my_hash {
+            selection = i + 1;
+            break;
+        }
+    }
+
+    // first mismatch step
+    println!("Selection: {}", selection);
+    let mismatch_step = nary_defs.step_from_base_and_bits(round, base_step, selection as u32) - 1;
+    println!("Mismatch step: {}", mismatch_step);
+    let lower_limit_bits = if selected_step < mismatch_step {
+        nary_defs.step_bits_for_round(round, selected_step)
+    } else {
+        selection as u32 - 1
+    };
+    let choice = mismatch_step.min(selected_step);
+
+    println!("Lower limit bits: {}", lower_limit_bits);
+    let base_step = nary_defs.step_from_base_and_bits(round, base_step, lower_limit_bits);
+
+    (lower_limit_bits, base_step, choice)
 }
 
 #[cfg(test)]
@@ -199,5 +276,108 @@ mod tests {
         assert_eq!(nary_search.step_bits_for_round(1, 75), 4);
         assert_eq!(nary_search.step_bits_for_round(2, 75), 5);
         assert_eq!(nary_search.step_bits_for_round(3, 75), 1);
+    }
+    #[test]
+    fn test_step_from_bits() {
+        let nary_search = NArySearchDefinition::new(64, 8);
+        assert_eq!(nary_search.step_from_base_and_bits(1, 0, 7), 56);
+        assert_eq!(nary_search.step_from_base_and_bits(1, 0, 0), 0);
+
+        assert_eq!(nary_search.step_from_base_and_bits(2, 0, 0), 0);
+        assert_eq!(nary_search.step_from_base_and_bits(2, 1, 56), 57);
+
+        let nary_search = NArySearchDefinition::new(128, 8);
+        assert_eq!(nary_search.step_from_base_and_bits(1, 0, 5), 80);
+        assert_eq!(nary_search.step_from_base_and_bits(2, 80, 5), 90);
+        assert_eq!(nary_search.step_from_base_and_bits(3, 90, 0), 90);
+        assert_eq!(nary_search.step_from_base_and_bits(3, 90, 1), 91);
+    }
+
+    fn test_vector(size: usize, diff_index: Option<usize>) -> Vec<Vec<u8>> {
+        let mut v = Vec::new();
+        for i in 0..size {
+            let mut hash = Vec::new();
+            match diff_index {
+                Some(index) => {
+                    if index == i {
+                        hash.push((i + 1) as u8);
+                    } else {
+                        hash.push(i as u8);
+                    }
+                }
+                None => hash.push(i as u8),
+            }
+            v.push(hash);
+        }
+        v
+    }
+
+    fn test_selection_aux(
+        nary: u8,
+        max: u64,
+        base_step: u64,
+        selected_step: u64,
+        round: u8,
+        diff_index: Option<usize>,
+        exp_bits: u32,
+        exp_step: u64,
+        exp_choice: u64,
+    ) {
+        println!("Test: nary: {}, max: {}, base_step: {}, selected_step: {}, round: {}, diff_index: {:?}, exp_bits: {}, exp_step: {}", nary, max, base_step, selected_step, round, diff_index, exp_bits, exp_step);
+        let nary_search = NArySearchDefinition::new(max, nary);
+        let hashes = nary_search.hashes_for_round(round);
+        let prover_hashes = test_vector(hashes as usize, None);
+        let my_hashes = test_vector(hashes as usize, diff_index);
+        println!("Prover hashes: {:?}", prover_hashes);
+        println!("My hashes: {:?}", my_hashes);
+        let (bits, base, selected) = choose_segment(
+            &nary_search,
+            base_step,
+            selected_step,
+            round,
+            &prover_hashes.into(),
+            &my_hashes.into(),
+        );
+        assert_eq!(bits, exp_bits);
+        assert_eq!(base, exp_step);
+        assert_eq!(selected, exp_choice);
+    }
+
+    #[test]
+    fn test_selection() {
+        // when there is no inferior limit selected and all the hashes matches it should selected the max-1|max transition
+        test_selection_aux(8, 64, 0, 63, 1, None, 7, 56, 63);
+        test_selection_aux(8, 64, 56, 63, 2, None, 7, 63, 63);
+
+        test_selection_aux(8, 128, 0, 127, 1, None, 7, 112, 127);
+        test_selection_aux(8, 128, 112, 127, 2, None, 7, 126, 127);
+        test_selection_aux(8, 128, 126, 127, 3, None, 1, 127, 127);
+
+        // when the diference is in the first step should choose 0
+        test_selection_aux(8, 64, 0, 63, 1, Some(0), 0, 0, 7);
+        test_selection_aux(8, 64, 0, 7, 2, Some(0), 0, 0, 0);
+
+        // chose something in the middle
+        test_selection_aux(8, 64, 0, 63, 1, Some(1), 1, 8, 15);
+        test_selection_aux(8, 64, 8, 15, 2, Some(2), 2, 10, 10);
+
+        // test limiting selected_step
+        test_selection_aux(8, 128, 0, 10, 1, None, 0, 0, 10);
+        test_selection_aux(8, 128, 0, 10, 2, None, 5, 10, 10);
+        test_selection_aux(8, 128, 10, 10, 3, None, 0, 10, 10);
+        test_selection_aux(8, 128, 10, 10, 3, Some(1), 0, 10, 10);
+
+        // test limiting selected_step
+        test_selection_aux(8, 128, 0, 9, 1, None, 0, 0, 9);
+        test_selection_aux(8, 128, 0, 9, 2, None, 4, 8, 9);
+        test_selection_aux(8, 128, 8, 9, 3, None, 1, 9, 9);
+        // selected_step is in action until one hash is different before
+        test_selection_aux(8, 128, 8, 9, 3, Some(0), 0, 8, 8);
+        // selected_step is in action and finds the same mismatch hash
+        test_selection_aux(8, 128, 8, 9, 3, Some(1), 1, 9, 9);
+
+        test_selection_aux(8, 128, 0, 9, 1, Some(0), 0, 0, 9);
+        test_selection_aux(8, 128, 0, 9, 2, Some(1), 1, 2, 3);
+        test_selection_aux(8, 128, 2, 3, 3, Some(0), 0, 2, 2);
     }
 }
