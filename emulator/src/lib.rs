@@ -1,6 +1,7 @@
 pub mod executor;
 pub mod loader;
 
+use bitcoin_script_riscv::ScriptValidation;
 use thiserror::Error;
 #[derive(Error, Debug, PartialEq)]
 pub enum ExecutionResult {
@@ -32,6 +33,9 @@ pub enum ExecutionResult {
 
     #[error("Can't write into the code section")]
     WriteToCodeSection,
+
+    #[error("Failed to verify the bitcoin script {0}")]
+    BitcoinScriptVerification(#[from] ScriptValidation),
 }
 
 pub mod constants {

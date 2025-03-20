@@ -1,3 +1,5 @@
+use crate::ExecutionResult;
+
 use super::trace::TraceRWStep;
 use bitcoin_script_riscv::riscv::{instruction_mapping::InstructionMapping, instructions::*};
 
@@ -5,7 +7,7 @@ pub fn validate(
     trace: &TraceRWStep,
     base_register_address: u32,
     instruction_mapping: &Option<InstructionMapping>,
-) -> bool {
+) -> Result<(), ExecutionResult> {
     let program = ProgramSpec::new(base_register_address);
     let result = verify(
         instruction_mapping,
@@ -23,7 +25,7 @@ pub fn validate(
         trace.trace_step.get_pc().get_address(),
         trace.trace_step.get_pc().get_micro(),
         trace.witness,
-    );
+    )?;
 
-    result.unwrap_or(false)
+    Ok(result)
 }

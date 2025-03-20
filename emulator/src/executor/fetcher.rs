@@ -153,15 +153,15 @@ pub fn execute_program(
         }
 
         if trace.is_ok() && validate_on_chain {
-            if validate(
+            let validation_result = validate(
                 trace.as_ref().unwrap(),
                 program.registers.get_base_address(),
                 &instruction_mapping,
-            ) {
-                count += 1;
-            } else {
-                break ExecutionResult::Error;
+            );
+            if validation_result.is_err() {
+                break validation_result.unwrap_err();
             }
+            count += 1;
         }
 
         if trace.is_err() {

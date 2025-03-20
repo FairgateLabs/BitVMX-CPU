@@ -964,7 +964,7 @@ pub fn verify(
     wpc: u32,
     wmicro: u8,
     witness: Option<u32>,
-) -> Result<bool, ScriptValidation> {
+) -> Result<(), ScriptValidation> {
     let mut stack = StackTracker::new();
     let trace_step = load_trace_step_in_stack(&mut stack, w1, wv1, wpc, wmicro);
     let mut consumes = 11;
@@ -994,10 +994,11 @@ pub fn verify(
 
     stack.op_true();
 
-    if !stack.run().success {
-        panic!("Verification failed");
+    let result = stack.run();
+    match result.success {
+        true => Ok(()),
+        false => Err(ScriptValidation::ValidationFail(result.error_msg)),
     }
-    Ok(true)
 }
 
 pub fn verify_execution(
