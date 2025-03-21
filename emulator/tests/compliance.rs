@@ -1,7 +1,14 @@
-use emulator::{executor::fetcher::execute_program, loader::program::load_elf, ExecutionResult};
+use emulator::{
+    executor::fetcher::{execute_program, FullTrace},
+    loader::program::load_elf,
+    ExecutionResult,
+};
 use tracing::info;
 
-fn verify_file(fname: &str, validate_on_chain: bool) -> Result<ExecutionResult, ExecutionResult> {
+fn verify_file(
+    fname: &str,
+    validate_on_chain: bool,
+) -> Result<(ExecutionResult, FullTrace), ExecutionResult> {
     let mut program = load_elf(&fname, false)?;
 
     info!("Execute program {}", fname);
@@ -16,7 +23,7 @@ fn verify_file(fname: &str, validate_on_chain: bool) -> Result<ExecutionResult, 
         validate_on_chain,
         false,
         false,
-        true,
+        false,
         true,
         None,
         None,
@@ -40,9 +47,9 @@ fn list_files() {
                 let path = path.path();
                 let path = path.to_string_lossy();
 
-                let result = verify_file(&format!("{}", path), true).unwrap();
+                let (result, _) = verify_file(&format!("{}", path), true).unwrap();
                 match result {
-                    ExecutionResult::Halt(exit_code) => {
+                    ExecutionResult::Halt(exit_code, _) => {
                         assert!(exit_code == 0, "Error executing file {}", path);
                         info!("File {} executed successfully", path);
                         count += 1;

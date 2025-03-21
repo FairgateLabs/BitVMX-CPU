@@ -1,9 +1,16 @@
 use std::collections::HashMap;
 
-use emulator::{executor::fetcher::execute_program, loader::program::load_elf, ExecutionResult};
+use emulator::{
+    executor::fetcher::{execute_program, FullTrace},
+    loader::program::load_elf,
+    ExecutionResult,
+};
 use tracing::info;
 
-fn verify_file(fname: &str, validate_on_chain: bool) -> Result<ExecutionResult, ExecutionResult> {
+fn verify_file(
+    fname: &str,
+    validate_on_chain: bool,
+) -> Result<(ExecutionResult, FullTrace), ExecutionResult> {
     let mut program = load_elf(&fname, false)?;
     info!("Execute program {}", fname);
     Ok(execute_program(
@@ -17,7 +24,7 @@ fn verify_file(fname: &str, validate_on_chain: bool) -> Result<ExecutionResult, 
         validate_on_chain,
         false,
         false,
-        true,
+        false,
         true,
         None,
         None,
@@ -36,7 +43,7 @@ fn exception_cases() {
         "read_invalid.elf",
         ExecutionResult::SectionNotFound("Address 0x00000000 not found in any section".to_string()),
     );
-    test_cases.insert("pc_limit.elf", ExecutionResult::LimitStepReached);
+    test_cases.insert("pc_limit.elf", ExecutionResult::LimitStepReached(1000));
     test_cases.insert(
         "pc_invalid.elf",
         ExecutionResult::SectionNotFound("Address 0x00000000 not found in any section".to_string()),
@@ -60,7 +67,7 @@ fn exception_cases() {
                 let path = path.path();
                 let path = path.to_string_lossy();
 
-                let result = verify_file(&format!("{}", path), true).unwrap();
+                let (result, _) = verify_file(&format!("{}", path), true).unwrap();
                 assert_eq!(
                     test_cases.get(fname.into_owned().as_str()).unwrap(),
                     &result

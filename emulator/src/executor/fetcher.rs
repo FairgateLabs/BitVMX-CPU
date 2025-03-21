@@ -12,6 +12,9 @@ use riscv_decode::{
 };
 use tracing::{error, info};
 
+pub type TraceStepResult = (TraceRWStep, String);
+pub type FullTrace = Vec<TraceStepResult>;
+
 pub fn execute_program(
     program: &mut Program,
     input: Vec<u8>,
@@ -31,8 +34,10 @@ pub fn execute_program(
     mem_dump: Option<u64>,
     fail_reads: Option<FailReads>,
     fail_pc: Option<u64>,
-) -> ExecutionResult {
+) -> (ExecutionResult, FullTrace) {
     let trace_set: Option<HashSet<u64>> = trace_list.map(|vec| vec.into_iter().collect());
+
+    let mut traces = Vec::new();
 
     if !input.is_empty() {
         if let Some(section) = program.find_section_by_name(input_section_name) {
@@ -41,7 +46,10 @@ pub fn execute_program(
                 section.data[i] = *byte;
             }
         } else {
-            return ExecutionResult::SectionNotFound(input_section_name.to_string());
+            return (
+                ExecutionResult::SectionNotFound(input_section_name.to_string()),
+                traces,
+            );
         }
     }
     let instruction_mapping = match validate_on_chain && use_instruction_mapping {
@@ -94,7 +102,10 @@ pub fn execute_program(
                         );
                     }
                 } else {
-                    return ExecutionResult::SectionNotFound(input_section_name.to_string());
+                    return (
+                        ExecutionResult::SectionNotFound(input_section_name.to_string()),
+                        traces,
+                    );
                 }
             }
         }
@@ -120,25 +131,30 @@ pub fn execute_program(
                     }
                 }
             }
+        }
 
-            if let Some(step) = mem_dump {
-                if program.step == step {
-                    info!("\n========== Dumping memory at step: {} ==========", step);
-                    program.dump_memory();
-                }
+        if let Some(step) = mem_dump {
+            if program.step == step {
+                info!("\n========== Dumping memory at step: {} ==========", step);
+                program.dump_memory();
             }
         }
 
-        if print_trace && trace.is_ok() {
+        if print_trace || trace.is_err() || program.halt {
             if trace_set.is_none() || trace_set.as_ref().unwrap().contains(&program.step) {
+                let hash_hex = program
+                    .hash
+                    .iter()
+                    .map(|byte| format!("{:02x}", byte))
+                    .collect::<String>();
+                traces.push((
+                    trace.as_ref().unwrap_or(&TraceRWStep::default()).clone(),
+                    hash_hex.clone(),
+                ));
                 info!(
                     "{};{}",
-                    trace.as_ref().unwrap().to_csv(),
-                    program
-                        .hash
-                        .iter()
-                        .map(|byte| format!("{:02x}", byte))
-                        .collect::<String>()
+                    trace.as_ref().unwrap_or(&TraceRWStep::default()).to_csv(),
+                    hash_hex
                 );
             }
         }
@@ -169,12 +185,12 @@ pub fn execute_program(
         }
 
         if program.halt {
-            break ExecutionResult::Halt(program.registers.get(REGISTER_A0 as u32));
+            break ExecutionResult::Halt(program.registers.get(REGISTER_A0 as u32), program.step);
         }
 
         if let Some(limit_step) = limit_step {
             if limit_step == program.step {
-                break ExecutionResult::LimitStepReached;
+                break ExecutionResult::LimitStepReached(limit_step);
             }
         }
     };
@@ -194,7 +210,7 @@ pub fn execute_program(
         );
     }
 
-    ret
+    (ret, traces)
 }
 
 pub fn wrapping_add(value: u32, x: u32, mask: u8) -> u32 {
@@ -225,6 +241,7 @@ pub fn execute_step(
     debug: bool,
 ) -> Result<TraceRWStep, ExecutionResult> {
     let pc = program.pc.clone();
+    program.step += 1;
 
     let opcode = program.read_mem(pc.get_address())?;
     let instruction = riscv_decode::decode(opcode).unwrap();
@@ -289,7 +306,6 @@ pub fn execute_step(
         mem_witness,
     );
 
-    program.step += 1;
     Ok(trace)
 }
 

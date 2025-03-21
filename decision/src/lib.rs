@@ -38,6 +38,10 @@ impl NArySearchDefinition {
         f64::log2(self.nary_last_round as f64) as u8
     }
 
+    pub fn total_rounds(&self) -> u8 {
+        self.full_rounds + if self.nary_last_round > 0 { 1 } else { 0 }
+    }
+
     pub fn bits_for_round(&self, round: u8) -> u8 {
         if round <= self.full_rounds {
             self.bits_nary()
@@ -104,6 +108,18 @@ impl ExecutionHashes {
     pub fn new(hashes: Vec<Vec<u8>>) -> ExecutionHashes {
         ExecutionHashes { hashes }
     }
+    pub fn from_hexstr(hashes: &Vec<String>) -> ExecutionHashes {
+        let mut v = Vec::new();
+        for hash in hashes {
+            let mut h = Vec::new();
+            for i in 0..hash.len() / 2 {
+                let byte = u8::from_str_radix(&hash[i * 2..i * 2 + 2], 16).unwrap();
+                h.push(byte);
+            }
+            v.push(h);
+        }
+        ExecutionHashes::new(v)
+    }
 }
 
 impl Into<ExecutionHashes> for Vec<Vec<u8>> {
@@ -156,9 +172,9 @@ pub fn choose_segment(
     }
 
     // first mismatch step
-    println!("Selection: {}", selection);
+    //println!("Selection: {}", selection);
     let mismatch_step = nary_defs.step_from_base_and_bits(round, base_step, selection as u32) - 1;
-    println!("Mismatch step: {}", mismatch_step);
+    //println!("Mismatch step: {}", mismatch_step);
     let lower_limit_bits = if selected_step < mismatch_step {
         nary_defs.step_bits_for_round(round, selected_step)
     } else {
@@ -166,7 +182,7 @@ pub fn choose_segment(
     };
     let choice = mismatch_step.min(selected_step);
 
-    println!("Lower limit bits: {}", lower_limit_bits);
+    //println!("Lower limit bits: {}", lower_limit_bits);
     let base_step = nary_defs.step_from_base_and_bits(round, base_step, lower_limit_bits);
 
     (lower_limit_bits, base_step, choice)

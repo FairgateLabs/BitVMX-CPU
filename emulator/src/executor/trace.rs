@@ -2,7 +2,7 @@ use crate::loader::program::{ProgramCounter, Registers};
 use bitvmx_cpu_definitions::MemoryWitness;
 use blake3::Hasher;
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct TraceRead {
     pub address: u32,
     pub value: u32,
@@ -27,7 +27,7 @@ impl TraceRead {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct TraceReadPC {
     pub pc: ProgramCounter,
     pub opcode: u32,
@@ -39,7 +39,7 @@ impl TraceReadPC {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct TraceWrite {
     pub address: u32,
     pub value: u32,
@@ -58,7 +58,7 @@ impl TraceWrite {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct TraceWritePC {
     pub pc: ProgramCounter,
 }
@@ -69,7 +69,7 @@ impl TraceWritePC {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 #[allow(unused)]
 pub struct TraceStep {
     pub(crate) write_1: TraceWrite,
@@ -98,16 +98,16 @@ impl TraceStep {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 #[allow(unused)]
 pub struct TraceRWStep {
-    pub(crate) step_number: u64,
-    pub(crate) read_1: TraceRead,
-    pub(crate) read_2: TraceRead,
-    pub(crate) read_pc: TraceReadPC,
-    pub(crate) trace_step: TraceStep,
-    pub(crate) witness: Option<u32>,
-    pub(crate) mem_witness: MemoryWitness,
+    pub step_number: u64,
+    pub read_1: TraceRead,
+    pub read_2: TraceRead,
+    pub read_pc: TraceReadPC,
+    pub trace_step: TraceStep,
+    pub witness: Option<u32>,
+    pub mem_witness: MemoryWitness,
 }
 
 impl TraceRWStep {

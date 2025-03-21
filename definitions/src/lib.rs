@@ -32,7 +32,7 @@ impl From<u8> for MemoryAccessType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct MemoryWitness {
     data: u8,
 }

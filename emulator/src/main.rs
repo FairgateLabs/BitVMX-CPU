@@ -249,6 +249,7 @@ fn main() -> Result<(), ExecutionResult> {
                     fail_reads,
                     *fail_pc,
                 )
+                .0
             );
         }
         None => {
