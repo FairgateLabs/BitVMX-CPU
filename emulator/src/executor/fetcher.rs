@@ -151,11 +151,13 @@ pub fn execute_program(
                     trace.as_ref().unwrap_or(&TraceRWStep::default()).clone(),
                     hash_hex.clone(),
                 ));
-                info!(
-                    "{};{}",
-                    trace.as_ref().unwrap_or(&TraceRWStep::default()).to_csv(),
-                    hash_hex
-                );
+                if debug {
+                    info!(
+                        "{};{}",
+                        trace.as_ref().unwrap_or(&TraceRWStep::default()).to_csv(),
+                        hash_hex
+                    );
+                }
             }
         }
 
