@@ -1,4 +1,4 @@
 [workspace]
 resolver = "2"
 
-members = ["bitcoin-script-riscv", "decision", "definitions", "emulator"]
+members = ["bitcoin-script-riscv", "definitions", "emulator"]

@@ -1,6 +1,7 @@
+use serde::Serialize;
 use tracing::error;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct NArySearchDefinition {
     pub max_steps: u64,
     pub nary: u8,

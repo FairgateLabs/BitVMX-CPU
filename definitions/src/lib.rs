@@ -1,4 +1,3 @@
-pub mod program_definition;
 pub mod memory_access_type {
     pub const REGISTER: u8 = 0;
     pub const MEMORY: u8 = 1;

@@ -1,31 +1,27 @@
-use bitvmx_cpu_decision::{
-    choose_segment, need_to_challenge, ExecutionHashes, NArySearchDefinition, ProgramResult,
-};
 use emulator::{
     constants::REGISTERS_BASE_ADDRESS,
+    decision::{choose_segment, need_to_challenge, ExecutionHashes, ProgramResult},
     executor::{
         fetcher::{execute_program, FullTrace},
         validator::validate,
     },
-    loader::program::load_elf,
+    loader::{program::Program, program_definition::ProgramDefinition},
     ExecutionResult,
 };
-use tracing::info;
+use tracing::{info, Level};
 
-fn verify_file(
-    fname: &str,
+fn verify_program(
+    mut program: Program,
+    input_section_name: &str,
     validate_on_chain: bool,
     input_data: Vec<u8>,
 ) -> Result<(ExecutionResult, FullTrace), ExecutionResult> {
-    let mut program = load_elf(&fname, false)?;
-
-    info!("Execute program {}", fname);
     Ok(execute_program(
         &mut program,
         input_data,
-        ".input",
+        input_section_name,
         false,
-        &None,
+        &Some("../temp-runs/".to_string()),
         None,
         true,
         validate_on_chain,
@@ -56,14 +52,19 @@ fn get_hashes(trace: &FullTrace, steps: &Vec<u64>) -> Vec<String> {
 }
 
 fn test_nary_search_trace_aux(input: u8, expect_err: bool) {
-    let path = "../docker-riscv32/riscv32/build/hello-world.elf";
+    let program_def =
+        ProgramDefinition::from_config("../docker-riscv32/riscv32/build/hello-world.yaml").unwrap();
 
-    let defs = NArySearchDefinition::new(2000, 8);
-    info!("{:?}", defs);
+    let defs = program_def.nary_def();
 
     //bad result
-    let (_bad_result, bad_trace) =
-        verify_file(&format!("{}", path), false, vec![17, 17, 17, input]).unwrap();
+    let (_bad_result, bad_trace) = verify_program(
+        program_def.load_program().unwrap(),
+        &program_def.input_section_name,
+        false,
+        vec![17, 17, 17, input],
+    )
+    .unwrap();
     let last_step = bad_trace.last().unwrap().0.step_number;
 
     let fake_end_hash = vec![1; 20]
@@ -120,11 +121,11 @@ fn test_nary_search_trace_aux(input: u8, expect_err: bool) {
 
 #[test]
 fn test_nary_search_trace() {
-    /*tracing_subscriber::fmt()
-    .without_time()
-    .with_target(false)
-    .with_max_level(Level::INFO)
-    .init();*/
+    tracing_subscriber::fmt()
+        .without_time()
+        .with_target(false)
+        .with_max_level(Level::INFO)
+        .init();
     test_nary_search_trace_aux(17, false);
     test_nary_search_trace_aux(0, true);
 }
