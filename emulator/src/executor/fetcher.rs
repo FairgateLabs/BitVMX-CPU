@@ -66,7 +66,7 @@ pub fn execute_program(
     if let Some(path) = &checkpoint_path {
         //create path if it does not exist
         std::fs::create_dir_all(path).unwrap();
-        Program::serialize_to_file(&program, &format!("{}/checkpoint.0.json", path));
+        program.serialize_to_file(path);
     }
 
     let ret = loop {
@@ -163,10 +163,7 @@ pub fn execute_program(
 
         if let Some(path) = &checkpoint_path {
             if program.step % CHECKPOINT_SIZE == 0 || trace.is_err() || program.halt {
-                Program::serialize_to_file(
-                    &program,
-                    &format!("{}/checkpoint.{}.json", path, program.step),
-                );
+                program.serialize_to_file(path);
             }
         }
 

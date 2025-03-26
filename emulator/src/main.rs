@@ -197,10 +197,7 @@ fn main() -> Result<(), ExecutionResult> {
                     let path = checkpoint_path
                         .as_ref()
                         .expect("Checkpoint path is expected");
-                    let program = Program::deserialize_from_file(&format!(
-                        "{}/checkpoint.{}.json",
-                        path, step
-                    ));
+                    let program = Program::deserialize_from_file(path, step)?;
                     if *debug {
                         info!("Execute from checkpoint: {} up to: {:?}", step, limit);
                     }

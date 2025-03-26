@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::{decision::NArySearchDefinition, ExecutionResult};
 
-use super::program::{load_elf, Program};
+use super::program::{load_elf, Program, CHECKPOINT_SIZE};
 
 #[derive(Error, Debug)]
 pub enum ProgramDefinitionError {
@@ -48,6 +48,30 @@ impl ProgramDefinition {
         let elf_path = self.config_path.split("/").collect::<Vec<&str>>();
         let elf_file = format!("{}/{}", elf_path[..elf_path.len() - 1].join("/"), self.elf);
         load_elf(&elf_file, false)
+    }
+
+    pub fn load_program_from_checkpoint(
+        &self,
+        checkpoint_path: &str,
+        step: u64,
+    ) -> Result<Program, ExecutionResult> {
+        let ndefs = self.nary_def();
+        if step >= ndefs.max_steps {
+            return Err(ExecutionResult::CantLoadPorgram(format!(
+                "Step {} is greater than max steps {}",
+                step, ndefs.max_steps
+            )));
+        }
+
+        let mut checkpoint_step = 0;
+        loop {
+            if step < checkpoint_step + CHECKPOINT_SIZE {
+                break;
+            }
+            checkpoint_step += CHECKPOINT_SIZE;
+        }
+
+        Program::deserialize_from_file(checkpoint_path, checkpoint_step)
     }
 }
 

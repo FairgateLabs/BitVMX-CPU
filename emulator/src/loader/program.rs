@@ -165,15 +165,23 @@ pub struct Program {
 }
 
 impl Program {
-    pub fn serialize_to_file(&self, fname: &str) {
+    pub fn serialize_to_file(&self, fpath: &str) {
+        let fname = format!("{}/checkpoint.{}.json", fpath, self.step);
         let serialized = serde_json::to_string(self).unwrap();
         std::fs::write(fname, serialized).expect("Unable to write file");
     }
 
-    pub fn deserialize_from_file(fname: &str) -> Program {
-        let serialized = std::fs::read(fname).expect("Unable to read file");
-        let serialized_str = std::str::from_utf8(&serialized).expect("Unable to convert to UTF-8");
-        serde_json::from_str(serialized_str).expect("Unable to deserialize")
+    pub fn deserialize_from_file(fpath: &str, step: u64) -> Result<Program, ExecutionResult> {
+        let fname = format!("{}/checkpoint.{}.json", fpath, step);
+        let serialized = std::fs::read(&fname).map_err(|_| {
+            ExecutionResult::CantLoadPorgram(format!("Error loading file: {}", fname))
+        })?;
+        let serialized_str = std::str::from_utf8(&serialized).map_err(|_| {
+            ExecutionResult::CantLoadPorgram(format!("Error parsing file: {}", fname))
+        })?;
+        serde_json::from_str(serialized_str).map_err(|_| {
+            ExecutionResult::CantLoadPorgram(format!("Error deserializing file: {}", fname))
+        })
     }
 
     pub fn new(entry_point: u32, registers_base_address: u32, sp_base_address: u32) -> Program {
