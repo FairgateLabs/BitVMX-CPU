@@ -4,3 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+config = "0.15.11"
+serde = "1.0.204"
+thiserror = "2.0.12"
