@@ -2,7 +2,7 @@ use emulator::{
     constants::REGISTERS_BASE_ADDRESS,
     decision::{choose_segment, need_to_challenge, ExecutionHashes, ProgramResult},
     executor::{
-        fetcher::{execute_program, FullTrace},
+        fetcher::{execute_program, FailConfiguration, FullTrace},
         validator::validate,
     },
     loader::{program::Program, program_definition::ProgramDefinition},
@@ -31,10 +31,7 @@ fn verify_program(
         false,
         None,
         None,
-        None,
-        None,
-        None,
-        None,
+        FailConfiguration::default(),
     ))
 }
 

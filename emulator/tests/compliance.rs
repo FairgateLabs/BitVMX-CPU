@@ -1,5 +1,5 @@
 use emulator::{
-    executor::fetcher::{execute_program, FullTrace},
+    executor::fetcher::{execute_program, FailConfiguration, FullTrace},
     loader::program::load_elf,
     ExecutionResult,
 };
@@ -27,10 +27,7 @@ fn verify_file(
         true,
         None,
         None,
-        None,
-        None,
-        None,
-        None,
+        FailConfiguration::default(),
     ))
 }
 

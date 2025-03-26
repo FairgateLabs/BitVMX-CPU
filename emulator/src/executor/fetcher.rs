@@ -15,6 +15,14 @@ use tracing::{error, info};
 pub type TraceStepResult = (TraceRWStep, String);
 pub type FullTrace = Vec<TraceStepResult>;
 
+#[derive(Debug, Default)]
+pub struct FailConfiguration {
+    pub fail_hash: Option<u64>,
+    pub fail_execute: Option<u64>,
+    pub fail_reads: Option<FailReads>,
+    pub fail_pc: Option<u64>,
+}
+
 pub fn execute_program(
     program: &mut Program,
     input: Vec<u8>,
@@ -28,12 +36,9 @@ pub fn execute_program(
     print_program_stdout: bool,
     debug: bool,
     no_hash: bool,
-    fail_hash: Option<u64>,
-    fail_execute: Option<u64>,
     trace_list: Option<Vec<u64>>,
     mem_dump: Option<u64>,
-    fail_reads: Option<FailReads>,
-    fail_pc: Option<u64>,
+    fail_config: FailConfiguration,
 ) -> (ExecutionResult, FullTrace) {
     let trace_set: Option<HashSet<u64>> = trace_list.map(|vec| vec.into_iter().collect());
 
@@ -71,11 +76,11 @@ pub fn execute_program(
 
     let ret = loop {
         let mut should_patch = (false, false);
-        if let Some(fr) = &fail_reads {
+        if let Some(fr) = &fail_config.fail_reads {
             should_patch = fr.patch_mem(program); // patches memory only at the right step
         }
 
-        if let Some(fail) = fail_pc {
+        if let Some(fail) = fail_config.fail_pc {
             if fail == program.step {
                 program.pc.next_address(); // makes pc fail by advancing twice
             }
@@ -111,11 +116,11 @@ pub fn execute_program(
         }
 
         if trace.is_ok() {
-            if let Some(fr) = &fail_reads {
+            if let Some(fr) = &fail_config.fail_reads {
                 fr.patch_trace_reads(trace.as_mut().unwrap(), should_patch); // patches trace reads only at the right step
             }
 
-            if let Some(fail) = fail_execute {
+            if let Some(fail) = fail_config.fail_execute {
                 if fail == program.step {
                     let value = &mut trace.as_mut().unwrap().trace_step.write_1.value;
                     *value = value.wrapping_add(1);
@@ -125,7 +130,7 @@ pub fn execute_program(
             if !no_hash {
                 let trace_bytes = trace.as_ref().unwrap().trace_step.to_bytes();
                 program.hash = compute_step_hash(&mut hasher, &program.hash, &trace_bytes);
-                if let Some(fail) = fail_hash {
+                if let Some(fail) = fail_config.fail_hash {
                     if fail == program.step {
                         program.hash = compute_step_hash(&mut hasher, &program.hash, &trace_bytes);
                     }

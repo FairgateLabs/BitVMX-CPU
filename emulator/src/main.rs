@@ -1,7 +1,10 @@
 use bitcoin_script_riscv::riscv::instruction_mapping::create_verification_script_mapping;
 use emulator::{
     constants::REGISTERS_BASE_ADDRESS,
-    executor::{fetcher::execute_program, utils::FailReads},
+    executor::{
+        fetcher::{execute_program, FailConfiguration},
+        utils::FailReads,
+    },
     loader::program::{generate_rom_commitment, load_elf, Program},
     ExecutionResult,
 };
@@ -224,6 +227,12 @@ fn main() -> Result<(), ExecutionResult> {
             };
 
             let debugvar = *debug;
+            let fail_config = FailConfiguration {
+                fail_hash: *fail_hash,
+                fail_execute: *fail_execute,
+                fail_reads,
+                fail_pc: *fail_pc,
+            };
             info!(
                 "{}",
                 execute_program(
@@ -239,12 +248,9 @@ fn main() -> Result<(), ExecutionResult> {
                     *stdout,
                     debugvar,
                     *no_hash,
-                    *fail_hash,
-                    *fail_execute,
                     numbers,
                     *dump_mem,
-                    fail_reads,
-                    *fail_pc,
+                    fail_config,
                 )
                 .0
             );
