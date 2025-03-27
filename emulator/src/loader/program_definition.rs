@@ -9,7 +9,7 @@ use crate::{
         fetcher::{execute_program, FailConfiguration, FullTrace},
         trace::TraceRWStep,
     },
-    ExecutionResult,
+    EmulatorError, ExecutionResult,
 };
 
 use super::program::{load_elf, Program, CHECKPOINT_SIZE};
@@ -50,7 +50,7 @@ impl ProgramDefinition {
         NArySearchDefinition::new(self.max_steps, self.nary_search)
     }
 
-    pub fn load_program(&self) -> Result<Program, ExecutionResult> {
+    pub fn load_program(&self) -> Result<Program, EmulatorError> {
         //extract the path from config path and concat with elf
         let elf_path = self.config_path.split("/").collect::<Vec<&str>>();
         let elf_file = format!("{}/{}", elf_path[..elf_path.len() - 1].join("/"), self.elf);
@@ -61,10 +61,10 @@ impl ProgramDefinition {
         &self,
         checkpoint_path: &str,
         step: u64,
-    ) -> Result<Program, ExecutionResult> {
+    ) -> Result<Program, EmulatorError> {
         let ndefs = self.nary_def();
         if step >= ndefs.max_steps {
-            return Err(ExecutionResult::CantLoadPorgram(format!(
+            return Err(EmulatorError::CantLoadPorgram(format!(
                 "Step {} is greater than max steps {}",
                 step, ndefs.max_steps
             )));
@@ -86,7 +86,7 @@ impl ProgramDefinition {
         checkpoint_path: &str,
         input_data: Vec<u8>,
         steps: Option<Vec<u64>>,
-    ) -> Result<(ExecutionResult, FullTrace), ExecutionResult> {
+    ) -> Result<(ExecutionResult, FullTrace), EmulatorError> {
         let checkpoint_path_str = checkpoint_path.to_string();
         let (mut program, checkpoint_path, output_trace) = match &steps {
             Some(steps) => (
@@ -121,11 +121,11 @@ impl ProgramDefinition {
         &self,
         input_data: Vec<u8>,
         checkpoint_path: &str,
-    ) -> Result<(ExecutionResult, u64, String), ExecutionResult> {
+    ) -> Result<(ExecutionResult, u64, String), EmulatorError> {
         let (result, trace) = self.execute_helper(checkpoint_path, input_data, None)?;
 
         if trace.len() == 0 {
-            return Err(ExecutionResult::Error);
+            return Err(EmulatorError::CantObtainTrace);
         }
 
         let last_trace = trace.last().unwrap();
@@ -142,7 +142,7 @@ impl ProgramDefinition {
         checkpoint_path: &str,
         round: u8,
         base: u64,
-    ) -> Result<Vec<String>, ExecutionResult> {
+    ) -> Result<Vec<String>, EmulatorError> {
         let mut steps = self.nary_def().required_steps(round, base);
         steps.insert(0, base); //asks base step as it should be always obtainable
         let steps_len = steps.len();
@@ -150,7 +150,7 @@ impl ProgramDefinition {
         let (_result, trace) = self.execute_helper(checkpoint_path, vec![], Some(steps))?;
         // at least the base step should be present
         if trace.len() == 0 {
-            return Err(ExecutionResult::Error);
+            return Err(EmulatorError::CantObtainTrace);
         }
 
         // if there are actual steps skip the first one
@@ -168,12 +168,12 @@ impl ProgramDefinition {
         &self,
         checkpoint_path: &str,
         step: u64,
-    ) -> Result<TraceRWStep, ExecutionResult> {
+    ) -> Result<TraceRWStep, EmulatorError> {
         let steps = vec![step];
         let (_result, trace) = self.execute_helper(checkpoint_path, vec![], Some(steps))?;
         // at least the base step should be present
         if trace.len() == 0 {
-            return Err(ExecutionResult::Error);
+            return Err(EmulatorError::CantObtainTrace);
         }
 
         Ok(trace[0].0.clone())

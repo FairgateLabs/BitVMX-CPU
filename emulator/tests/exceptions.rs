@@ -3,14 +3,14 @@ use std::collections::HashMap;
 use emulator::{
     executor::fetcher::{execute_program, FailConfiguration, FullTrace},
     loader::program::load_elf,
-    ExecutionResult,
+    EmulatorError, ExecutionResult,
 };
 use tracing::info;
 
 fn verify_file(
     fname: &str,
     validate_on_chain: bool,
-) -> Result<(ExecutionResult, FullTrace), ExecutionResult> {
+) -> Result<(ExecutionResult, FullTrace), EmulatorError> {
     let mut program = load_elf(&fname, false)?;
     info!("Execute program {}", fname);
     Ok(execute_program(

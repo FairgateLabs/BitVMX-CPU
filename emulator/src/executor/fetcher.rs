@@ -74,7 +74,7 @@ pub fn execute_program(
         program.serialize_to_file(path);
     }
 
-    let ret = loop {
+    let ret: ExecutionResult = loop {
         let mut should_patch = (false, false);
         if let Some(fr) = &fail_config.fail_reads {
             should_patch = fr.patch_mem(program); // patches memory only at the right step

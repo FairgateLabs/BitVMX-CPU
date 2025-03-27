@@ -6,7 +6,7 @@ use emulator::{
         utils::FailReads,
     },
     loader::program::{generate_rom_commitment, load_elf, Program},
-    ExecutionResult,
+    EmulatorError,
 };
 use hex::FromHex;
 
@@ -126,7 +126,7 @@ enum Commands {
     },
 }
 
-fn main() -> Result<(), ExecutionResult> {
+fn main() -> Result<(), EmulatorError> {
     tracing_subscriber::fmt()
         .without_time()
         .with_target(false)
@@ -176,11 +176,11 @@ fn main() -> Result<(), ExecutionResult> {
         }) => {
             if elf.is_none() && step.is_none() {
                 error!("To execute an elf file or a checkpoint step is required");
-                return Err(ExecutionResult::Error);
+                return Err(EmulatorError::InvalidParameters);
             }
             if elf.is_some() && step.is_some() {
                 error!("To execute chose an elf file or a checkpoint not both");
-                return Err(ExecutionResult::Error);
+                return Err(EmulatorError::InvalidParameters);
             }
 
             let (mut program, input) = match elf {

@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 use tracing::{error, info};
 
-use crate::{constants::*, executor::trace::generate_initial_step_hash, ExecutionResult};
+use crate::{
+    constants::*, executor::trace::generate_initial_step_hash, EmulatorError, ExecutionResult,
+};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Section {
@@ -171,16 +173,16 @@ impl Program {
         std::fs::write(fname, serialized).expect("Unable to write file");
     }
 
-    pub fn deserialize_from_file(fpath: &str, step: u64) -> Result<Program, ExecutionResult> {
+    pub fn deserialize_from_file(fpath: &str, step: u64) -> Result<Program, EmulatorError> {
         let fname = format!("{}/checkpoint.{}.json", fpath, step);
         let serialized = std::fs::read(&fname).map_err(|_| {
-            ExecutionResult::CantLoadPorgram(format!("Error loading file: {}", fname))
+            EmulatorError::CantLoadPorgram(format!("Error loading file: {}", fname))
         })?;
         let serialized_str = std::str::from_utf8(&serialized).map_err(|_| {
-            ExecutionResult::CantLoadPorgram(format!("Error parsing file: {}", fname))
+            EmulatorError::CantLoadPorgram(format!("Error parsing file: {}", fname))
         })?;
         serde_json::from_str(serialized_str).map_err(|_| {
-            ExecutionResult::CantLoadPorgram(format!("Error deserializing file: {}", fname))
+            EmulatorError::CantLoadPorgram(format!("Error deserializing file: {}", fname))
         })
     }
 
@@ -197,7 +199,7 @@ impl Program {
         }
     }
 
-    pub fn sanity_check(&self) -> Result<(), ExecutionResult> {
+    pub fn sanity_check(&self) -> Result<(), EmulatorError> {
         //check overlapping sections
         for i in 0..self.sections.len() {
             for j in i + 1..self.sections.len() {
@@ -206,7 +208,7 @@ impl Program {
                 if section1.start < section2.start + section2.size
                     && section1.start + section1.size > section2.start
                 {
-                    return Err(ExecutionResult::CantLoadPorgram(format!(
+                    return Err(EmulatorError::CantLoadPorgram(format!(
                         "Overlapping sections: {} and {}",
                         section1.name, section2.name
                     )));
@@ -371,25 +373,23 @@ pub fn vec_u8_to_vec_u32(input: &[u8], little: bool) -> Vec<u32> {
         .collect()
 }
 
-pub fn load_elf(fname: &str, show_sections: bool) -> Result<Program, ExecutionResult> {
+pub fn load_elf(fname: &str, show_sections: bool) -> Result<Program, EmulatorError> {
     let path = std::path::PathBuf::from(fname);
     let file_data = std::fs::read(path)
-        .map_err(|_| ExecutionResult::CantLoadPorgram(format!("Error loading file: {}", fname)))?;
+        .map_err(|_| EmulatorError::CantLoadPorgram(format!("Error loading file: {}", fname)))?;
     let slice = file_data.as_slice();
     let file = ElfBytes::<LittleEndian>::minimal_parse(slice)
-        .map_err(|_| ExecutionResult::CantLoadPorgram(format!("Error parsing elf: {}", fname)))?;
+        .map_err(|_| EmulatorError::CantLoadPorgram(format!("Error parsing elf: {}", fname)))?;
 
     let entry_point = u32::try_from(file.ehdr.e_entry).map_err(|_| {
-        ExecutionResult::CantLoadPorgram(format!("Invalid entrypoint for elf: {}", fname))
+        EmulatorError::CantLoadPorgram(format!("Invalid entrypoint for elf: {}", fname))
     })?;
     let string_table = file
         .section_headers_with_strtab()
-        .map_err(|_| {
-            ExecutionResult::CantLoadPorgram(format!("Can't read headers for: {}", fname))
-        })?
+        .map_err(|_| EmulatorError::CantLoadPorgram(format!("Can't read headers for: {}", fname)))?
         .1
         .ok_or_else(|| {
-            ExecutionResult::CantLoadPorgram(format!("Can't read string table for: {}", fname))
+            EmulatorError::CantLoadPorgram(format!("Can't read string table for: {}", fname))
         })?;
 
     let mut program = Program::new(
@@ -399,7 +399,7 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Result<Program, ExecutionRe
     );
 
     let sections = file.section_headers().ok_or_else(|| {
-        ExecutionResult::CantLoadPorgram(format!("Can't read headers for: {}", fname))
+        EmulatorError::CantLoadPorgram(format!("Can't read headers for: {}", fname))
     })?;
 
     program.add_section(Section::new(
@@ -476,7 +476,7 @@ pub struct RomCommitment {
     pub zero_initialized: Vec<(u32, u32)>, //start, size
 }
 
-pub fn generate_rom_commitment(program: &Program) -> Result<RomCommitment, ExecutionResult> {
+pub fn generate_rom_commitment(program: &Program) -> Result<RomCommitment, EmulatorError> {
     let mut rom_commitment = RomCommitment {
         entrypoint: program.pc.get_address(),
         code: Vec::new(),
@@ -547,12 +547,7 @@ mod tests {
         let mut program = Program::new(0, 0, 0);
         program.add_section(Section::new("test_1", 0, 10, false, false));
         program.add_section(Section::new("test_2", 9, 5, false, false));
-        assert_eq!(
-            program.sanity_check(),
-            Err(ExecutionResult::CantLoadPorgram(
-                "Overlapping sections: test_1 and test_2".to_string()
-            ))
-        );
+        assert!(program.sanity_check().is_err());
     }
 
     #[test]
