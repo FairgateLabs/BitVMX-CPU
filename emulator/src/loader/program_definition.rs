@@ -3,7 +3,14 @@ use serde::Deserialize;
 
 use thiserror::Error;
 
-use crate::{decision::NArySearchDefinition, ExecutionResult};
+use crate::{
+    decision::NArySearchDefinition,
+    executor::{
+        fetcher::{execute_program, FailConfiguration, FullTrace},
+        trace::TraceRWStep,
+    },
+    ExecutionResult,
+};
 
 use super::program::{load_elf, Program, CHECKPOINT_SIZE};
 
@@ -72,6 +79,104 @@ impl ProgramDefinition {
         }
 
         Program::deserialize_from_file(checkpoint_path, checkpoint_step)
+    }
+
+    pub fn execute_helper(
+        &self,
+        checkpoint_path: &str,
+        input_data: Vec<u8>,
+        steps: Option<Vec<u64>>,
+    ) -> Result<(ExecutionResult, FullTrace), ExecutionResult> {
+        let checkpoint_path_str = checkpoint_path.to_string();
+        let (mut program, checkpoint_path, output_trace) = match &steps {
+            Some(steps) => (
+                self.load_program_from_checkpoint(checkpoint_path, steps[0])?,
+                None,
+                true,
+            ),
+
+            None => (self.load_program()?, Some(checkpoint_path_str), false),
+        };
+
+        Ok(execute_program(
+            &mut program,
+            input_data,
+            &self.input_section_name,
+            false,
+            &checkpoint_path,
+            Some(self.max_steps),
+            output_trace,
+            false,
+            false,
+            false,
+            false,
+            false,
+            steps,
+            None,
+            FailConfiguration::default(),
+        ))
+    }
+
+    pub fn get_execution_result(
+        &self,
+        input_data: Vec<u8>,
+        checkpoint_path: &str,
+    ) -> Result<(ExecutionResult, u64, String), ExecutionResult> {
+        let (result, trace) = self.execute_helper(checkpoint_path, input_data, None)?;
+
+        if trace.len() == 0 {
+            return Err(ExecutionResult::Error);
+        }
+
+        let last_trace = trace.last().unwrap();
+        let last_step = last_trace.0.step_number;
+        let last_hash = last_trace.1.clone();
+
+        Ok((result, last_step, last_hash))
+    }
+
+    //TODO: Check that the base is not higher that the reported finish step
+    //it might be necessary to enforce this in bitcoin script
+    pub fn get_round_hashes(
+        &self,
+        checkpoint_path: &str,
+        round: u8,
+        base: u64,
+    ) -> Result<Vec<String>, ExecutionResult> {
+        let mut steps = self.nary_def().required_steps(round, base);
+        steps.insert(0, base); //asks base step as it should be always obtainable
+        let steps_len = steps.len();
+
+        let (_result, trace) = self.execute_helper(checkpoint_path, vec![], Some(steps))?;
+        // at least the base step should be present
+        if trace.len() == 0 {
+            return Err(ExecutionResult::Error);
+        }
+
+        // if there are actual steps skip the first one
+        let skip = if trace.len() > 1 { 1 } else { 0 };
+
+        let mut ret: Vec<String> = trace.iter().skip(skip).map(|t| t.1.clone()).collect();
+        for _ in 0..steps_len - trace.len() {
+            ret.push(trace.last().unwrap().1.clone());
+        }
+
+        Ok(ret)
+    }
+
+    pub fn get_trace_step(
+        &self,
+        checkpoint_path: &str,
+        step: u64,
+    ) -> Result<TraceRWStep, ExecutionResult> {
+        let steps = vec![step];
+        let (_result, trace) = self.execute_helper(checkpoint_path, vec![], Some(steps))?;
+        // at least the base step should be present
+        if trace.len() == 0 {
+            return Err(ExecutionResult::Error);
+        }
+
+        Ok(trace[0].0.clone())
     }
 }
 
