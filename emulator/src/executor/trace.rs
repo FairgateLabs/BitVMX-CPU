@@ -1,8 +1,9 @@
 use crate::loader::program::{ProgramCounter, Registers};
 use bitvmx_cpu_definitions::MemoryWitness;
 use blake3::Hasher;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct TraceRead {
     pub address: u32,
     pub value: u32,
@@ -27,7 +28,7 @@ impl TraceRead {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct TraceReadPC {
     pub pc: ProgramCounter,
     pub opcode: u32,
@@ -39,7 +40,7 @@ impl TraceReadPC {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct TraceWrite {
     pub address: u32,
     pub value: u32,
@@ -58,7 +59,7 @@ impl TraceWrite {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct TraceWritePC {
     pub pc: ProgramCounter,
 }
@@ -69,7 +70,7 @@ impl TraceWritePC {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[allow(unused)]
 pub struct TraceStep {
     pub(crate) write_1: TraceWrite,
@@ -98,7 +99,7 @@ impl TraceStep {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[allow(unused)]
 pub struct TraceRWStep {
     pub step_number: u64,

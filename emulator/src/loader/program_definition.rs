@@ -2,9 +2,10 @@ use config::Config;
 use serde::Deserialize;
 
 use thiserror::Error;
+use tracing::info;
 
 use crate::{
-    decision::NArySearchDefinition,
+    decision::nary_search::NArySearchDefinition,
     executor::{
         fetcher::{execute_program, FailConfiguration, FullTrace},
         trace::TraceRWStep,
@@ -145,6 +146,10 @@ impl ProgramDefinition {
     ) -> Result<Vec<String>, EmulatorError> {
         let mut steps = self.nary_def().required_steps(round, base);
         steps.insert(0, base); //asks base step as it should be always obtainable
+        info!(
+            "Getting hashes for round: {} with steps: {:?}",
+            round, steps
+        );
         let steps_len = steps.len();
 
         let (_result, trace) = self.execute_helper(checkpoint_path, vec![], Some(steps))?;

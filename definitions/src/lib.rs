@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 pub mod memory_access_type {
     pub const REGISTER: u8 = 0;
     pub const MEMORY: u8 = 1;
@@ -32,7 +34,7 @@ impl From<u8> for MemoryAccessType {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MemoryWitness {
     data: u8,
 }

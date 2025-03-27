@@ -4,6 +4,7 @@ pub mod loader;
 
 use bitcoin_script_riscv::ScriptValidation;
 use loader::program_definition::ProgramDefinitionError;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -17,6 +18,9 @@ pub enum EmulatorError {
     #[error("Can't load the program {0}")]
     CantLoadPorgram(String),
 
+    #[error("Error with challenge log {0}")]
+    ChallengeError(String),
+
     #[error("Error execution program {0}")]
     ExecutionError(#[from] ExecutionResult),
 
@@ -24,7 +28,7 @@ pub enum EmulatorError {
     ProgramDefinition(#[from] ProgramDefinitionError),
 }
 
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ExecutionResult {
     #[error("Program halted return value: {0} at step: {1}")]
     Halt(u32, u64),

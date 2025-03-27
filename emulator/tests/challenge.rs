@@ -1,10 +1,18 @@
 use emulator::{
     constants::REGISTERS_BASE_ADDRESS,
-    decision::{choose_segment, need_to_challenge, ExecutionHashes, ProgramResult},
+    decision::nary_search::{choose_segment, ExecutionHashes},
     executor::validator::validate,
     loader::program_definition::ProgramDefinition,
 };
 use tracing::{info, Level};
+
+fn init_trace() {
+    tracing_subscriber::fmt()
+        .without_time()
+        .with_target(false)
+        .with_max_level(Level::INFO)
+        .init();
+}
 
 fn test_nary_search_trace_aux(input: u8, expect_err: bool, checkpoint_path: &str) {
     let program_definition_file = "../docker-riscv32/riscv32/build/hello-world.yaml";
@@ -16,12 +24,7 @@ fn test_nary_search_trace_aux(input: u8, expect_err: bool, checkpoint_path: &str
         .get_execution_result(vec![17, 17, 17, input], checkpoint_path)
         .unwrap();
 
-    let challenge_selected_step = need_to_challenge(
-        &ProgramResult::new(true, 1500),
-        &ProgramResult::new(false, last_step),
-    )
-    .unwrap();
-
+    let challenge_selected_step = last_step.min(1500);
     info!("Verifier decides to challenge");
     info!("Selected step to challenge: {}", challenge_selected_step);
 
@@ -65,11 +68,7 @@ fn test_nary_search_trace_aux(input: u8, expect_err: bool, checkpoint_path: &str
 
 #[test]
 fn test_nary_search_trace() {
-    tracing_subscriber::fmt()
-        .without_time()
-        .with_target(false)
-        .with_max_level(Level::INFO)
-        .init();
+    init_trace();
     test_nary_search_trace_aux(17, false, "../temp-runs/ok/");
     test_nary_search_trace_aux(0, true, "../temp-runs/fail/");
 }

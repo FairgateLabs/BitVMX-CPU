@@ -1,7 +1,8 @@
 pub mod riscv;
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ScriptValidation {
     #[error("Not implemented {0}")]
     InstructionNotImplemented(String),
