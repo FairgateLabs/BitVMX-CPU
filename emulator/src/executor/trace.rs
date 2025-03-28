@@ -182,3 +182,15 @@ pub fn generate_initial_step_hash() -> Vec<u8> {
     hasher.update(&initial_bytes);
     hasher.finalize().as_bytes()[..20].to_vec()
 }
+
+pub fn validate_step_hash(hash: &str, step: &TraceStep, next_hash: &str) -> bool {
+    let hash = hex::decode(hash).expect("Invalid hex string");
+    let next_hash = hex::decode(next_hash).expect("Invalid hex string");
+    let trace_bytes = step.to_bytes();
+
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&hash);
+    hasher.update(&trace_bytes);
+    let computed_hash = hasher.finalize().as_bytes()[..20].to_vec();
+    computed_hash == next_hash
+}

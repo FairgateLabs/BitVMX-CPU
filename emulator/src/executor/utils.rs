@@ -2,7 +2,7 @@ use crate::loader::program::Program;
 
 use super::trace::{TraceRWStep, TraceRead};
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct FailRead {
     pub address_original: u32,
     pub value: u32,
@@ -57,7 +57,7 @@ impl FailRead {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FailReads {
     read_1: FailRead,
     read_2: FailRead,
@@ -96,6 +96,41 @@ impl FailReads {
 
         if self.read_2.init && should_patch.1 {
             self.read_2.patch_trace_read(&mut trace.read_2);
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct FailConfiguration {
+    pub fail_hash: Option<u64>,
+    pub fail_execute: Option<u64>,
+    pub fail_reads: Option<FailReads>,
+    pub fail_pc: Option<u64>,
+}
+
+impl FailConfiguration {
+    pub fn new_fail_hash(fail_hash: u64) -> Self {
+        Self {
+            fail_hash: Some(fail_hash),
+            ..Default::default()
+        }
+    }
+    pub fn new_fail_execute(fail_execute: u64) -> Self {
+        Self {
+            fail_execute: Some(fail_execute),
+            ..Default::default()
+        }
+    }
+    pub fn new_fail_reads(fail_reads: FailReads) -> Self {
+        Self {
+            fail_reads: Some(fail_reads),
+            ..Default::default()
+        }
+    }
+    pub fn new_fail_pc(fail_pc: u64) -> Self {
+        Self {
+            fail_pc: Some(fail_pc),
+            ..Default::default()
         }
     }
 }

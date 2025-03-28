@@ -1,5 +1,8 @@
 use emulator::{
-    executor::fetcher::{execute_program, FailConfiguration, FullTrace},
+    executor::{
+        fetcher::{execute_program, FullTrace},
+        utils::FailConfiguration,
+    },
     loader::program::load_elf,
     EmulatorError, ExecutionResult,
 };

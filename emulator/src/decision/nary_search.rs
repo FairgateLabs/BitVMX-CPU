@@ -1,5 +1,7 @@
+use std::collections::HashMap;
+
 use serde::Serialize;
-use tracing::error;
+use tracing::{error, info};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct NArySearchDefinition {
@@ -97,6 +99,24 @@ impl NArySearchDefinition {
         } else {
             base + (bits as u64)
         }
+    }
+
+    pub fn step_mapping(&self, bits: &Vec<u32>) -> HashMap<u64, (u8, u8)> {
+        assert_eq!(bits.len(), self.total_rounds() as usize);
+        let mut base = 0;
+        let mut mapping: HashMap<u64, (u8, u8)> = HashMap::new();
+
+        for round in 1..self.total_rounds() + 1 {
+            let required_steps = self.required_steps(round, base);
+            for (n, step) in required_steps.iter().enumerate() {
+                mapping.insert(*step, (round, n as u8));
+            }
+
+            base = self.step_from_base_and_bits(round, base, bits[round as usize - 1]);
+        }
+
+        info!("Mapping: {:?}", mapping);
+        mapping
     }
 }
 

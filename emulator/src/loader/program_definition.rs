@@ -7,8 +7,9 @@ use tracing::info;
 use crate::{
     decision::nary_search::NArySearchDefinition,
     executor::{
-        fetcher::{execute_program, FailConfiguration, FullTrace},
+        fetcher::{execute_program, FullTrace},
         trace::TraceRWStep,
+        utils::FailConfiguration,
     },
     EmulatorError, ExecutionResult,
 };
@@ -87,6 +88,7 @@ impl ProgramDefinition {
         checkpoint_path: &str,
         input_data: Vec<u8>,
         steps: Option<Vec<u64>>,
+        fail_config: Option<FailConfiguration>,
     ) -> Result<(ExecutionResult, FullTrace), EmulatorError> {
         let checkpoint_path_str = checkpoint_path.to_string();
         let (mut program, checkpoint_path, output_trace) = match &steps {
@@ -114,7 +116,7 @@ impl ProgramDefinition {
             false,
             steps,
             None,
-            FailConfiguration::default(),
+            fail_config.unwrap_or_default(),
         ))
     }
 
@@ -122,8 +124,10 @@ impl ProgramDefinition {
         &self,
         input_data: Vec<u8>,
         checkpoint_path: &str,
+        fail_config: Option<FailConfiguration>,
     ) -> Result<(ExecutionResult, u64, String), EmulatorError> {
-        let (result, trace) = self.execute_helper(checkpoint_path, input_data, None)?;
+        let (result, trace) =
+            self.execute_helper(checkpoint_path, input_data, None, fail_config)?;
 
         if trace.len() == 0 {
             return Err(EmulatorError::CantObtainTrace);
@@ -143,16 +147,18 @@ impl ProgramDefinition {
         checkpoint_path: &str,
         round: u8,
         base: u64,
+        fail_config: Option<FailConfiguration>,
     ) -> Result<Vec<String>, EmulatorError> {
         let mut steps = self.nary_def().required_steps(round, base);
-        steps.insert(0, base); //asks base step as it should be always obtainable
         info!(
             "Getting hashes for round: {} with steps: {:?}",
             round, steps
         );
+        steps.insert(0, base); //asks base step as it should be always obtainable
         let steps_len = steps.len();
 
-        let (_result, trace) = self.execute_helper(checkpoint_path, vec![], Some(steps))?;
+        let (_result, trace) =
+            self.execute_helper(checkpoint_path, vec![], Some(steps), fail_config)?;
         // at least the base step should be present
         if trace.len() == 0 {
             return Err(EmulatorError::CantObtainTrace);
@@ -175,7 +181,7 @@ impl ProgramDefinition {
         step: u64,
     ) -> Result<TraceRWStep, EmulatorError> {
         let steps = vec![step];
-        let (_result, trace) = self.execute_helper(checkpoint_path, vec![], Some(steps))?;
+        let (_result, trace) = self.execute_helper(checkpoint_path, vec![], Some(steps), None)?;
         // at least the base step should be present
         if trace.len() == 0 {
             return Err(EmulatorError::CantObtainTrace);

@@ -21,7 +21,7 @@ fn test_nary_search_trace_aux(input: u8, expect_err: bool, checkpoint_path: &str
     let defs = program_def.nary_def();
 
     let (_bad_result, last_step, _last_hash) = program_def
-        .get_execution_result(vec![17, 17, 17, input], checkpoint_path)
+        .get_execution_result(vec![17, 17, 17, input], checkpoint_path, None)
         .unwrap();
 
     let challenge_selected_step = last_step.min(1500);
@@ -34,7 +34,7 @@ fn test_nary_search_trace_aux(input: u8, expect_err: bool, checkpoint_path: &str
     for round in 1..defs.total_rounds() + 1 {
         info!("Prover gets the steps required by the n-ary search round: {round}");
         let reply_hashes = program_def
-            .get_round_hashes(checkpoint_path, round, base)
+            .get_round_hashes(checkpoint_path, round, base, None)
             .unwrap(); //get_hashes(&bad_trace, &steps);
         info!("Hashes: {:?}", reply_hashes);
 

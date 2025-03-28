@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, collections::HashSet};
 
-use super::{trace::TraceRWStep, utils::FailReads, validator::validate};
+use super::{trace::TraceRWStep, utils::FailConfiguration, validator::validate};
 use crate::{
     executor::alignment_masks::*, executor::trace::*, loader::program::*, ExecutionResult,
 };
@@ -14,14 +14,6 @@ use tracing::{error, info};
 
 pub type TraceStepResult = (TraceRWStep, String);
 pub type FullTrace = Vec<TraceStepResult>;
-
-#[derive(Debug, Default)]
-pub struct FailConfiguration {
-    pub fail_hash: Option<u64>,
-    pub fail_execute: Option<u64>,
-    pub fail_reads: Option<FailReads>,
-    pub fail_pc: Option<u64>,
-}
 
 pub fn execute_program(
     program: &mut Program,

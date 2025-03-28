@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use tracing::{error, info, warn};
 
 use crate::{
@@ -5,7 +7,10 @@ use crate::{
         execution_log::VerifierChallengeLog,
         nary_search::{choose_segment, ExecutionHashes},
     },
-    executor::trace::TraceRWStep,
+    executor::{
+        trace::{validate_step_hash, TraceRWStep},
+        utils::FailConfiguration,
+    },
     loader::program_definition::ProgramDefinition,
     EmulatorError, ExecutionResult,
 };
@@ -17,10 +22,11 @@ pub fn prover_execute(
     input: Vec<u8>,
     checkpoint_path: &str,
     force: bool,
+    fail_config: Option<FailConfiguration>,
 ) -> Result<(ExecutionResult, u64, String), EmulatorError> {
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
     let (result, last_step, last_hash) =
-        program_def.get_execution_result(input.clone(), checkpoint_path)?;
+        program_def.get_execution_result(input.clone(), checkpoint_path, fail_config)?;
     if result != ExecutionResult::Halt(0, last_step) {
         error!(
             "The execution of the program {} failed with error: {:?}. The claim should not be commited on-chain.",
@@ -47,6 +53,7 @@ pub fn prover_get_hashes_for_round(
     checkpoint_path: &str,
     round: u8,
     verifier_decision: u32,
+    fail_config: Option<FailConfiguration>,
 ) -> Result<Vec<String>, EmulatorError> {
     let mut challenge_log = ProverChallengeLog::load(checkpoint_path)?;
     let base = challenge_log.base_step;
@@ -61,7 +68,12 @@ pub fn prover_get_hashes_for_round(
     };
 
     challenge_log.base_step = new_base;
-    let hashes = program_def.get_round_hashes(checkpoint_path, round, challenge_log.base_step)?;
+    let hashes = program_def.get_round_hashes(
+        checkpoint_path,
+        round,
+        challenge_log.base_step,
+        fail_config,
+    )?;
     challenge_log.hash_rounds.push(hashes.clone());
     challenge_log.verifier_decisions.push(verifier_decision);
     challenge_log.save(checkpoint_path)?;
@@ -75,10 +87,11 @@ pub fn verifier_check_execution(
     claim_last_step: u64,
     claim_last_hash: &str,
     force: bool,
+    fail_config: Option<FailConfiguration>,
 ) -> Result<Option<u64>, EmulatorError> {
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
     let (result, last_step, last_hash) =
-        program_def.get_execution_result(input.clone(), checkpoint_path)?;
+        program_def.get_execution_result(input.clone(), checkpoint_path, fail_config)?;
 
     if result == ExecutionResult::Halt(0, last_step) {
         info!("The program executed successfully with the prover input");
@@ -122,13 +135,14 @@ pub fn verifier_choose_segment(
     checkpoint_path: &str,
     round: u8,
     prover_last_hashes: Vec<String>,
+    fail_config: Option<FailConfiguration>,
 ) -> Result<u32, EmulatorError> {
     let mut challenge_log = VerifierChallengeLog::load(checkpoint_path)?;
     let base = challenge_log.base_step;
 
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
 
-    let hashes = program_def.get_round_hashes(checkpoint_path, round, base)?;
+    let hashes = program_def.get_round_hashes(checkpoint_path, round, base, fail_config)?;
 
     let claim_hashes = ExecutionHashes::from_hexstr(&prover_last_hashes);
     let my_hashes = ExecutionHashes::from_hexstr(&hashes);
@@ -165,7 +179,7 @@ pub fn prover_final_trace(
     let nary_def = program_def.nary_def();
 
     let total_rounds = nary_def.total_rounds();
-    let final_step = nary_def.step_from_base_and_bits(total_rounds - 1, base, final_bits);
+    let final_step = nary_def.step_from_base_and_bits(total_rounds, base, final_bits);
 
     challenge_log.base_step = final_step;
     challenge_log.verifier_decisions.push(final_bits);
@@ -175,6 +189,81 @@ pub fn prover_final_trace(
     challenge_log.save(checkpoint_path)?;
     Ok(challenge_log.final_trace)
 }
+
+pub fn get_hashes(
+    mapping: &HashMap<u64, (u8, u8)>,
+    hashes: &Vec<Vec<String>>,
+    challenge_step: u64,
+) -> (String, String) {
+    let next_step = challenge_step + 1;
+
+    let step_access = mapping.get(&challenge_step).unwrap();
+    let next_access = mapping.get(&next_step).unwrap();
+
+    let claim_hash = hashes[step_access.0 as usize - 1][step_access.1 as usize].clone();
+    let claim_next_hash = hashes[next_access.0 as usize - 1][next_access.1 as usize].clone();
+    (claim_hash, claim_next_hash)
+}
+
+pub fn verifier_choose_challenge(
+    program_definition_file: &str,
+    checkpoint_path: &str,
+    trace: TraceRWStep,
+) -> Result<String, EmulatorError> {
+    let program_def = ProgramDefinition::from_config(program_definition_file)?;
+    let nary_def = program_def.nary_def();
+    let verifier_log = VerifierChallengeLog::load(checkpoint_path)?;
+
+    let (step_hash, next_hash) = get_hashes(
+        &nary_def.step_mapping(&verifier_log.verifier_decisions),
+        &verifier_log.prover_hash_rounds,
+        verifier_log.step_to_challenge,
+    );
+
+    if !validate_step_hash(&step_hash, &trace.trace_step, &next_hash) {
+        info!("Veifier choose to challenge TRACE_HASH");
+        return Ok("trace_hash".to_string());
+    }
+
+    Ok("".to_string())
+}
+
+/*
+  TEST CASES
+  ----------
+
+  - prover can't provide last step equal to MAX_LAST_STEP (should be enforced in the script)
+  - prover provides a last step that is > than the verifier last step
+  - prover provides a last step that is = to the verifier last step
+  - prover provides a last step that is < to the verifier last step
+
+  - acording to the verifier there is no halt(0) at min(prover_last_step, verifier_last_step)
+  - if both agrees on both hashes, then the verifier lies about the halt and will not succeed the execute
+
+  - if prover lies about the result and prover_last_step is executed:
+    - it will not succeed if it's halt(!0)
+    - it will succeed if it's halt(0) (or other opcode)
+        - this happens if the discrepancy in the hash if < than verifier_last_step
+        - or prover lies with the trace_hash
+
+    - if  hash(hash_prev|trace_write) != hash =>  challenge: trace_hash (does not matter if values agrees with the verifier)
+        - if step is 1, challenge: trace_hash_special_case (initial hash is hardcoded)
+
+    - if trace_step == prover_final_step and it is not a halt(0) => challenge: halt
+
+    - if step == 1 and PC != entrypoint => challenge: entrypoint
+
+    - if step > 1 and PC != MY_PC => challenge: program_counter
+
+    - if execution succeeds:
+
+        - my result at that step is crash => challenge memory section access
+
+        - the opcode/pc is right: trace_write is different
+            - challenge: memory_read (TBD)
+
+
+*/
 
 #[cfg(test)]
 mod tests {
@@ -193,7 +282,12 @@ mod tests {
             .init();
     }
 
-    fn test_challenge_aux(input: u8, expect_err: bool) {
+    fn test_challenge_aux(
+        input: u8,
+        expect_err: bool,
+        fail_config_prover: Option<FailConfiguration>,
+        fail_config_verifier: Option<FailConfiguration>,
+    ) {
         let pdf = "../docker-riscv32/riscv32/build/hello-world.yaml";
         let input = vec![17, 17, 17, input];
         let program_def = ProgramDefinition::from_config(pdf).unwrap();
@@ -205,28 +299,57 @@ mod tests {
         let chk_verifier_path = &format!("../temp-runs/challenge/{}/verifier/", extra);
 
         // PROVER EXECUTES
-        let result_1 = prover_execute(pdf, input.clone(), chk_prover_path, true).unwrap();
+        let result_1 = prover_execute(
+            pdf,
+            input.clone(),
+            chk_prover_path,
+            true,
+            fail_config_prover.clone(),
+        )
+        .unwrap();
         info!("{:?}", result_1);
 
         // VERIFIER DECIDES TO CHALLENGE
-        let result =
-            verifier_check_execution(pdf, input, chk_verifier_path, result_1.1, &result_1.2, true)
-                .unwrap();
+        let result = verifier_check_execution(
+            pdf,
+            input,
+            chk_verifier_path,
+            result_1.1,
+            &result_1.2,
+            true,
+            fail_config_verifier.clone(),
+        )
+        .unwrap();
         info!("{:?}", result);
 
         let mut v_decision = 0;
 
         //MULTIPLE ROUNDS N-ARY SEARCH
         for round in 1..nary_def.total_rounds() + 1 {
-            let hashes =
-                prover_get_hashes_for_round(pdf, chk_prover_path, round, v_decision).unwrap();
+            let hashes = prover_get_hashes_for_round(
+                pdf,
+                chk_prover_path,
+                round,
+                v_decision,
+                fail_config_prover.clone(),
+            )
+            .unwrap();
             info!("{:?}", &hashes);
 
-            v_decision = verifier_choose_segment(pdf, chk_verifier_path, round, hashes).unwrap();
+            v_decision = verifier_choose_segment(
+                pdf,
+                chk_verifier_path,
+                round,
+                hashes,
+                fail_config_verifier.clone(),
+            )
+            .unwrap();
             info!("{:?}", v_decision);
         }
 
-        //PROVER PROVIDES FINAL TRACE
+        //TODO: Add translation keys
+
+        //PROVER PROVIDES EXECUTE STEP (and reveals full_trace)
         let final_trace = prover_final_trace(pdf, chk_prover_path, v_decision).unwrap();
         info!("{:?}", final_trace.to_csv());
 
@@ -235,15 +358,23 @@ mod tests {
 
         if expect_err {
             assert!(result.is_err());
+            //once execution fails there is no need to execute more steps
+            return;
         } else {
             assert!(result.is_ok());
         }
+
+        let _challenge = verifier_choose_challenge(pdf, &chk_verifier_path, final_trace).unwrap();
     }
 
     #[test]
     fn test_challenge() {
         init_trace();
-        test_challenge_aux(0, true);
-        test_challenge_aux(17, false);
+        //bad input: exepct execute step to fail
+        test_challenge_aux(0, true, None, None);
+        //good input: expect execute step to succeed
+        test_challenge_aux(17, false, None, None);
+        //invalid hash: expect trace hash to fail
+        test_challenge_aux(0, false, Some(FailConfiguration::new_fail_hash(1312)), None);
     }
 }

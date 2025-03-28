@@ -2,8 +2,8 @@ use bitcoin_script_riscv::riscv::instruction_mapping::create_verification_script
 use emulator::{
     constants::REGISTERS_BASE_ADDRESS,
     executor::{
-        fetcher::{execute_program, FailConfiguration},
-        utils::FailReads,
+        fetcher::execute_program,
+        utils::{FailConfiguration, FailReads},
     },
     loader::program::{generate_rom_commitment, load_elf, Program},
     EmulatorError,
