@@ -7,16 +7,16 @@ use crate::riscv::{decoder::decode_s_type, operations::*, script_utils::*};
 use super::{
     instructions::{validate_register_address, verify_memory_witness},
     memory_alignment::*,
-    trace::{TraceRead, TraceStep},
+    trace::{STraceRead, STraceWrite},
 };
 
 pub fn op_store(
     instruction: &Instruction,
     stack: &mut StackTracker,
-    trace_read: &TraceRead,
+    trace_read: &STraceRead,
     micro: u8,
     base_register_address: u32,
-) -> TraceStep {
+) -> STraceWrite {
     let micro = micro as u32;
     match micro {
         0 | 4 => op_store_micro_0(instruction, stack, trace_read, micro, base_register_address),
@@ -30,10 +30,10 @@ pub fn op_store(
 pub fn op_store_micro_0(
     instruction: &Instruction,
     stack: &mut StackTracker,
-    trace_read: &TraceRead,
+    trace_read: &STraceRead,
     micro: u32,
     base_register_address: u32,
-) -> TraceStep {
+) -> STraceWrite {
     let (func3, mut if_alignment_less) = match instruction {
         Sb(_) => (0x0, 0),
         Sh(_) => (0x1, 0),
@@ -131,7 +131,7 @@ pub fn op_store_micro_0(
         0,
     );
 
-    let trace = TraceStep::new(ret[0], ret[1], ret[2], ret[3]);
+    let trace = STraceWrite::new(ret[0], ret[1], ret[2], ret[3]);
 
     trace.to_altstack(stack);
     tables.drop(stack);
@@ -143,7 +143,7 @@ pub fn op_store_micro_0(
 fn op_store_micro_0_missaligned(
     stack: &mut StackTracker,
     instruction: &Instruction,
-    trace_read: &TraceRead,
+    trace_read: &STraceRead,
     aligned: StackVariable,
     rs2: StackVariable,
     micro: u32,
@@ -180,7 +180,7 @@ fn op_store_micro_0_missaligned(
 fn op_store_sw_aligned(
     stack: &mut StackTracker,
     tables: &StackTables,
-    trace_read: &TraceRead,
+    trace_read: &STraceRead,
     aligned: StackVariable,
     rs2: StackVariable,
     base_register_address: u32,
@@ -204,10 +204,10 @@ fn op_store_sw_aligned(
 pub fn op_store_micro_1(
     instruction: &Instruction,
     stack: &mut StackTracker,
-    trace_read: &TraceRead,
+    trace_read: &STraceRead,
     micro: u32,
     base_register_address: u32,
-) -> TraceStep {
+) -> STraceWrite {
     let func3 = match instruction {
         Sb(_) => 0x0,
         Sh(_) => 0x1,
@@ -276,7 +276,7 @@ pub fn op_store_micro_1(
     let write_micro = stack.number(micro + 1);
     stack.rename(write_micro, "write_micro");
 
-    let trace = TraceStep::new(write_addr, result, write_pc, write_micro);
+    let trace = STraceWrite::new(write_addr, result, write_pc, write_micro);
 
     trace.to_altstack(stack);
     tables.drop(stack);
@@ -288,10 +288,10 @@ pub fn op_store_micro_1(
 pub fn op_store_micro_2(
     instruction: &Instruction,
     stack: &mut StackTracker,
-    trace_read: &TraceRead,
+    trace_read: &STraceRead,
     micro: u32,
     base_register_address: u32,
-) -> TraceStep {
+) -> STraceWrite {
     let func3 = match instruction {
         Sb(_) => 0x0,
         Sh(_) => 0x1,
@@ -338,7 +338,7 @@ pub fn op_store_micro_2(
     let write_micro = stack.number(micro + 1);
     stack.rename(write_micro, "write_micro");
 
-    let trace = TraceStep::new(write_addr, write_value, write_pc, write_micro);
+    let trace = STraceWrite::new(write_addr, write_value, write_pc, write_micro);
 
     trace.to_altstack(stack);
     tables.drop(stack);
@@ -350,10 +350,10 @@ pub fn op_store_micro_2(
 pub fn op_store_micro_3(
     instruction: &Instruction,
     stack: &mut StackTracker,
-    trace_read: &TraceRead,
+    trace_read: &STraceRead,
     micro: u32,
     base_register_address: u32,
-) -> TraceStep {
+) -> STraceWrite {
     let (func3, if_alignment) = match instruction {
         Sb(_) => (0x0, 4),
         Sh(_) => (0x1, 3),
@@ -436,7 +436,7 @@ pub fn op_store_micro_3(
     let write_pc = ret[0];
     let write_micro = ret[1];
 
-    let trace = TraceStep::new(aligned, write_value, write_pc, write_micro);
+    let trace = STraceWrite::new(aligned, write_value, write_pc, write_micro);
 
     trace.to_altstack(stack);
     tables.drop(stack);

@@ -7,16 +7,16 @@ use crate::riscv::{decoder::decode_i_type, operations::*, script_utils::*};
 use super::{
     instructions::{validate_register_address, verify_memory_witness},
     memory_alignment::*,
-    trace::{TraceRead, TraceStep},
+    trace::{STraceRead, STraceWrite},
 };
 
 pub fn op_load(
     instruction: &Instruction,
     stack: &mut StackTracker,
-    trace_read: &TraceRead,
+    trace_read: &STraceRead,
     micro: u8,
     base_register_address: u32,
-) -> TraceStep {
+) -> STraceWrite {
     match micro {
         0 => op_load_micro_0(instruction, stack, trace_read, micro, base_register_address),
         1 => op_load_micro_1(instruction, stack, trace_read, micro, base_register_address),
@@ -29,10 +29,10 @@ pub fn op_load(
 pub fn op_load_micro_0(
     instruction: &Instruction,
     stack: &mut StackTracker,
-    trace_read: &TraceRead,
+    trace_read: &STraceRead,
     micro: u8,
     base_register_address: u32,
-) -> TraceStep {
+) -> STraceWrite {
     let (func3, aligned_if_less_than) = match instruction {
         Lb(_) => (0, 4),
         Lh(_) => (1, 3),
@@ -120,7 +120,7 @@ pub fn op_load_micro_0(
         0,
     );
 
-    TraceStep::new(ret[0], ret[1], ret[2], ret[3])
+    STraceWrite::new(ret[0], ret[1], ret[2], ret[3])
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -131,10 +131,10 @@ pub fn op_load_micro_0_missaligned(
     rd: StackVariable,
     aligned: StackVariable,
     alignment: StackVariable,
-    trace_read: &TraceRead,
+    trace_read: &STraceRead,
     _micro: u8,
     base_register_address: u32,
-) -> TraceStep {
+) -> STraceWrite {
     let (nibs, max_extra, prepad, unsigned) = match instruction {
         Lb(_) => (2, 0, 6, false),
         Lh(_) => (4, 2, 4, false),
@@ -176,7 +176,7 @@ pub fn op_load_micro_0_missaligned(
     let micro = stack.number(1);
     stack.rename(micro, "write_micro");
 
-    let trace = TraceStep::new(write_addr, write_value, write_pc, micro);
+    let trace = STraceWrite::new(write_addr, write_value, write_pc, micro);
     trace.to_altstack(stack);
     tables.drop(stack);
     trace.from_altstack(stack);
@@ -192,10 +192,10 @@ pub fn op_load_micro_0_aligned(
     rd: StackVariable,
     aligned: StackVariable,
     alignment: StackVariable,
-    trace_read: &TraceRead,
+    trace_read: &STraceRead,
     _micro: u8,
     base_register_address: u32,
-) -> TraceStep {
+) -> STraceWrite {
     let (nibs, max_extra, prepad, unsigned) = match instruction {
         Lb(_) => (2, 0, 6, false),
         Lh(_) => (4, 2, 4, false),
@@ -236,7 +236,7 @@ pub fn op_load_micro_0_aligned(
     let micro = stack.number(0);
     stack.rename(micro, "write_micro");
 
-    let trace = TraceStep::new(write_addr, write_value, write_pc, micro);
+    let trace = STraceWrite::new(write_addr, write_value, write_pc, micro);
     trace.to_altstack(stack);
     tables.drop(stack);
     trace.from_altstack(stack);
@@ -247,10 +247,10 @@ pub fn op_load_micro_0_aligned(
 pub fn op_load_micro_1(
     instruction: &Instruction,
     stack: &mut StackTracker,
-    trace_read: &TraceRead,
+    trace_read: &STraceRead,
     _micro: u8,
     base_register_address: u32,
-) -> TraceStep {
+) -> STraceWrite {
     let (func3, nibs, max_extra, pre_pad, post, unsigned) = match instruction {
         Lh(_) => (1, 4, 0, 4, 8, false),
         Lhu(_) => (5, 4, 0, 4, 8, true),
@@ -324,7 +324,7 @@ pub fn op_load_micro_1(
     let micro = stack.number(2);
     stack.rename(micro, "write_micro");
 
-    let trace = TraceStep::new(write_addr, write_value, write_pc, micro);
+    let trace = STraceWrite::new(write_addr, write_value, write_pc, micro);
     trace.to_altstack(stack);
     tables.drop(stack);
     trace.from_altstack(stack);
@@ -335,10 +335,10 @@ pub fn op_load_micro_1(
 pub fn op_load_micro_2(
     instruction: &Instruction,
     stack: &mut StackTracker,
-    trace_read: &TraceRead,
+    trace_read: &STraceRead,
     _micro: u8,
     base_register_address: u32,
-) -> TraceStep {
+) -> STraceWrite {
     let func3 = match instruction {
         Lh(_) => 1,
         Lhu(_) => 5,
@@ -386,7 +386,7 @@ pub fn op_load_micro_2(
     let micro = stack.number(3);
     stack.rename(micro, "write_micro");
 
-    let trace = TraceStep::new(write_addr, write_value, write_pc, micro);
+    let trace = STraceWrite::new(write_addr, write_value, write_pc, micro);
     trace.to_altstack(stack);
     tables.drop(stack);
     trace.from_altstack(stack);
@@ -397,10 +397,10 @@ pub fn op_load_micro_2(
 pub fn op_load_micro_3(
     instruction: &Instruction,
     stack: &mut StackTracker,
-    trace_read: &TraceRead,
+    trace_read: &STraceRead,
     _micro: u8,
     base_register_address: u32,
-) -> TraceStep {
+) -> STraceWrite {
     let func3 = match instruction {
         Lh(_) => 1,
         Lhu(_) => 5,
@@ -445,7 +445,7 @@ pub fn op_load_micro_3(
     let micro = stack.number(0);
     stack.rename(micro, "write_micro");
 
-    let trace = TraceStep::new(write_addr, write_value, write_pc, micro);
+    let trace = STraceWrite::new(write_addr, write_value, write_pc, micro);
     trace.to_altstack(stack);
     tables.drop(stack);
     trace.from_altstack(stack);
