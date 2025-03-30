@@ -24,7 +24,7 @@ pub fn execute_program(
     checkpoint_path: &Option<String>,
     limit_step: Option<u64>,
     print_trace: bool,
-    validate_on_chain: bool,
+    verify_on_chain: bool,
     use_instruction_mapping: bool,
     print_program_stdout: bool,
     debug: bool,
@@ -50,7 +50,7 @@ pub fn execute_program(
             );
         }
     }
-    let instruction_mapping = match validate_on_chain && use_instruction_mapping {
+    let instruction_mapping = match verify_on_chain && use_instruction_mapping {
         true => Some(create_verification_script_mapping(
             program.registers.get_base_address(),
         )),
@@ -165,7 +165,7 @@ pub fn execute_program(
             }
         }
 
-        if trace.is_ok() && validate_on_chain {
+        if trace.is_ok() && verify_on_chain {
             let validation_result = verify_script(
                 trace.as_ref().unwrap(),
                 program.registers.get_base_address(),
@@ -192,8 +192,8 @@ pub fn execute_program(
         }
     };
 
-    if debug && validate_on_chain {
-        info!("Instructions validated on chain:  {}", count);
+    if debug && verify_on_chain {
+        info!("Instructions verified on chain:  {}", count);
     }
 
     if debug {

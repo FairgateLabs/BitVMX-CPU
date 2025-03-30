@@ -12,7 +12,7 @@ use tracing::info;
 
 fn verify_file(
     fname: &str,
-    validate_on_chain: bool,
+    verify_on_chain: bool,
 ) -> Result<(ExecutionResult, FullTrace), EmulatorError> {
     let mut program = load_elf(&fname, false)?;
     info!("Execute program {}", fname);
@@ -24,7 +24,7 @@ fn verify_file(
         &None,
         Some(1000),
         false,
-        validate_on_chain,
+        verify_on_chain,
         false,
         false,
         false,
