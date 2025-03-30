@@ -298,7 +298,7 @@ pub fn execute_step(
         read_1,
         read_2,
         TraceReadPC::new(pc, opcode),
-        TraceStep::new(write_1, TraceWritePC::new(&program.pc)),
+        TraceStep::new(write_1, program.pc.clone()),
         witness,
         mem_witness,
     );

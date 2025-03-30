@@ -77,41 +77,32 @@ impl TraceWrite {
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct TraceWritePC {
-    pub pc: ProgramCounter,
-}
-
-impl TraceWritePC {
-    pub fn new(pc: &ProgramCounter) -> TraceWritePC {
-        TraceWritePC { pc: pc.clone() }
-    }
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[allow(unused)]
 pub struct TraceStep {
     pub write_1: TraceWrite,
-    pub write_pc: TraceWritePC,
+    pub write_pc: ProgramCounter,
 }
 
 impl TraceStep {
-    pub fn new(write_1: TraceWrite, write_pc: TraceWritePC) -> TraceStep {
+    pub fn new(write_1: TraceWrite, write_pc: ProgramCounter) -> TraceStep {
         TraceStep { write_1, write_pc }
     }
+
+    //pub fn new_step(write_address: u32, write_value: u32, program_counter: u64, micro: u8)
 
     pub fn get_write(&self) -> &TraceWrite {
         &self.write_1
     }
     pub fn get_pc(&self) -> &ProgramCounter {
-        &self.write_pc.pc
+        &self.write_pc
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend(&self.write_1.address.to_be_bytes());
         bytes.extend(&self.write_1.value.to_be_bytes());
-        bytes.extend(&self.write_pc.pc.get_address().to_be_bytes());
-        bytes.push(self.write_pc.pc.get_micro());
+        bytes.extend(&self.write_pc.get_address().to_be_bytes());
+        bytes.push(self.write_pc.get_micro());
         bytes
     }
 }
