@@ -12,6 +12,7 @@ pub fn validate(
     let result = verify(
         instruction_mapping,
         program,
+        //trace,
         trace.mem_witness.byte(),
         trace.read_1.address,
         trace.read_1.value,
