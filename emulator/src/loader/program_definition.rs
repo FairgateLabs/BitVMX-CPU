@@ -1,3 +1,4 @@
+use bitvmx_cpu_definitions::trace::TraceRWStep;
 use config::Config;
 use serde::Deserialize;
 
@@ -8,7 +9,6 @@ use crate::{
     decision::nary_search::NArySearchDefinition,
     executor::{
         fetcher::{execute_program, FullTrace},
-        trace::TraceRWStep,
         utils::FailConfiguration,
     },
     EmulatorError, ExecutionResult,

@@ -1,5 +1,6 @@
 #![allow(dead_code)]
-use emulator::loader::program::{Program, ProgramCounter, Registers, Section};
+use bitvmx_cpu_definitions::trace::ProgramCounter;
+use emulator::loader::program::{Program, Registers, Section};
 use rand::Rng;
 use riscv_decode::types::{BType, IType, JType, RType, SType, ShiftType, UType};
 use std::ops::RangeInclusive;

@@ -1,6 +1,7 @@
+use bitvmx_cpu_definitions::trace::TraceRWStep;
 use serde::{Deserialize, Serialize};
 
-use crate::{executor::trace::TraceRWStep, EmulatorError, ExecutionResult};
+use crate::{EmulatorError, ExecutionResult};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ExecutionLog {

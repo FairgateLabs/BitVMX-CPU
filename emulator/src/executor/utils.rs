@@ -1,6 +1,6 @@
-use crate::loader::program::Program;
+use bitvmx_cpu_definitions::trace::{TraceRWStep, TraceRead};
 
-use super::trace::{TraceRWStep, TraceRead};
+use crate::loader::program::Program;
 
 #[derive(Clone, Debug, Default)]
 pub struct FailRead {

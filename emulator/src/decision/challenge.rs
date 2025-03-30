@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use bitvmx_cpu_definitions::trace::{validate_step_hash, TraceRWStep};
 use tracing::{error, info, warn};
 
 use crate::{
@@ -7,10 +8,7 @@ use crate::{
         execution_log::VerifierChallengeLog,
         nary_search::{choose_segment, ExecutionHashes},
     },
-    executor::{
-        trace::{validate_step_hash, TraceRWStep},
-        utils::FailConfiguration,
-    },
+    executor::utils::FailConfiguration,
     loader::program_definition::ProgramDefinition,
     EmulatorError, ExecutionResult,
 };

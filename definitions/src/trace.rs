@@ -1,7 +1,39 @@
-use crate::loader::program::{ProgramCounter, Registers};
-use bitvmx_cpu_definitions::memory::MemoryWitness;
+use crate::memory::MemoryWitness;
 use blake3::Hasher;
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct ProgramCounter {
+    address: u32,
+    micro: u8,
+}
+
+impl ProgramCounter {
+    pub fn new(address: u32, micro: u8) -> ProgramCounter {
+        ProgramCounter { address, micro }
+    }
+
+    pub fn get_address(&self) -> u32 {
+        self.address
+    }
+
+    pub fn get_micro(&self) -> u8 {
+        self.micro
+    }
+
+    pub fn jump(&mut self, address: u32) {
+        self.address = address;
+    }
+
+    pub fn next_address(&mut self) {
+        self.address += 4;
+        self.micro = 0;
+    }
+
+    pub fn next_micro(&mut self) {
+        self.micro += 1;
+    }
+}
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct TraceRead {
@@ -16,14 +48,6 @@ impl TraceRead {
             address,
             value,
             last_step,
-        }
-    }
-
-    pub fn new_from(registers: &Registers, idx: u32) -> TraceRead {
-        TraceRead {
-            address: registers.get_register_address(idx),
-            value: registers.get(idx),
-            last_step: registers.get_last_step(idx),
         }
     }
 }
@@ -50,13 +74,6 @@ impl TraceWrite {
     pub fn new(address: u32, value: u32) -> TraceWrite {
         TraceWrite { address, value }
     }
-
-    pub fn new_from(registers: &Registers, idx: u32) -> TraceWrite {
-        TraceWrite {
-            address: registers.get_register_address(idx),
-            value: registers.get(idx),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -73,8 +90,8 @@ impl TraceWritePC {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[allow(unused)]
 pub struct TraceStep {
-    pub(crate) write_1: TraceWrite,
-    pub(crate) write_pc: TraceWritePC,
+    pub write_1: TraceWrite,
+    pub write_pc: TraceWritePC,
 }
 
 impl TraceStep {

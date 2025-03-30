@@ -1,11 +1,12 @@
 use std::{cmp::Ordering, collections::HashSet};
 
-use super::{trace::TraceRWStep, utils::FailConfiguration, validator::validate};
-use crate::{
-    executor::alignment_masks::*, executor::trace::*, loader::program::*, ExecutionResult,
-};
+use super::{utils::FailConfiguration, validator::validate};
+use crate::{executor::alignment_masks::*, loader::program::*, ExecutionResult};
 use bitcoin_script_riscv::riscv::instruction_mapping::create_verification_script_mapping;
-use bitvmx_cpu_definitions::memory::{MemoryAccessType, MemoryWitness};
+use bitvmx_cpu_definitions::{
+    memory::{MemoryAccessType, MemoryWitness},
+    trace::*,
+};
 use riscv_decode::{
     types::*,
     Instruction::{self, *},
@@ -312,8 +313,10 @@ pub fn op_ecall(
 ) -> (TraceRead, TraceRead, TraceWrite, MemoryWitness) {
     let syscall = program.registers.get(REGISTER_A7_ECALL_ARG as u32);
     let value_2 = program.registers.get(REGISTER_A0 as u32);
-    let read_1 = TraceRead::new_from(&program.registers, REGISTER_A7_ECALL_ARG as u32);
-    let read_2 = TraceRead::new_from(&program.registers, REGISTER_A0 as u32);
+    let read_1 = program
+        .registers
+        .to_trace_read(REGISTER_A7_ECALL_ARG as u32);
+    let read_2 = program.registers.to_trace_read(REGISTER_A0 as u32);
 
     match syscall {
         116 => {
@@ -347,7 +350,7 @@ pub fn op_ecall(
             (
                 read_1,
                 read_2,
-                TraceWrite::new_from(&program.registers, REGISTER_A0 as u32),
+                program.registers.to_trace_write(REGISTER_A0 as u32),
                 MemoryWitness::registers(),
             )
             //Intenttionally PC is not modified and remains in this instruction
@@ -372,8 +375,8 @@ pub fn op_conditional(
 ) -> (TraceRead, TraceRead, TraceWrite, MemoryWitness) {
     let value_1 = program.registers.get(x.rs1());
     let value_2 = program.registers.get(x.rs2());
-    let read_1 = TraceRead::new_from(&program.registers, x.rs1());
-    let read_2 = TraceRead::new_from(&program.registers, x.rs2());
+    let read_1 = program.registers.to_trace_read(x.rs1());
+    let read_2 = program.registers.to_trace_read(x.rs2());
 
     let conditional_dest = wrapping_add_btype(program.pc.get_address(), x);
 
@@ -417,7 +420,7 @@ pub fn op_jal(
             .registers
             .set(dest_register, pc.get_address() + 4, program.step);
         (
-            TraceWrite::new_from(&program.registers, dest_register),
+            program.registers.to_trace_write(dest_register),
             MemoryWitness::new(
                 MemoryAccessType::Unused,
                 MemoryAccessType::Unused,
@@ -443,7 +446,7 @@ pub fn op_jalr(
     let pc = program.pc.clone();
     let dest_register = x.rd();
     let src_value = program.registers.get(x.rs1());
-    let read_1 = TraceRead::new_from(&program.registers, x.rs1());
+    let read_1 = program.registers.to_trace_read(x.rs1());
 
     let (write_1, mem_witness) = if dest_register == REGISTER_ZERO as u32 {
         //used by rets
@@ -461,7 +464,7 @@ pub fn op_jalr(
             .registers
             .set(dest_register, pc.get_address() + 4, program.step);
         (
-            TraceWrite::new_from(&program.registers, dest_register),
+            program.registers.to_trace_write(dest_register),
             MemoryWitness::rur(),
         )
     };
@@ -492,8 +495,8 @@ pub fn op_arithmetic(
         );
     }
 
-    let read_1 = TraceRead::new_from(&program.registers, x.rs1());
-    let read_2 = TraceRead::new_from(&program.registers, x.rs2());
+    let read_1 = program.registers.to_trace_read(x.rs1());
+    let read_2 = program.registers.to_trace_read(x.rs2());
     let value_1 = program.registers.get(x.rs1());
     let value_2 = program.registers.get(x.rs2());
 
@@ -581,7 +584,7 @@ pub fn op_arithmetic(
         (
             read_1,
             read_2,
-            TraceWrite::new_from(&program.registers, x.rd()),
+            program.registers.to_trace_write(x.rd()),
             MemoryWitness::registers(),
         ),
         witness,
@@ -609,7 +612,7 @@ pub fn op_arithmetic_imm(
     }
 
     // Note, XORI rd, rs1, -1 performs a bitwise logical inversion of register rs1 (assembler pseudoinstruction NOT rd, rs).
-    let read_1 = TraceRead::new_from(&program.registers, x.rs1());
+    let read_1 = program.registers.to_trace_read(x.rs1());
 
     let rs1 = program.registers.get(x.rs1());
     let imm_value_signed = ((x.imm() as i32) << 20) >> 20;
@@ -629,7 +632,7 @@ pub fn op_arithmetic_imm(
     program.registers.set(rd, result, program.step);
     program.pc.next_address();
 
-    let write = TraceWrite::new_from(&program.registers, rd);
+    let write = program.registers.to_trace_write(rd);
 
     (read_1, TraceRead::default(), write, MemoryWitness::rur())
 }
@@ -639,8 +642,8 @@ pub fn op_shift_sl(
     x: &RType,
     program: &mut Program,
 ) -> (TraceRead, TraceRead, TraceWrite, MemoryWitness) {
-    let read_1 = TraceRead::new_from(&program.registers, x.rs1());
-    let read_2 = TraceRead::new_from(&program.registers, x.rs2());
+    let read_1 = program.registers.to_trace_read(x.rs1());
+    let read_2 = program.registers.to_trace_read(x.rs2());
     let value_1 = program.registers.get(x.rs1());
     let value_2 = program.registers.get(x.rs2());
 
@@ -682,7 +685,7 @@ pub fn op_shift_sl(
     (
         read_1,
         read_2,
-        TraceWrite::new_from(&program.registers, x.rd()),
+        program.registers.to_trace_write(x.rd()),
         MemoryWitness::registers(),
     )
 }
@@ -702,7 +705,7 @@ pub fn op_shift_imm(
         );
     }
 
-    let read_1 = TraceRead::new_from(&program.registers, x.rs1());
+    let read_1 = program.registers.to_trace_read(x.rs1());
     let value = program.registers.get(x.rs1());
 
     let result = match instruction {
@@ -718,7 +721,7 @@ pub fn op_shift_imm(
     (
         read_1,
         TraceRead::default(),
-        TraceWrite::new_from(&program.registers, x.rd()),
+        program.registers.to_trace_write(x.rd()),
         MemoryWitness::rur(),
     )
 }
@@ -738,7 +741,7 @@ pub fn op_sl_imm(
         );
     }
 
-    let read_1 = TraceRead::new_from(&program.registers, x.rs1());
+    let read_1 = program.registers.to_trace_read(x.rs1());
     let value = program.registers.get(x.rs1());
     let imm = x.imm();
     let imm_extended = ((imm as i32) << 20) >> 20;
@@ -767,12 +770,12 @@ pub fn op_sl_imm(
     (
         read_1,
         TraceRead::default(),
-        TraceWrite::new_from(&program.registers, x.rd()),
+        program.registers.to_trace_write(x.rd()),
         MemoryWitness::rur(),
     )
 }
 pub fn get_dest_mem(registers: &Registers, x: &SType) -> (TraceRead, u32, u32) {
-    let read_1 = TraceRead::new_from(registers, x.rs1());
+    let read_1 = registers.to_trace_read(x.rs1());
     let dest_mem = wrapping_add_stype(registers.get(x.rs1()), x);
     let alignment = dest_mem % 4;
     (read_1, dest_mem - alignment, alignment)
@@ -809,7 +812,7 @@ pub fn op_store(
             //half requires one reads if the second byte fits in the same word
 
             if micro == 0 && word && reads == 0 {
-                let read_2 = TraceRead::new_from(&program.registers, x.rs2());
+                let read_2 = program.registers.to_trace_read(x.rs2());
                 let value = program.registers.get(x.rs2());
                 program.write_mem(dest_mem, value)?;
                 program.pc.next_address();
@@ -849,7 +852,7 @@ pub fn op_store(
             (
                 read_1,
                 read_2,
-                TraceWrite::new_from(&program.registers, AUX_REGISTER_1),
+                program.registers.to_trace_write(AUX_REGISTER_1),
                 MemoryWitness::new(
                     MemoryAccessType::Register,
                     MemoryAccessType::Memory,
@@ -868,7 +871,7 @@ pub fn op_store(
             } else {
                 get_mask_round_2(instruction, alignment)
             };
-            let read_2 = TraceRead::new_from(&program.registers, x.rs2());
+            let read_2 = program.registers.to_trace_read(x.rs2());
 
             let value = program.registers.get(x.rs2());
             let masked = mask_src & value;
@@ -884,7 +887,7 @@ pub fn op_store(
             (
                 read_1,
                 read_2,
-                TraceWrite::new_from(&program.registers, AUX_REGISTER_2),
+                program.registers.to_trace_write(AUX_REGISTER_2),
                 MemoryWitness::registers(),
             )
         }
@@ -893,13 +896,13 @@ pub fn op_store(
             //2:  reg[aux_2] = reg[aux_1] | reg[aux_2]
             let value_1 = program.registers.get(AUX_REGISTER_1);
             let value_2 = program.registers.get(AUX_REGISTER_2);
-            let read_1 = TraceRead::new_from(&program.registers, AUX_REGISTER_1);
-            let read_2 = TraceRead::new_from(&program.registers, AUX_REGISTER_2);
+            let read_1 = program.registers.to_trace_read(AUX_REGISTER_1);
+            let read_2 = program.registers.to_trace_read(AUX_REGISTER_2);
             program
                 .registers
                 .set(AUX_REGISTER_1, value_1 | value_2, program.step);
             program.pc.next_micro();
-            let write_1 = TraceWrite::new_from(&program.registers, AUX_REGISTER_1);
+            let write_1 = program.registers.to_trace_write(AUX_REGISTER_1);
 
             (read_1, read_2, write_1, MemoryWitness::registers())
         }
@@ -911,7 +914,7 @@ pub fn op_store(
             let (_word, _half, _byte, reads) =
                 get_type_and_read_from_instruction(instruction, alignment);
             let value = program.registers.get(AUX_REGISTER_1);
-            let read_2 = TraceRead::new_from(&program.registers, AUX_REGISTER_1);
+            let read_2 = program.registers.to_trace_read(AUX_REGISTER_1);
             if micro == 7 {
                 dest_mem += 4;
             }
@@ -942,7 +945,7 @@ pub fn op_store(
 }
 
 pub fn get_src_mem(registers: &Registers, x: &IType) -> (TraceRead, u32, u32) {
-    let read_1 = TraceRead::new_from(registers, x.rs1());
+    let read_1 = registers.to_trace_read(x.rs1());
     let src_mem = wrapping_add_itype(registers.get(x.rs1()), x);
     let alignment = src_mem % 4;
     (read_1, src_mem - alignment, alignment)
@@ -1002,7 +1005,7 @@ pub fn op_load(
             let write_1 = if reads == 1 {
                 program.pc.next_address();
                 program.registers.set(x.rd(), shifted, program.step);
-                TraceWrite::new_from(&program.registers, x.rd())
+                program.registers.to_trace_write(x.rd())
             } else {
                 program.pc.next_micro();
                 let dest = if micro == 0 {
@@ -1011,7 +1014,7 @@ pub fn op_load(
                     AUX_REGISTER_2
                 };
                 program.registers.set(dest, shifted, program.step);
-                TraceWrite::new_from(&program.registers, dest)
+                program.registers.to_trace_write(dest)
             };
 
             (
@@ -1031,13 +1034,13 @@ pub fn op_load(
 
             let value_1 = program.registers.get(AUX_REGISTER_1);
             let value_2 = program.registers.get(AUX_REGISTER_2);
-            let read_1 = TraceRead::new_from(&program.registers, AUX_REGISTER_1);
-            let read_2 = TraceRead::new_from(&program.registers, AUX_REGISTER_2);
+            let read_1 = program.registers.to_trace_read(AUX_REGISTER_1);
+            let read_2 = program.registers.to_trace_read(AUX_REGISTER_2);
             program
                 .registers
                 .set(AUX_REGISTER_1, value_1 | value_2, program.step);
             program.pc.next_micro();
-            let write_1 = TraceWrite::new_from(&program.registers, AUX_REGISTER_1);
+            let write_1 = program.registers.to_trace_write(AUX_REGISTER_1);
 
             (read_1, read_2, write_1, MemoryWitness::registers())
         }
@@ -1045,11 +1048,11 @@ pub fn op_load(
             // micro 3:
             // rd = aux1
             let value = program.registers.get(AUX_REGISTER_1);
-            let read_1 = TraceRead::new_from(&program.registers, AUX_REGISTER_1);
+            let read_1 = program.registers.to_trace_read(AUX_REGISTER_1);
 
             program.registers.set(x.rd(), value, program.step);
             program.pc.next_address();
-            let write_1 = TraceWrite::new_from(&program.registers, x.rd());
+            let write_1 = program.registers.to_trace_write(x.rd());
 
             (read_1, TraceRead::default(), write_1, MemoryWitness::rur())
         }
@@ -1088,7 +1091,7 @@ pub fn op_upper(
     (
         TraceRead::default(),
         TraceRead::default(),
-        TraceWrite::new_from(&program.registers, dest_register),
+        program.registers.to_trace_write(dest_register),
         MemoryWitness::new(
             MemoryAccessType::Unused,
             MemoryAccessType::Unused,

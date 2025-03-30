@@ -3,14 +3,15 @@ use std::cmp::Ordering;
 use bitcoin_script_riscv::riscv::instruction_mapping::{
     get_key_from_instruction_and_micro, get_required_microinstruction,
 };
+use bitvmx_cpu_definitions::trace::{
+    generate_initial_step_hash, ProgramCounter, TraceRead, TraceWrite,
+};
 use elf::{abi::SHF_EXECINSTR, endian::LittleEndian, ElfBytes};
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 use tracing::{error, info};
 
-use crate::{
-    constants::*, executor::trace::generate_initial_step_hash, EmulatorError, ExecutionResult,
-};
+use crate::{constants::*, EmulatorError, ExecutionResult};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Section {
@@ -121,38 +122,20 @@ impl Registers {
     pub fn get_original_idx(&self, address: u32) -> u32 {
         (address - self.base_address) / 4
     }
-}
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct ProgramCounter {
-    address: u32,
-    micro: u8,
-}
-
-impl ProgramCounter {
-    pub fn new(address: u32, micro: u8) -> ProgramCounter {
-        ProgramCounter { address, micro }
+    pub fn to_trace_read(&self, idx: u32) -> TraceRead {
+        TraceRead {
+            address: self.get_register_address(idx),
+            value: self.get(idx),
+            last_step: self.get_last_step(idx),
+        }
     }
 
-    pub fn get_address(&self) -> u32 {
-        self.address
-    }
-
-    pub fn get_micro(&self) -> u8 {
-        self.micro
-    }
-
-    pub fn jump(&mut self, address: u32) {
-        self.address = address;
-    }
-
-    pub fn next_address(&mut self) {
-        self.address += 4;
-        self.micro = 0;
-    }
-
-    pub fn next_micro(&mut self) {
-        self.micro += 1;
+    pub fn to_trace_write(&self, idx: u32) -> TraceWrite {
+        TraceWrite {
+            address: self.get_register_address(idx),
+            value: self.get(idx),
+        }
     }
 }
 

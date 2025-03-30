@@ -1,7 +1,7 @@
 use crate::ExecutionResult;
 
-use super::trace::TraceRWStep;
 use bitcoin_script_riscv::riscv::{instruction_mapping::InstructionMapping, instructions::*};
+use bitvmx_cpu_definitions::trace::TraceRWStep;
 
 pub fn validate(
     trace: &TraceRWStep,
