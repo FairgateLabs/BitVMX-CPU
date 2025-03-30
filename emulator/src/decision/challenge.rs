@@ -268,8 +268,8 @@ mod tests {
     use tracing::Level;
 
     use crate::{
-        constants::REGISTERS_BASE_ADDRESS, decision::challenge::*, executor::validator::validate,
-        loader::program_definition::ProgramDefinition,
+        constants::REGISTERS_BASE_ADDRESS, decision::challenge::*,
+        executor::verifier::verify_script, loader::program_definition::ProgramDefinition,
     };
 
     fn init_trace() {
@@ -351,7 +351,7 @@ mod tests {
         let final_trace = prover_final_trace(pdf, chk_prover_path, v_decision).unwrap();
         info!("{:?}", final_trace.to_csv());
 
-        let result = validate(&final_trace, REGISTERS_BASE_ADDRESS, &None);
+        let result = verify_script(&final_trace, REGISTERS_BASE_ADDRESS, &None);
         info!("Validation result: {:?}", result);
 
         if expect_err {

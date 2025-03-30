@@ -1,7 +1,7 @@
 use emulator::{
     constants::REGISTERS_BASE_ADDRESS,
     decision::nary_search::{choose_segment, ExecutionHashes},
-    executor::validator::validate,
+    executor::verifier::verify_script,
     loader::program_definition::ProgramDefinition,
 };
 use tracing::{info, Level};
@@ -56,7 +56,7 @@ fn test_nary_search_trace_aux(input: u8, expect_err: bool, checkpoint_path: &str
 
     info!("{:?}", trace.to_csv());
 
-    let result = validate(&trace, REGISTERS_BASE_ADDRESS, &None);
+    let result = verify_script(&trace, REGISTERS_BASE_ADDRESS, &None);
     info!("Validation result: {:?}", result);
 
     if expect_err {

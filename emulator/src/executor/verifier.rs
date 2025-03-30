@@ -3,7 +3,7 @@ use crate::ExecutionResult;
 use bitcoin_script_riscv::riscv::{instruction_mapping::InstructionMapping, instructions::*};
 use bitvmx_cpu_definitions::trace::TraceRWStep;
 
-pub fn validate(
+pub fn verify_script(
     trace: &TraceRWStep,
     base_register_address: u32,
     instruction_mapping: &Option<InstructionMapping>,

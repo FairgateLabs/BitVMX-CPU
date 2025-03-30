@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, collections::HashSet};
 
-use super::{utils::FailConfiguration, validator::validate};
+use super::{utils::FailConfiguration, verifier::verify_script};
 use crate::{executor::alignment_masks::*, loader::program::*, ExecutionResult};
 use bitcoin_script_riscv::riscv::instruction_mapping::create_verification_script_mapping;
 use bitvmx_cpu_definitions::{
@@ -166,7 +166,7 @@ pub fn execute_program(
         }
 
         if trace.is_ok() && validate_on_chain {
-            let validation_result = validate(
+            let validation_result = verify_script(
                 trace.as_ref().unwrap(),
                 program.registers.get_base_address(),
                 &instruction_mapping,
