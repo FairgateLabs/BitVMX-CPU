@@ -1,5 +1,5 @@
 use crate::loader::program::{ProgramCounter, Registers};
-use bitvmx_cpu_definitions::MemoryWitness;
+use bitvmx_cpu_definitions::memory::MemoryWitness;
 use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 

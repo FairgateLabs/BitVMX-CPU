@@ -1,5 +1,5 @@
 use bitcoin_script_stack::stack::{StackTracker, StackVariable};
-use bitvmx_cpu_definitions::{MemoryAccessType, MemoryWitness};
+use bitvmx_cpu_definitions::memory::{MemoryAccessType, MemoryWitness};
 use riscv_decode::Instruction::{self, *};
 
 use crate::riscv::{decoder::decode_i_type, operations::*, script_utils::*};

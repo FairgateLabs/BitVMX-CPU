@@ -5,7 +5,7 @@ use crate::{
     executor::alignment_masks::*, executor::trace::*, loader::program::*, ExecutionResult,
 };
 use bitcoin_script_riscv::riscv::instruction_mapping::create_verification_script_mapping;
-use bitvmx_cpu_definitions::{MemoryAccessType, MemoryWitness};
+use bitvmx_cpu_definitions::memory::{MemoryAccessType, MemoryWitness};
 use riscv_decode::{
     types::*,
     Instruction::{self, *},

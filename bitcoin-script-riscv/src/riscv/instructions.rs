@@ -1,7 +1,7 @@
 use bitcoin_script_stack::stack::{StackTracker, StackVariable};
 
-use bitvmx_cpu_definitions::MemoryAccessType;
-use bitvmx_cpu_definitions::MemoryWitness;
+use bitvmx_cpu_definitions::memory::MemoryAccessType;
+use bitvmx_cpu_definitions::memory::MemoryWitness;
 use riscv_decode::Instruction;
 use riscv_decode::Instruction::*;
 
@@ -1058,7 +1058,6 @@ pub fn compare_trace_step(
 #[cfg(test)]
 mod tests {
 
-    use bitvmx_cpu_definitions::MemoryWitness;
     use riscv_decode::types::{BType, RType, ShiftType};
 
     use crate::riscv::decoder::get_register_address;

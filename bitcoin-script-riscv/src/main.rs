@@ -2,7 +2,7 @@ use bitcoin_script_riscv::riscv::instructions::{
     load_trace_read_in_stack, load_trace_step_in_stack, verify_execution, ProgramSpec,
 };
 use bitcoin_script_stack::{interactive::interactive, stack::StackTracker};
-use bitvmx_cpu_definitions::MemoryWitness;
+use bitvmx_cpu_definitions::memory::MemoryWitness;
 
 fn execute_example() {
     let mut stack = StackTracker::new();
