@@ -48,6 +48,46 @@ impl STraceRead {
             opcode,
         }
     }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn load(
+        stack: &mut StackTracker,
+        mw: u8,
+        r1: u32,
+        v1: u32,
+        r2: u32,
+        v2: u32,
+        pc: u32,
+        micro: u8,
+        opcode: u32,
+    ) -> STraceRead {
+        let mem_witness = stack.byte(mw);
+        stack.rename(mem_witness, "mem_witness");
+        let read_1_add = stack.number_u32(r1);
+        stack.rename(read_1_add, "read_1_add");
+        let read_1_value = stack.number_u32(v1);
+        stack.rename(read_1_value, "read_1_value");
+        let read_2_add = stack.number_u32(r2);
+        stack.rename(read_2_add, "read_2_add");
+        let read_2_value = stack.number_u32(v2);
+        stack.rename(read_2_value, "read_2_value");
+        let program_counter = stack.number_u32(pc);
+        stack.rename(program_counter, "read_program_counter");
+        let micro = stack.number(micro as u32);
+        stack.rename(micro, "read_micro");
+        let opcode = stack.number_u32(opcode);
+        stack.rename(opcode, "read_opcode");
+        STraceRead {
+            mem_witness,
+            read_1_add,
+            read_1_value,
+            read_2_add,
+            read_2_value,
+            program_counter,
+            micro,
+            opcode,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -105,67 +145,21 @@ impl STraceStep {
             micro,
         }
     }
-}
 
-#[allow(clippy::too_many_arguments)]
-pub fn load_trace_read_in_stack(
-    stack: &mut StackTracker,
-    mw: u8,
-    r1: u32,
-    v1: u32,
-    r2: u32,
-    v2: u32,
-    pc: u32,
-    micro: u8,
-    opcode: u32,
-) -> STraceRead {
-    let mem_witness = stack.byte(mw);
-    stack.rename(mem_witness, "mem_witness");
-    let read_1_add = stack.number_u32(r1);
-    stack.rename(read_1_add, "read_1_add");
-    let read_1_value = stack.number_u32(v1);
-    stack.rename(read_1_value, "read_1_value");
-    let read_2_add = stack.number_u32(r2);
-    stack.rename(read_2_add, "read_2_add");
-    let read_2_value = stack.number_u32(v2);
-    stack.rename(read_2_value, "read_2_value");
-    let program_counter = stack.number_u32(pc);
-    stack.rename(program_counter, "read_program_counter");
-    let micro = stack.number(micro as u32);
-    stack.rename(micro, "read_micro");
-    let opcode = stack.number_u32(opcode);
-    stack.rename(opcode, "read_opcode");
-    STraceRead {
-        mem_witness,
-        read_1_add,
-        read_1_value,
-        read_2_add,
-        read_2_value,
-        program_counter,
-        micro,
-        opcode,
-    }
-}
-
-pub fn load_trace_step_in_stack(
-    stack: &mut StackTracker,
-    w1: u32,
-    v1: u32,
-    pc: u32,
-    micro: u8,
-) -> STraceStep {
-    let write_1_add = stack.number_u32(w1);
-    stack.rename(write_1_add, "write_1_add");
-    let write_1_value = stack.number_u32(v1);
-    stack.rename(write_1_value, "write_1_value");
-    let program_counter = stack.number_u32(pc);
-    stack.rename(program_counter, "write_program_counter");
-    let micro = stack.number(micro as u32);
-    stack.rename(micro, "write_micro");
-    STraceStep {
-        write_1_add,
-        write_1_value,
-        program_counter,
-        micro,
+    pub fn load(stack: &mut StackTracker, w1: u32, v1: u32, pc: u32, micro: u8) -> STraceStep {
+        let write_1_add = stack.number_u32(w1);
+        stack.rename(write_1_add, "write_1_add");
+        let write_1_value = stack.number_u32(v1);
+        stack.rename(write_1_value, "write_1_value");
+        let program_counter = stack.number_u32(pc);
+        stack.rename(program_counter, "write_program_counter");
+        let micro = stack.number(micro as u32);
+        stack.rename(micro, "write_micro");
+        STraceStep {
+            write_1_add,
+            write_1_value,
+            program_counter,
+            micro,
+        }
     }
 }

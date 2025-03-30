@@ -88,7 +88,17 @@ impl TraceStep {
         TraceStep { write_1, write_pc }
     }
 
-    //pub fn new_step(write_address: u32, write_value: u32, program_counter: u64, micro: u8)
+    pub fn new_step(
+        write_address: u32,
+        write_value: u32,
+        program_counter: u32,
+        micro: u8,
+    ) -> TraceStep {
+        TraceStep {
+            write_1: TraceWrite::new(write_address, write_value),
+            write_pc: ProgramCounter::new(program_counter as u32, micro),
+        }
+    }
 
     pub fn get_write(&self) -> &TraceWrite {
         &self.write_1
