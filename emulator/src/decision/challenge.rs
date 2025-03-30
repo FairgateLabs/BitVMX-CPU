@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use bitvmx_cpu_definitions::trace::{validate_step_hash, TraceRWStep};
+use bitvmx_cpu_definitions::{
+    challenge::ChallengeType,
+    trace::{validate_step_hash, TraceRWStep},
+};
 use tracing::{error, info, warn};
 
 use crate::{
@@ -207,7 +210,7 @@ pub fn verifier_choose_challenge(
     program_definition_file: &str,
     checkpoint_path: &str,
     trace: TraceRWStep,
-) -> Result<String, EmulatorError> {
+) -> Result<ChallengeType, EmulatorError> {
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
     let nary_def = program_def.nary_def();
     let verifier_log = VerifierChallengeLog::load(checkpoint_path)?;
@@ -220,10 +223,14 @@ pub fn verifier_choose_challenge(
 
     if !validate_step_hash(&step_hash, &trace.trace_step, &next_hash) {
         info!("Veifier choose to challenge TRACE_HASH");
-        return Ok("trace_hash".to_string());
+        return Ok(ChallengeType::TraceHash(
+            step_hash,
+            trace.trace_step,
+            next_hash,
+        ));
     }
 
-    Ok("".to_string())
+    Ok(ChallengeType::No)
 }
 
 /*
@@ -265,6 +272,7 @@ pub fn verifier_choose_challenge(
 
 #[cfg(test)]
 mod tests {
+    use bitcoin_script_riscv::riscv::challenges::execute_challenge;
     use tracing::Level;
 
     use crate::{
@@ -362,7 +370,11 @@ mod tests {
             assert!(result.is_ok());
         }
 
-        let _challenge = verifier_choose_challenge(pdf, &chk_verifier_path, final_trace).unwrap();
+        let challenge = verifier_choose_challenge(pdf, &chk_verifier_path, final_trace).unwrap();
+
+        info!("{:?}", challenge);
+
+        info!("{}", execute_challenge(&challenge));
     }
 
     #[test]

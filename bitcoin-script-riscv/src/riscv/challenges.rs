@@ -1,5 +1,6 @@
 use bitcoin_script_functions::hash::blake3;
 use bitcoin_script_stack::stack::StackTracker;
+use bitvmx_cpu_definitions::challenge::ChallengeType;
 
 // TODO: hash initial challenge
 // given the "agreement" about the initial hash, the verifier needs to challenge this value in an special way
@@ -138,6 +139,24 @@ pub fn trace_hash_challenge(stack: &mut StackTracker) {
 
 //TODO: memory section challenge
 //TODO: program crash challenge - this might be more about finding the right place to challenge that a challenge itself
+
+pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
+    match challege_type {
+        ChallengeType::TraceHash(pre_hash, trace_step, hash) => {
+            let mut stack = StackTracker::new();
+            stack.hexstr_as_nibbles(pre_hash);
+            stack.number_u32(trace_step.get_write().address);
+            stack.number_u32(trace_step.get_write().value);
+            stack.number_u32(trace_step.get_pc().get_address());
+            stack.byte(trace_step.get_pc().get_micro() as u8);
+            stack.hexstr_as_nibbles(hash);
+            trace_hash_challenge(&mut stack);
+            stack.op_true();
+            stack.run().success
+        }
+        ChallengeType::No => false,
+    }
+}
 
 #[cfg(test)]
 mod tests {
