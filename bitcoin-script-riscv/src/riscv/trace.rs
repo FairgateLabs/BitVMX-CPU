@@ -51,16 +51,16 @@ impl STraceRead {
 }
 
 #[derive(Debug)]
-pub struct STraceWrite {
+pub struct STraceStep {
     pub write_1_add: StackVariable,
     pub write_1_value: StackVariable,
     pub program_counter: StackVariable,
     pub micro: StackVariable,
 }
 
-impl Default for STraceWrite {
+impl Default for STraceStep {
     fn default() -> Self {
-        STraceWrite {
+        STraceStep {
             write_1_add: StackVariable::null(),
             write_1_value: StackVariable::null(),
             program_counter: StackVariable::null(),
@@ -68,14 +68,14 @@ impl Default for STraceWrite {
         }
     }
 }
-impl STraceWrite {
+impl STraceStep {
     pub fn new(
         write_1_add: StackVariable,
         write_1_value: StackVariable,
         program_counter: StackVariable,
         micro: StackVariable,
-    ) -> STraceWrite {
-        STraceWrite {
+    ) -> STraceStep {
+        STraceStep {
             write_1_add,
             write_1_value,
             program_counter,
@@ -93,12 +93,12 @@ impl STraceWrite {
         }
     }
 
-    pub fn define(stack: &mut StackTracker) -> STraceWrite {
+    pub fn define(stack: &mut StackTracker) -> STraceStep {
         let write_1_add = stack.define(8, "write_1_add");
         let write_1_value = stack.define(8, "write_1_value");
         let program_counter = stack.define(8, "write_program_counter");
         let micro = stack.define(1, "write_micro");
-        STraceWrite {
+        STraceStep {
             write_1_add,
             write_1_value,
             program_counter,
@@ -153,7 +153,7 @@ pub fn load_trace_step_in_stack(
     v1: u32,
     pc: u32,
     micro: u8,
-) -> STraceWrite {
+) -> STraceStep {
     let write_1_add = stack.number_u32(w1);
     stack.rename(write_1_add, "write_1_add");
     let write_1_value = stack.number_u32(v1);
@@ -162,7 +162,7 @@ pub fn load_trace_step_in_stack(
     stack.rename(program_counter, "write_program_counter");
     let micro = stack.number(micro as u32);
     stack.rename(micro, "write_micro");
-    STraceWrite {
+    STraceStep {
         write_1_add,
         write_1_value,
         program_counter,

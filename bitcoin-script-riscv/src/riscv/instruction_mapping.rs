@@ -9,7 +9,7 @@ use riscv_decode::{
 
 use super::{
     instructions::ProgramSpec,
-    trace::{STraceRead, STraceWrite},
+    trace::{STraceRead, STraceStep},
 };
 use bitcoin_script_stack::stack::StackTracker;
 
@@ -201,7 +201,7 @@ pub fn generate_verification_script(
 ) -> Script {
     let mut stack = StackTracker::new();
     let program = ProgramSpec::new(base_register_address);
-    let trace_step = STraceWrite::define(&mut stack);
+    let trace_step = STraceStep::define(&mut stack);
     let witness = match witness {
         true => Some(stack.define(8, "witness")),
         false => None,

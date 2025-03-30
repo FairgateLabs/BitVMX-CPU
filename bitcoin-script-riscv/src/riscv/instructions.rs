@@ -18,7 +18,7 @@ use super::operations::*;
 use super::script_utils::*;
 use super::trace::load_trace_read_in_stack;
 use super::trace::load_trace_step_in_stack;
-use super::trace::{STraceRead, STraceWrite};
+use super::trace::{STraceRead, STraceStep};
 
 pub const R_TYPE_OPCODE: u8 = 0x33;
 
@@ -54,7 +54,7 @@ pub fn verify_memory_witness(
     stack.equals(mem_witness, true, witness, true);
 }
 
-pub fn op_nop(stack: &mut StackTracker, trace_read: &STraceRead) -> STraceWrite {
+pub fn op_nop(stack: &mut StackTracker, trace_read: &STraceRead) -> STraceStep {
     verify_memory_witness(stack, trace_read.mem_witness, MemoryWitness::default());
 
     move_and_drop(stack, trace_read.opcode);
@@ -76,7 +76,7 @@ pub fn op_nop(stack: &mut StackTracker, trace_read: &STraceRead) -> STraceWrite 
     stack.from_altstack();
 
     let micro = stack.number(0);
-    STraceWrite::new(write_add, write_value, pc, micro)
+    STraceStep::new(write_add, write_value, pc, micro)
 }
 
 pub const REGISTER_A0: usize = 10;
@@ -86,7 +86,7 @@ pub fn op_ecall(
     stack: &mut StackTracker,
     trace_read: &STraceRead,
     base_register_address: u32,
-) -> STraceWrite {
+) -> STraceStep {
     //compare the instruction number with the halt constant
     let constant = stack.number_u32(93);
     is_equal_to(stack, &trace_read.read_1_value, &constant);
@@ -158,7 +158,7 @@ pub fn op_ecall(
         0,
     );
 
-    STraceWrite::new(ret[0], ret[1], ret[2], ret[3])
+    STraceStep::new(ret[0], ret[1], ret[2], ret[3])
 }
 
 pub fn op_conditional(
@@ -166,7 +166,7 @@ pub fn op_conditional(
     stack: &mut StackTracker,
     trace_read: &STraceRead,
     base_register_address: u32,
-) -> STraceWrite {
+) -> STraceStep {
     let (func3, unsigned, lower, inverse) = match instruction {
         Beq(_) => (0, false, false, false),
         Bne(_) => (1, false, false, true),
@@ -246,7 +246,7 @@ pub fn op_conditional(
     let micro = stack.number(0);
     stack.rename(micro, "write_micro");
 
-    let trace = STraceWrite::new(write_add, write_value, write_pc, micro);
+    let trace = STraceStep::new(write_add, write_value, write_pc, micro);
     trace.to_altstack(stack);
     tables.drop(stack);
     trace.from_altstack(stack);
@@ -310,7 +310,7 @@ pub fn op_jal(
     stack: &mut StackTracker,
     trace_read: &STraceRead,
     base_register_address: u32,
-) -> STraceWrite {
+) -> STraceStep {
     let tables = StackTables::new(stack, true, true, 5, 5, 0);
 
     stack.set_breakpoint(&format!("op_{:?}", instruction));
@@ -347,7 +347,7 @@ pub fn op_jal(
     let micro = stack.number(0);
     stack.rename(micro, "write_micro");
 
-    let trace = STraceWrite::new(write_add, write_value, write_pc, micro);
+    let trace = STraceStep::new(write_add, write_value, write_pc, micro);
     trace.to_altstack(stack);
     tables.drop(stack);
     trace.from_altstack(stack);
@@ -359,7 +359,7 @@ pub fn op_jalr(
     stack: &mut StackTracker,
     trace_read: &STraceRead,
     base_register_address: u32,
-) -> STraceWrite {
+) -> STraceStep {
     let tables = StackTables::new(stack, true, true, 1, 5, 0);
 
     stack.set_breakpoint(&format!("op_{:?}", instruction));
@@ -400,7 +400,7 @@ pub fn op_jalr(
     let micro = stack.number(0);
     stack.rename(micro, "write_micro");
 
-    let trace = STraceWrite::new(write_add, write_value, write_pc, micro);
+    let trace = STraceStep::new(write_add, write_value, write_pc, micro);
     trace.to_altstack(stack);
     tables.drop(stack);
     trace.from_altstack(stack);
@@ -412,7 +412,7 @@ pub fn op_arithmetic_imm(
     stack: &mut StackTracker,
     trace_read: &STraceRead,
     base_register_address: u32,
-) -> STraceWrite {
+) -> STraceStep {
     let (mask, logic, func3, func7) = match instruction {
         Xori(_) => (LOGIC_MASK_XOR, Some(LogicOperation::Xor), 4, None),
         Andi(_) => (LOGIC_MASK_AND, Some(LogicOperation::And), 7, None),
@@ -486,7 +486,7 @@ pub fn op_arithmetic_imm(
     //   write_add = base_register_address + rd
     //   write_value = read_1_value + (bitextended) imm
     //   program_counter = read_program_counter + 4
-    let trace = STraceWrite::new(write_add, write_value, write_pc, micro);
+    let trace = STraceStep::new(write_add, write_value, write_pc, micro);
     trace.to_altstack(stack);
     tables.drop(stack);
     trace.from_altstack(stack);
@@ -497,10 +497,10 @@ pub fn op_arithmetic(
     instruction: &Instruction,
     stack: &mut StackTracker,
     trace_read: &STraceRead,
-    trace_step: &STraceWrite,
+    trace_step: &STraceStep,
     witness: Option<StackVariable>,
     base_register_address: u32,
-) -> STraceWrite {
+) -> STraceStep {
     let (mask, logic, func3, func7, extra_shift_for_mask) = match instruction {
         Mul(_) => (0x0, None, 0x0, 0x1, 0),
         Mulh(_) => (0x0, None, 0x1, 0x1, 0),
@@ -687,7 +687,7 @@ pub fn op_arithmetic(
     //   write_addr = base_register_address + rd * 4
     //   write_value = read_1_value + read_2_value
     //   program_counter = read_program_counter + 4
-    let trace = STraceWrite::new(write_addr, write_value, write_pc, micro);
+    let trace = STraceStep::new(write_addr, write_value, write_pc, micro);
     trace.to_altstack(stack);
     tables.drop(stack);
     trace.from_altstack(stack);
@@ -700,7 +700,7 @@ pub fn op_upper(
     stack: &mut StackTracker,
     trace_read: &STraceRead,
     base_register_address: u32,
-) -> STraceWrite {
+) -> STraceStep {
     let tables = StackTables::new(stack, true, true, 1, 4, 0);
 
     stack.set_breakpoint(&format!("op_{:?}", instruction));
@@ -748,7 +748,7 @@ pub fn op_upper(
     let micro = stack.number(0);
     stack.rename(micro, "write_micro");
 
-    let trace = STraceWrite::new(write_addr, write_value, write_pc, micro);
+    let trace = STraceStep::new(write_addr, write_value, write_pc, micro);
     trace.to_altstack(stack);
     tables.drop(stack);
     trace.from_altstack(stack);
@@ -776,12 +776,12 @@ impl ProgramSpec {
 pub fn execute_step(
     stack: &mut StackTracker,
     trace_read: &STraceRead,
-    trace_step: &STraceWrite,
+    trace_step: &STraceStep,
     witness: Option<StackVariable>,
     instruction: &Instruction,
     micro: u8,
     program: ProgramSpec,
-) -> Result<STraceWrite, ScriptValidation> {
+) -> Result<STraceStep, ScriptValidation> {
     match instruction {
         Fence(_) | Ebreak => Ok(op_nop(stack, &trace_read)),
 
@@ -958,7 +958,7 @@ pub fn verify(
 
 pub fn verify_execution(
     stack: &mut StackTracker,
-    trace_step: STraceWrite,
+    trace_step: STraceStep,
     trace_read: STraceRead,
     witness: Option<StackVariable>,
     opcode: u32,
@@ -982,8 +982,8 @@ pub fn verify_execution(
 
 pub fn compare_trace_step(
     stack: &mut StackTracker,
-    trace_step_commit: &STraceWrite,
-    trace_step_result: &STraceWrite,
+    trace_step_commit: &STraceStep,
+    trace_step_result: &STraceStep,
 ) {
     stack.set_breakpoint("verify execution");
 
