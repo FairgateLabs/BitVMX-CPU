@@ -889,40 +889,13 @@ pub fn execute_step(
 pub fn verify(
     instruction_mapping: &Option<InstructionMapping>,
     program: ProgramSpec,
-    //trace: &TraceRWStep,
-    mw: u8,
-    r1: u32,
-    v1: u32,
-    r2: u32,
-    v2: u32,
-    pc: u32,
-    micro: u8,
-    opcode: u32,
-    w1: u32,
-    wv1: u32,
-    wpc: u32,
-    wmicro: u8,
-    witness: Option<u32>,
+    trace: &TraceRWStep,
 ) -> Result<(), ScriptValidation> {
-    /*  trace.mem_witness.byte(),
-    trace.read_1.address,
-    trace.read_1.value,
-    trace.read_2.address,
-    trace.read_2.value,
-    trace.read_pc.pc.get_address(),
-    trace.read_pc.pc.get_micro(),
-    trace.read_pc.opcode,
-    trace.trace_step.write_1.address,
-    trace.trace_step.write_1.value,
-    trace.trace_step.get_pc().get_address(),
-    trace.trace_step.get_pc().get_micro(),
-    trace.witness,*/
-
     let mut stack = StackTracker::new();
-    let trace_step = STraceStep::load(&mut stack, w1, wv1, wpc, wmicro);
+    let trace_step = STraceStep::from(&mut stack, &trace.trace_step);
     let mut consumes = 11;
 
-    let witness = match witness {
+    let witness = match trace.witness {
         Some(w) => {
             let witness = stack.number_u32(w);
             stack.rename(witness, "witness");
@@ -932,7 +905,9 @@ pub fn verify(
         None => None,
     };
 
-    let trace_read = STraceRead::load(&mut stack, mw, r1, v1, r2, v2, pc, micro, opcode);
+    let trace_read = STraceRead::from(&mut stack, trace);
+    let opcode = trace.read_pc.opcode;
+    let micro = trace.read_pc.pc.get_micro();
 
     if let Some(mapping) = instruction_mapping {
         let instruction = riscv_decode::decode(opcode).unwrap();

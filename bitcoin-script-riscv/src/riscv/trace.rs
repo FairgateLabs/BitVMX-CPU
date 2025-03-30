@@ -1,4 +1,5 @@
 use bitcoin_script_stack::stack::{StackTracker, StackVariable};
+use bitvmx_cpu_definitions::trace::{TraceRWStep, TraceStep};
 
 #[derive(Debug, Clone, Copy)]
 pub struct STraceRead {
@@ -88,6 +89,20 @@ impl STraceRead {
             opcode,
         }
     }
+
+    pub fn from(stack: &mut StackTracker, trace: &TraceRWStep) -> STraceRead {
+        Self::load(
+            stack,
+            trace.mem_witness.byte(),
+            trace.read_1.address,
+            trace.read_1.value,
+            trace.read_2.address,
+            trace.read_2.value,
+            trace.read_pc.pc.get_address(),
+            trace.read_pc.pc.get_micro(),
+            trace.read_pc.opcode,
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -161,5 +176,15 @@ impl STraceStep {
             program_counter,
             micro,
         }
+    }
+
+    pub fn from(stack: &mut StackTracker, trace: &TraceStep) -> STraceStep {
+        Self::load(
+            stack,
+            trace.write_1.address,
+            trace.write_1.value,
+            trace.write_pc.get_address(),
+            trace.write_pc.get_micro(),
+        )
     }
 }
