@@ -212,3 +212,9 @@ pub fn validate_step_hash(hash: &str, step: &TraceStep, next_hash: &str) -> bool
     let computed_hash = hasher.finalize().as_bytes()[..20].to_vec();
     computed_hash == next_hash
 }
+
+pub fn hash_to_string(hash: &[u8; 20]) -> String {
+    hash.iter()
+        .map(|byte| format!("{:02x}", byte))
+        .collect::<String>()
+}

@@ -114,7 +114,10 @@ pub fn verifier_check_execution(
     warn!("There is a discrepancy between the prover and verifier execution");
     warn!("This execution will be challenged");
 
-    let step_to_challenge = claim_last_step.min(last_step);
+    assert!(claim_last_step > 0 && last_step > 0);
+
+    // we use the minimum agreed step (that is one before the disagreement)
+    let step_to_challenge = claim_last_step.min(last_step) - 1;
 
     let challenge_log = VerifierChallengeLog::new(
         ExecutionLog::new(
@@ -206,10 +209,17 @@ pub fn get_hashes(
     (claim_hash, claim_next_hash)
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ForceChallenge {
+    TraceHash,
+    No,
+}
+
 pub fn verifier_choose_challenge(
     program_definition_file: &str,
     checkpoint_path: &str,
     trace: TraceRWStep,
+    force: ForceChallenge,
 ) -> Result<ChallengeType, EmulatorError> {
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
     let nary_def = program_def.nary_def();
@@ -221,7 +231,9 @@ pub fn verifier_choose_challenge(
         verifier_log.step_to_challenge,
     );
 
-    if !validate_step_hash(&step_hash, &trace.trace_step, &next_hash) {
+    if !validate_step_hash(&step_hash, &trace.trace_step, &next_hash)
+        || force == ForceChallenge::TraceHash
+    {
         info!("Veifier choose to challenge TRACE_HASH");
         return Ok(ChallengeType::TraceHash(
             step_hash,
@@ -289,20 +301,21 @@ mod tests {
     }
 
     fn test_challenge_aux(
+        id: &str,
         input: u8,
-        expect_err: bool,
+        execute_err: bool,
         fail_config_prover: Option<FailConfiguration>,
         fail_config_verifier: Option<FailConfiguration>,
+        challenge_ok: bool,
+        force: ForceChallenge,
     ) {
         let pdf = "../docker-riscv32/riscv32/build/hello-world.yaml";
         let input = vec![17, 17, 17, input];
         let program_def = ProgramDefinition::from_config(pdf).unwrap();
         let nary_def = program_def.nary_def();
 
-        let extra = if expect_err { "fail" } else { "ok" };
-
-        let chk_prover_path = &format!("../temp-runs/challenge/{}/prover/", extra);
-        let chk_verifier_path = &format!("../temp-runs/challenge/{}/verifier/", extra);
+        let chk_prover_path = &format!("../temp-runs/challenge/{}/prover/", id);
+        let chk_verifier_path = &format!("../temp-runs/challenge/{}/verifier/", id);
 
         // PROVER EXECUTES
         let result_1 = prover_execute(
@@ -356,13 +369,14 @@ mod tests {
         //TODO: Add translation keys
 
         //PROVER PROVIDES EXECUTE STEP (and reveals full_trace)
-        let final_trace = prover_final_trace(pdf, chk_prover_path, v_decision).unwrap();
+        //Use v_desision + 1 as v_decision defines the last agreed step
+        let final_trace = prover_final_trace(pdf, chk_prover_path, v_decision + 1).unwrap();
         info!("{:?}", final_trace.to_csv());
 
         let result = verify_script(&final_trace, REGISTERS_BASE_ADDRESS, &None);
         info!("Validation result: {:?}", result);
 
-        if expect_err {
+        if execute_err {
             assert!(result.is_err());
             //once execution fails there is no need to execute more steps
             return;
@@ -370,21 +384,41 @@ mod tests {
             assert!(result.is_ok());
         }
 
-        let challenge = verifier_choose_challenge(pdf, &chk_verifier_path, final_trace).unwrap();
+        let challenge =
+            verifier_choose_challenge(pdf, &chk_verifier_path, final_trace, force).unwrap();
+        let result = execute_challenge(&challenge);
+        assert_eq!(result, challenge_ok);
 
-        info!("{:?}", challenge);
-
-        info!("{}", execute_challenge(&challenge));
+        info!("Challenge: {:?} result: {}", challenge, result);
     }
 
     #[test]
     fn test_challenge() {
         init_trace();
         //bad input: exepct execute step to fail
-        test_challenge_aux(0, true, None, None);
+        test_challenge_aux("1", 0, true, None, None, false, ForceChallenge::No);
         //good input: expect execute step to succeed
-        test_challenge_aux(17, false, None, None);
+        test_challenge_aux("2", 17, false, None, None, false, ForceChallenge::No);
+
         //invalid hash: expect trace hash to fail
-        test_challenge_aux(0, false, Some(FailConfiguration::new_fail_hash(1312)), None);
+        let fail_hash = Some(FailConfiguration::new_fail_hash(100));
+        test_challenge_aux(
+            "3",
+            17,
+            false,
+            fail_hash.clone(),
+            None,
+            true,
+            ForceChallenge::TraceHash,
+        );
+        test_challenge_aux(
+            "4",
+            17,
+            false,
+            None,
+            fail_hash,
+            false,
+            ForceChallenge::TraceHash,
+        );
     }
 }

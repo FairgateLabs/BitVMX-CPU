@@ -67,6 +67,14 @@ pub fn execute_program(
         program.serialize_to_file(path);
     }
 
+    if print_trace && (trace_set.is_none() || trace_set.as_ref().unwrap().contains(&program.step)) {
+        let hash_hex = hash_to_string(&program.hash);
+        traces.push((TraceRWStep::default(), hash_hex.clone()));
+        if debug {
+            info!("{};{}", traces[0].0.to_csv(), traces[0].1);
+        }
+    }
+
     let ret: ExecutionResult = loop {
         let mut should_patch = (false, false);
         if let Some(fr) = &fail_config.fail_reads {
@@ -140,11 +148,7 @@ pub fn execute_program(
 
         if print_trace || trace.is_err() || program.halt {
             if trace_set.is_none() || trace_set.as_ref().unwrap().contains(&program.step) {
-                let hash_hex = program
-                    .hash
-                    .iter()
-                    .map(|byte| format!("{:02x}", byte))
-                    .collect::<String>();
+                let hash_hex = hash_to_string(&program.hash);
                 traces.push((
                     trace.as_ref().unwrap_or(&TraceRWStep::default()).clone(),
                     hash_hex.clone(),
@@ -197,14 +201,7 @@ pub fn execute_program(
     }
 
     if debug {
-        info!(
-            "Last hash: {}",
-            program
-                .hash
-                .iter()
-                .map(|byte| format!("{:02x}", byte))
-                .collect::<String>()
-        );
+        info!("Last hash: {}", hash_to_string(&program.hash));
     }
 
     (ret, traces)

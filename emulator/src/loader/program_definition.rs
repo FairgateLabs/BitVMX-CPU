@@ -154,8 +154,8 @@ impl ProgramDefinition {
             "Getting hashes for round: {} with steps: {:?}",
             round, steps
         );
+        let required_hashes = steps.len();
         steps.insert(0, base); //asks base step as it should be always obtainable
-        let steps_len = steps.len();
 
         let (_result, trace) =
             self.execute_helper(checkpoint_path, vec![], Some(steps), fail_config)?;
@@ -168,7 +168,10 @@ impl ProgramDefinition {
         let skip = if trace.len() > 1 { 1 } else { 0 };
 
         let mut ret: Vec<String> = trace.iter().skip(skip).map(|t| t.1.clone()).collect();
-        for _ in 0..steps_len - trace.len() {
+        let obtained_hashes = ret.len();
+
+        assert!(obtained_hashes <= required_hashes);
+        for _ in 0..required_hashes - obtained_hashes {
             ret.push(trace.last().unwrap().1.clone());
         }
 
