@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use bitvmx_cpu_definitions::{
     challenge::ChallengeType,
-    trace::{validate_step_hash, TraceRWStep},
+    trace::{generate_initial_step_hash, hashvec_to_string, validate_step_hash, TraceRWStep},
 };
 use tracing::{error, info, warn};
 
@@ -201,6 +201,15 @@ pub fn get_hashes(
 ) -> (String, String) {
     let next_step = challenge_step + 1;
 
+    if challenge_step == 0 {
+        let next_access = mapping.get(&next_step).unwrap();
+        let claim_next_hash = hashes[next_access.0 as usize - 1][next_access.1 as usize].clone();
+        return (
+            hashvec_to_string(generate_initial_step_hash()),
+            claim_next_hash,
+        );
+    }
+
     let step_access = mapping.get(&challenge_step).unwrap();
     let next_access = mapping.get(&next_step).unwrap();
 
@@ -212,6 +221,7 @@ pub fn get_hashes(
 #[derive(Debug, Clone, PartialEq)]
 pub enum ForceChallenge {
     TraceHash,
+    TraceHashZero,
     No,
 }
 
@@ -233,7 +243,13 @@ pub fn verifier_choose_challenge(
 
     if !validate_step_hash(&step_hash, &trace.trace_step, &next_hash)
         || force == ForceChallenge::TraceHash
+        || force == ForceChallenge::TraceHashZero
     {
+        if trace.step_number == 1 {
+            info!("Veifier choose to challenge TRACE_HASH_ZERO");
+            return Ok(ChallengeType::TraceHashZero(trace.trace_step, next_hash));
+        }
+
         info!("Veifier choose to challenge TRACE_HASH");
         return Ok(ChallengeType::TraceHash(
             step_hash,
@@ -409,7 +425,7 @@ mod tests {
             fail_hash.clone(),
             None,
             true,
-            ForceChallenge::TraceHash,
+            ForceChallenge::No,
         );
         test_challenge_aux(
             "4",
@@ -419,6 +435,27 @@ mod tests {
             fail_hash,
             false,
             ForceChallenge::TraceHash,
+        );
+
+        // support for trace hash where the agreed step hash is zero
+        let fail_hash = Some(FailConfiguration::new_fail_hash(1));
+        test_challenge_aux(
+            "5",
+            17,
+            false,
+            fail_hash.clone(),
+            None,
+            true,
+            ForceChallenge::No,
+        );
+        test_challenge_aux(
+            "6",
+            17,
+            false,
+            None,
+            fail_hash,
+            false,
+            ForceChallenge::TraceHashZero,
         );
     }
 }

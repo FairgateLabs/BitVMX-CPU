@@ -1,6 +1,9 @@
 use bitcoin_script_functions::hash::blake3;
 use bitcoin_script_stack::stack::StackTracker;
-use bitvmx_cpu_definitions::challenge::ChallengeType;
+use bitvmx_cpu_definitions::{
+    challenge::ChallengeType,
+    trace::{generate_initial_step_hash, hashvec_to_string},
+};
 
 // TODO: hash initial challenge
 // given the "agreement" about the initial hash, the verifier needs to challenge this value in an special way
@@ -137,6 +140,45 @@ pub fn trace_hash_challenge(stack: &mut StackTracker) {
     stack.not_equal(result, true, hash, true);
 }
 
+pub fn trace_hash_zero_challenge(stack: &mut StackTracker) {
+    stack.clear_definitions();
+
+    let write_add = stack.define(8, "write_add");
+    let write_data = stack.define(8, "write_data");
+    let write_pc = stack.define(8, "write_pc");
+    let write_micro = stack.define(2, "write_micro");
+
+    let hash = stack.define(40, "hash");
+
+    //save the hash to compare
+    stack.to_altstack();
+
+    //save the trace steps
+    stack.to_altstack();
+    stack.to_altstack();
+    stack.to_altstack();
+    stack.to_altstack();
+
+    //hardcoded the initial hash
+    let prev_hash = stack.hexstr_as_nibbles(&hashvec_to_string(generate_initial_step_hash()));
+
+    //restore the trace step
+    stack.from_altstack();
+    stack.from_altstack();
+    stack.from_altstack();
+    stack.from_altstack();
+
+    stack.explode(prev_hash);
+    stack.explode(write_add);
+    stack.explode(write_data);
+    stack.explode(write_pc);
+    stack.explode(write_micro);
+
+    let result = blake3::blake3(stack, (40 + 8 + 8 + 8 + 2) / 2, 5);
+    stack.from_altstack();
+    stack.not_equal(result, true, hash, true);
+}
+
 //TODO: memory section challenge
 //TODO: program crash challenge - this might be more about finding the right place to challenge that a challenge itself
 
@@ -151,6 +193,17 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             stack.byte(trace_step.get_pc().get_micro() as u8);
             stack.hexstr_as_nibbles(hash);
             trace_hash_challenge(&mut stack);
+            stack.op_true();
+            stack.run().success
+        }
+        ChallengeType::TraceHashZero(trace_step, hash) => {
+            let mut stack = StackTracker::new();
+            stack.number_u32(trace_step.get_write().address);
+            stack.number_u32(trace_step.get_write().value);
+            stack.number_u32(trace_step.get_pc().get_address());
+            stack.byte(trace_step.get_pc().get_micro() as u8);
+            stack.hexstr_as_nibbles(hash);
+            trace_hash_zero_challenge(&mut stack);
             stack.op_true();
             stack.run().success
         }
@@ -289,6 +342,43 @@ mod tests {
         assert!(test_halt_challenge_aux(0x0, 0x0, 93, 0, 114));
         assert!(!test_halt_challenge_aux(0x0, 0x0, 93, 0, 115));
         assert!(!test_halt_challenge_aux(0x0, 0x1, 93, 0, 114));
+    }
+
+    fn test_trace_hash_zero_aux(
+        write_add: u32,
+        write_value: u32,
+        pc: u32,
+        micro: u8,
+        hash: &str,
+    ) -> bool {
+        let mut stack = StackTracker::new();
+
+        stack.number_u32(write_add);
+        stack.number_u32(write_value);
+        stack.number_u32(pc);
+        stack.byte(micro);
+
+        stack.hexstr_as_nibbles(hash);
+
+        trace_hash_zero_challenge(&mut stack);
+
+        stack.op_true();
+        stack.run().success
+    }
+
+    #[test]
+    fn test_trace_hash_zero() {
+        let hash = "3ebf30cdfd74fa9635abb08f13bb0d09bb6ae403";
+
+        //prover provided valid hash, verifier loses
+        assert!(!test_trace_hash_zero_aux(
+            0xf0000028, 0x00000000, 0x80000100, 0x00, hash
+        ));
+
+        //prover provided invalid hash, verifier wins
+        assert!(test_trace_hash_zero_aux(
+            0xf0000028, 0x00000000, 0x80000100, 0x01, hash
+        ));
     }
 
     fn test_trace_hash_aux(

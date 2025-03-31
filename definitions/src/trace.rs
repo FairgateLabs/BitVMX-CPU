@@ -213,6 +213,12 @@ pub fn validate_step_hash(hash: &str, step: &TraceStep, next_hash: &str) -> bool
     computed_hash == next_hash
 }
 
+pub fn hashvec_to_string(hash: Vec<u8>) -> String {
+    hash.iter()
+        .map(|byte| format!("{:02x}", byte))
+        .collect::<String>()
+}
+
 pub fn hash_to_string(hash: &[u8; 20]) -> String {
     hash.iter()
         .map(|byte| format!("{:02x}", byte))
