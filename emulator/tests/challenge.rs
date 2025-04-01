@@ -51,7 +51,7 @@ fn test_nary_search_trace_aux(input: u8, expect_err: bool, checkpoint_path: &str
 
     info!("The prover needs to provide the full trace for the selected step {selected}");
     let trace = program_def
-        .get_trace_step(checkpoint_path, selected)
+        .get_trace_step(checkpoint_path, selected, None)
         .unwrap();
 
     info!("{:?}", trace.to_csv());

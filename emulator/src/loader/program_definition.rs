@@ -182,9 +182,11 @@ impl ProgramDefinition {
         &self,
         checkpoint_path: &str,
         step: u64,
+        fail_config: Option<FailConfiguration>,
     ) -> Result<TraceRWStep, EmulatorError> {
         let steps = vec![step];
-        let (_result, trace) = self.execute_helper(checkpoint_path, vec![], Some(steps), None)?;
+        let (_result, trace) =
+            self.execute_helper(checkpoint_path, vec![], Some(steps), fail_config)?;
         // at least the base step should be present
         if trace.len() == 0 {
             return Err(EmulatorError::CantObtainTrace);

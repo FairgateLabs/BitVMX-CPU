@@ -175,6 +175,7 @@ pub fn prover_final_trace(
     program_definition_file: &str,
     checkpoint_path: &str,
     final_bits: u32,
+    fail_config: Option<FailConfiguration>,
 ) -> Result<TraceRWStep, EmulatorError> {
     let mut challenge_log = ProverChallengeLog::load(checkpoint_path)?;
     let base = challenge_log.base_step;
@@ -189,7 +190,8 @@ pub fn prover_final_trace(
     challenge_log.verifier_decisions.push(final_bits);
 
     info!("The prover needs to provide the full trace for the selected step {final_step}");
-    challenge_log.final_trace = program_def.get_trace_step(checkpoint_path, final_step)?;
+    challenge_log.final_trace =
+        program_def.get_trace_step(checkpoint_path, final_step, fail_config)?;
     challenge_log.save(checkpoint_path)?;
     Ok(challenge_log.final_trace)
 }
@@ -222,6 +224,7 @@ pub fn get_hashes(
 pub enum ForceChallenge {
     TraceHash,
     TraceHashZero,
+    EntryPoint,
     No,
 }
 
@@ -230,6 +233,7 @@ pub fn verifier_choose_challenge(
     checkpoint_path: &str,
     trace: TraceRWStep,
     force: ForceChallenge,
+    fail_config: Option<FailConfiguration>,
 ) -> Result<ChallengeType, EmulatorError> {
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
     let nary_def = program_def.nary_def();
@@ -241,6 +245,7 @@ pub fn verifier_choose_challenge(
         verifier_log.step_to_challenge,
     );
 
+    // check trace_hash
     if !validate_step_hash(&step_hash, &trace.trace_step, &next_hash)
         || force == ForceChallenge::TraceHash
         || force == ForceChallenge::TraceHashZero
@@ -255,6 +260,27 @@ pub fn verifier_choose_challenge(
             step_hash,
             trace.trace_step,
             next_hash,
+        ));
+    }
+
+    //obtain my trace to compare
+    let my_trace = program_def.get_trace_step(
+        checkpoint_path,
+        verifier_log.step_to_challenge + 1,
+        fail_config,
+    )?;
+
+    // check entrypoint
+    if (trace.step_number == 1
+        && (trace.read_pc.pc.get_address() != my_trace.read_pc.pc.get_address()
+            || trace.read_pc.pc.get_micro() != my_trace.read_pc.pc.get_micro()))
+        || force == ForceChallenge::EntryPoint
+    {
+        info!("Veifier choose to challenge ENTRYPOINT");
+        return Ok(ChallengeType::EntryPoint(
+            trace.read_pc,
+            trace.step_number,
+            program_def.load_program().unwrap().pc.get_address(), //this parameter is only used for the test
         ));
     }
 
@@ -308,7 +334,17 @@ mod tests {
         executor::verifier::verify_script, loader::program_definition::ProgramDefinition,
     };
 
+    use std::sync::Once;
+
+    static INIT: Once = Once::new();
+
     fn init_trace() {
+        INIT.call_once(|| {
+            init_trace_aux();
+        });
+    }
+
+    fn init_trace_aux() {
         tracing_subscriber::fmt()
             .without_time()
             .with_target(false)
@@ -386,7 +422,8 @@ mod tests {
 
         //PROVER PROVIDES EXECUTE STEP (and reveals full_trace)
         //Use v_desision + 1 as v_decision defines the last agreed step
-        let final_trace = prover_final_trace(pdf, chk_prover_path, v_decision + 1).unwrap();
+        let final_trace =
+            prover_final_trace(pdf, chk_prover_path, v_decision + 1, fail_config_prover).unwrap();
         info!("{:?}", final_trace.to_csv());
 
         let result = verify_script(&final_trace, REGISTERS_BASE_ADDRESS, &None);
@@ -400,8 +437,14 @@ mod tests {
             assert!(result.is_ok());
         }
 
-        let challenge =
-            verifier_choose_challenge(pdf, &chk_verifier_path, final_trace, force).unwrap();
+        let challenge = verifier_choose_challenge(
+            pdf,
+            &chk_verifier_path,
+            final_trace,
+            force,
+            fail_config_verifier,
+        )
+        .unwrap();
         let result = execute_challenge(&challenge);
         assert_eq!(result, challenge_ok);
 
@@ -409,13 +452,17 @@ mod tests {
     }
 
     #[test]
-    fn test_challenge() {
+    fn test_challenge_execution() {
         init_trace();
         //bad input: exepct execute step to fail
         test_challenge_aux("1", 0, true, None, None, false, ForceChallenge::No);
         //good input: expect execute step to succeed
         test_challenge_aux("2", 17, false, None, None, false, ForceChallenge::No);
+    }
 
+    #[test]
+    fn test_challenge_trace_hash() {
+        init_trace();
         //invalid hash: expect trace hash to fail
         let fail_hash = Some(FailConfiguration::new_fail_hash(100));
         test_challenge_aux(
@@ -436,7 +483,11 @@ mod tests {
             false,
             ForceChallenge::TraceHash,
         );
+    }
 
+    #[test]
+    fn test_challenge_trace_hash_zero() {
+        init_trace();
         // support for trace hash where the agreed step hash is zero
         let fail_hash = Some(FailConfiguration::new_fail_hash(1));
         test_challenge_aux(
@@ -456,6 +507,32 @@ mod tests {
             fail_hash,
             false,
             ForceChallenge::TraceHashZero,
+        );
+    }
+
+    #[test]
+    fn test_challenge_entrypoint() {
+        init_trace();
+        // support for trace hash where the agreed step hash is zero
+        let fail_entrypoint = Some(FailConfiguration::new_fail_pc(0));
+        //WHY TRACE_HASH_ZERO SUCCESD?
+        test_challenge_aux(
+            "5",
+            17,
+            false,
+            fail_entrypoint.clone(),
+            None,
+            true,
+            ForceChallenge::No,
+        );
+        test_challenge_aux(
+            "6",
+            17,
+            false,
+            None,
+            fail_entrypoint,
+            false,
+            ForceChallenge::EntryPoint,
         );
     }
 }

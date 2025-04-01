@@ -183,9 +183,9 @@ pub fn trace_hash_zero_challenge(stack: &mut StackTracker) {
 //TODO: program crash challenge - this might be more about finding the right place to challenge that a challenge itself
 
 pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
+    let mut stack = StackTracker::new();
     match challege_type {
         ChallengeType::TraceHash(pre_hash, trace_step, hash) => {
-            let mut stack = StackTracker::new();
             stack.hexstr_as_nibbles(pre_hash);
             stack.number_u32(trace_step.get_write().address);
             stack.number_u32(trace_step.get_write().value);
@@ -193,22 +193,27 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             stack.byte(trace_step.get_pc().get_micro() as u8);
             stack.hexstr_as_nibbles(hash);
             trace_hash_challenge(&mut stack);
-            stack.op_true();
-            stack.run().success
         }
         ChallengeType::TraceHashZero(trace_step, hash) => {
-            let mut stack = StackTracker::new();
             stack.number_u32(trace_step.get_write().address);
             stack.number_u32(trace_step.get_write().value);
             stack.number_u32(trace_step.get_pc().get_address());
             stack.byte(trace_step.get_pc().get_micro() as u8);
             stack.hexstr_as_nibbles(hash);
             trace_hash_zero_challenge(&mut stack);
-            stack.op_true();
-            stack.run().success
         }
-        ChallengeType::No => false,
+        ChallengeType::EntryPoint(read_pc, step, real_entry_point) => {
+            stack.number_u32(read_pc.pc.get_address());
+            stack.byte(read_pc.pc.get_micro() as u8);
+            stack.number_u64(*step);
+            entry_point_challenge(&mut stack, *real_entry_point);
+        }
+        _ => {
+            return false;
+        }
     }
+    stack.op_true();
+    stack.run().success
 }
 
 #[cfg(test)]
