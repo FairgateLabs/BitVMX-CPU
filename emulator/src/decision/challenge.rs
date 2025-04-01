@@ -225,6 +225,7 @@ pub enum ForceChallenge {
     TraceHash,
     TraceHashZero,
     EntryPoint,
+    ProgramCounter,
     No,
 }
 
@@ -263,25 +264,48 @@ pub fn verifier_choose_challenge(
         ));
     }
 
-    //obtain my trace to compare
-    let my_trace = program_def.get_trace_step(
-        checkpoint_path,
-        verifier_log.step_to_challenge + 1,
-        fail_config,
-    )?;
+    let step = verifier_log.step_to_challenge;
+    let mut steps = vec![step, step + 1];
+    let mut my_trace_idx = 1;
+    if step > 0 {
+        steps.insert(0, step - 1);
+        my_trace_idx += 1;
+    }
+
+    //obtain all the steps needed
+    let my_execution = program_def
+        .execute_helper(checkpoint_path, vec![], Some(steps), fail_config)?
+        .1;
+    info!("execution: {:?}", my_execution);
+    let my_trace = my_execution[my_trace_idx].0.clone();
 
     // check entrypoint
-    if (trace.step_number == 1
-        && (trace.read_pc.pc.get_address() != my_trace.read_pc.pc.get_address()
-            || trace.read_pc.pc.get_micro() != my_trace.read_pc.pc.get_micro()))
+    if trace.read_pc.pc.get_address() != my_trace.read_pc.pc.get_address()
+        || trace.read_pc.pc.get_micro() != my_trace.read_pc.pc.get_micro()
         || force == ForceChallenge::EntryPoint
+        || force == ForceChallenge::ProgramCounter
     {
-        info!("Veifier choose to challenge ENTRYPOINT");
-        return Ok(ChallengeType::EntryPoint(
-            trace.read_pc,
-            trace.step_number,
-            program_def.load_program().unwrap().pc.get_address(), //this parameter is only used for the test
-        ));
+        if trace.step_number == 1 {
+            info!("Veifier choose to challenge ENTRYPOINT");
+            return Ok(ChallengeType::EntryPoint(
+                trace.read_pc,
+                trace.step_number,
+                program_def.load_program().unwrap().pc.get_address(), //this parameter is only used for the test
+            ));
+        } else {
+            info!("Veifier choose to challenge PROGRAM_COUNTER");
+            let pre_pre_hash = my_execution[0].1.clone();
+            let pre_step = my_execution[1].0.clone();
+            info!("pre_pre_step: {:?}", pre_pre_hash);
+            info!("pre_step: {:?}", pre_step.trace_step);
+            info!("step: {:?}", step_hash);
+            return Ok(ChallengeType::ProgramCounter(
+                pre_pre_hash,
+                pre_step.trace_step,
+                step_hash,
+                trace.read_pc,
+            ));
+        }
     }
 
     Ok(ChallengeType::No)
@@ -513,9 +537,7 @@ mod tests {
     #[test]
     fn test_challenge_entrypoint() {
         init_trace();
-        // support for trace hash where the agreed step hash is zero
         let fail_entrypoint = Some(FailConfiguration::new_fail_pc(0));
-        //WHY TRACE_HASH_ZERO SUCCESD?
         test_challenge_aux(
             "5",
             17,
@@ -533,6 +555,30 @@ mod tests {
             fail_entrypoint,
             false,
             ForceChallenge::EntryPoint,
+        );
+    }
+
+    #[test]
+    fn test_challenge_program_counter() {
+        init_trace();
+        let fail_entrypoint = Some(FailConfiguration::new_fail_pc(1));
+        test_challenge_aux(
+            "7",
+            17,
+            false,
+            fail_entrypoint.clone(),
+            None,
+            true,
+            ForceChallenge::No,
+        );
+        test_challenge_aux(
+            "8",
+            17,
+            false,
+            None,
+            fail_entrypoint,
+            false,
+            ForceChallenge::ProgramCounter,
         );
     }
 }

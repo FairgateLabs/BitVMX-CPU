@@ -42,7 +42,7 @@ pub fn entry_point_challenge(stack: &mut StackTracker, entry_point: u32) {
 // As both agrees on the previous step hash and the [PC|micro] is included in that hash, the verifier is able to win the challenge if he can execute this equivocation:
 // NOTE: the verifiers provides an step back of the agreed step.
 // hash_funcion ( UNSIGNED_VERIFIER_HASH_PREV_PREV_STEP:64 | UNSIGINED_VERIFIER_WRITE_ADD_PREV:8 | UNSIGINED_VERIFIER_WRITE_DATA_PREV:8 | UNSIGNED_VERIFIER_WRITE_PC_PREV:8 | UNSIGNED_VERIFIER_WRITE_MICRO_PREV:2 ) == WOTS_PROVER_HASH_PREV_STEP:64
-// && WOTS_PROVER_TRACE_PC:8 | WOTS_PROVER_TRACE_MICRO:2 != UNSIGNED_VERIFIER_WRITE_PC_PREV | UNSIGNED_VERIFIER_WRITE_MICRO_PREV
+// && WOTS_PROVER_TRACE_READ_PC:8 | WOTS_PROVER_TRACE_READ_MICRO:2 != UNSIGNED_VERIFIER_WRITE_PC_PREV | UNSIGNED_VERIFIER_WRITE_MICRO_PREV
 pub fn program_counter_challenge(stack: &mut StackTracker) {
     stack.clear_definitions();
 
@@ -61,8 +61,8 @@ pub fn program_counter_challenge(stack: &mut StackTracker) {
     stack.verify_range_var_u4(prev_write_micro);
 
     // prover values decoded from WOTS
-    let prover_pc = stack.define(8, "prover_pc");
-    let _prover_micro = stack.define(2, "prover_micro");
+    let prover_pc = stack.define(8, "prover_read_pc");
+    let _prover_micro = stack.define(2, "prover_read_micro");
     let prover_prev_hash = stack.define(40, "prover_prev_hash");
 
     //save the hash to compare
@@ -207,6 +207,20 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             stack.byte(read_pc.pc.get_micro() as u8);
             stack.number_u64(*step);
             entry_point_challenge(&mut stack, *real_entry_point);
+        }
+        ChallengeType::ProgramCounter(pre_pre_hash, pre_step, prover_step_hash, prover_pc_read) => {
+            stack.hexstr_as_nibbles(pre_pre_hash);
+            stack.number_u32(pre_step.get_write().address);
+            stack.number_u32(pre_step.get_write().value);
+            stack.number_u32(pre_step.get_pc().get_address());
+            stack.byte(pre_step.get_pc().get_micro() as u8);
+
+            stack.number_u32(prover_pc_read.pc.get_address());
+            stack.byte(prover_pc_read.pc.get_micro() as u8);
+
+            stack.hexstr_as_nibbles(&prover_step_hash);
+
+            program_counter_challenge(&mut stack);
         }
         _ => {
             return false;
