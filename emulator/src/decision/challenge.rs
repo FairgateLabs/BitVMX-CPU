@@ -561,7 +561,7 @@ mod tests {
         init_trace();
         let fail_entrypoint = Some(FailConfiguration::new_fail_pc(0));
         test_challenge_aux(
-            "5",
+            "7",
             17,
             false,
             fail_entrypoint.clone(),
@@ -570,7 +570,7 @@ mod tests {
             ForceChallenge::No,
         );
         test_challenge_aux(
-            "6",
+            "8",
             17,
             false,
             None,
