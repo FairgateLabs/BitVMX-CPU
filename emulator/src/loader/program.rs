@@ -3,8 +3,9 @@ use std::cmp::Ordering;
 use bitcoin_script_riscv::riscv::instruction_mapping::{
     get_key_from_instruction_and_micro, get_required_microinstruction,
 };
-use bitvmx_cpu_definitions::trace::{
-    generate_initial_step_hash, ProgramCounter, TraceRead, TraceWrite,
+use bitvmx_cpu_definitions::{
+    constants::LAST_STEP_INIT,
+    trace::{generate_initial_step_hash, ProgramCounter, TraceRead, TraceWrite},
 };
 use elf::{abi::SHF_EXECINSTR, endian::LittleEndian, ElfBytes};
 use serde::{Deserialize, Serialize};
