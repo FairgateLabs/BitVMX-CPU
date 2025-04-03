@@ -5,9 +5,6 @@ use bitvmx_cpu_definitions::{
     trace::{generate_initial_step_hash, hashvec_to_string},
 };
 
-// TODO: hash initial challenge
-// given the "agreement" about the initial hash, the verifier needs to challenge this value in an special way
-
 // TODO: Value commited in WOTS_PROVER_LAST_STEP should not be greater than the MAX_STEP_CONSTANT_VALUE
 // the script should block this.
 

@@ -296,9 +296,6 @@ pub fn verifier_choose_challenge(
             info!("Veifier choose to challenge PROGRAM_COUNTER");
             let pre_pre_hash = my_execution[0].1.clone();
             let pre_step = my_execution[1].0.clone();
-            info!("pre_pre_step: {:?}", pre_pre_hash);
-            info!("pre_step: {:?}", pre_step.trace_step);
-            info!("step: {:?}", step_hash);
             return Ok(ChallengeType::ProgramCounter(
                 pre_pre_hash,
                 pre_step.trace_step,
@@ -345,6 +342,31 @@ pub fn verifier_choose_challenge(
         - the opcode/pc is right: trace_write is different
             - challenge: memory_read (TBD)
 
+    // check reads:
+    // -- common data should be added to a rom section
+    // -- address is asserted by the execution challenge
+    // -- if value is different:
+    //    -- if address in input section or rom section
+    //          -- if last_step == initial => challenge equivocation
+    //          -- if last_step != initial => should be segfault
+    //    -- if address in ram section
+    //          -- if last_step == initial => challenge equivocation (default initialization zero)
+    //          -- if last_step != initial => memory_challenge search
+    //              -- if last_step > current_step => equivocation (if can't be avoided directly)
+    //              -- else
+    //                 -- as we agree on prev_hash
+    //                      -- search max(last_step, my_last_step)
+    //                      -- find if the trace_hash is broken given a trace_step and challenge the hash
+    //                      -- if the hashes are ok check:
+    //                          -- verifier can generate a valid hash AND
+    //                             -- if last_step = my_last_step
+    //                                -- prover_read_value != verifier_written_value  (it lied about the value)
+    //                          -- if last_step < my_last_step
+    //                                -- verifier shows that address is written in that step
+    //                                -- prover_read_add == verifier_written_add ( so it lied about last step the add was written)
+    //                          -- if last_step > my_last_step
+    //                                -- verifier shows that address is not written in that step
+    //                                -- prover_read_add != verifier_written_add ( so it lied about last step the add was written)
 
 */
 
