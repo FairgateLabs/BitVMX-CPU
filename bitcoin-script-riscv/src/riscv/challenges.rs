@@ -15,7 +15,48 @@ use bitvmx_cpu_definitions::{
 
 // TODO: Implement multi value challange, using base address - address to pick value
 
-// One value challenge
+// One input value equivocation challenge
+// [WOTS_INPUT_DATA[address]|WOTS_PROVER_READ_ADD_1|WOTS_PROVER_READ_VALUE_1|WOTS_PROVER_LAST_STEP_1|WOTS_PROVER_READ_ADD_2|WOTS_PROVER_READ_VALUE_2|WOTS_PROVER_LAST_STEP_2]
+// If STEP_1 == INIT && ADD_1 == const_address && VALUE_1 != [WOTS_INPUT_DATA[address] || STEP_2 == INIT && ADD_2 == const_address && VALUE_2 != [WOTS_INPUT_DATA[address]  => verifier wins
+pub fn input_challenge(stack: &mut StackTracker, address: u32) {
+    assert_ne!(address, 0x0000_0000);
+    stack.clear_definitions();
+
+    let input = stack.define(8, "prover_input");
+
+    let add_1 = stack.define(8, "prover_read_add_1");
+    let read_1 = stack.define(8, "prover_read_value_1");
+    let prover_step_1 = stack.define(16, "prover_last_step_1");
+
+    let add_2 = stack.define(8, "prover_read_add_2");
+    let read_2 = stack.define(8, "prover_read_value_2");
+    let prover_step_2 = stack.define(16, "prover_last_step_2");
+
+    //compares agaisnt read_2
+    let init = stack.number_u64(LAST_STEP_INIT);
+    stack.equality(prover_step_2, true, init, true, true, false);
+    stack.equality(read_2, true, input, false, false, false);
+    let const_address = stack.number_u32(address);
+    stack.equality(add_2, true, const_address, true, true, false);
+    stack.op_booland();
+    stack.op_booland();
+
+    //compares agaisnt read_1
+    let init = stack.number_u64(LAST_STEP_INIT);
+    stack.equality(prover_step_1, true, init, true, true, false);
+    stack.equality(read_1, true, input, true, false, false);
+    let const_address = stack.number_u32(address);
+    stack.equality(add_1, true, const_address, true, true, false);
+
+    stack.op_booland();
+    stack.op_booland();
+
+    //one of the two needs to be right
+    stack.op_boolor();
+    stack.op_verify();
+}
+
+// One rom value equivocation challenge
 // [WOTS_PROVER_READ_ADD_1|WOTS_PROVER_READ_VALUE_1|WOTS_PROVER_LAST_STEP_1|WOTS_PROVER_READ_ADD_2|WOTS_PROVER_READ_VALUE_2|WOTS_PROVER_LAST_STEP_2]
 // If STEP_1 == INIT && ADD_1 == const_address && VALUE_1 != const_value || STEP_2 == INIT && ADD_2 == const_address && VALUE_2 != const_value  => verifier wins
 pub fn rom_challenge(stack: &mut StackTracker, address: u32, value: u32) {
@@ -546,5 +587,60 @@ mod tests {
         let read_1 = TraceRead::new(0x0000_0005, 0x1234_0000, LAST_STEP_INIT);
         let read_2 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
         assert!(test_rom_aux(&read_1, &read_2, 0x0000_0002, 0x1234_0000));
+    }
+
+    fn test_input_aux(
+        read_1: &TraceRead,
+        read_2: &TraceRead,
+        address: u32,
+        input_for_address: u32,
+    ) -> bool {
+        let mut stack = StackTracker::new();
+
+        stack.number_u32(input_for_address);
+        stack.number_u32(read_1.address);
+        stack.number_u32(read_1.value);
+        stack.number_u64(read_1.last_step);
+        stack.number_u32(read_2.address);
+        stack.number_u32(read_2.value);
+        stack.number_u64(read_2.last_step);
+
+        input_challenge(&mut stack, address);
+
+        stack.op_true();
+        stack.run().success
+    }
+
+    #[test]
+    fn test_input() {
+        //can't challenge not init state
+        let read_1 = TraceRead::new(0x0000_0002, 0x1234_5678, 1);
+        let read_2 = TraceRead::new(0x0000_0002, 0x1234_5678, 2);
+        assert!(!test_input_aux(&read_1, &read_2, 0x0000_0002, 0x0000_0000));
+
+        //can't challenge if value is right
+        let read_1 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
+        let read_2 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
+        assert!(!test_input_aux(&read_1, &read_2, 0x0000_0002, 0x1234_5678));
+
+        //can't challenge if address is different
+        let read_1 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
+        let read_2 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
+        assert!(!test_input_aux(&read_1, &read_2, 0x0000_0003, 0x1234_0000));
+
+        //challenge is valid if the address is the same but the value differs in both
+        let read_1 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
+        let read_2 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
+        assert!(test_input_aux(&read_1, &read_2, 0x0000_0002, 0x1234_0000));
+
+        //challenge is valid if the address is the same but the value differs in read_1
+        let read_1 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
+        let read_2 = TraceRead::new(0x0000_0005, 0x1234_0000, LAST_STEP_INIT);
+        assert!(test_input_aux(&read_1, &read_2, 0x0000_0002, 0x1234_0000));
+
+        //challenge is valid if the address is the same but the value differs in read_2
+        let read_1 = TraceRead::new(0x0000_0005, 0x1234_0000, LAST_STEP_INIT);
+        let read_2 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
+        assert!(test_input_aux(&read_1, &read_2, 0x0000_0002, 0x1234_0000));
     }
 }
