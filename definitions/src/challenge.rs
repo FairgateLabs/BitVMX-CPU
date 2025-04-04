@@ -1,4 +1,4 @@
-use crate::trace::{TraceReadPC, TraceStep};
+use crate::trace::{TraceRead, TraceReadPC, TraceStep};
 
 #[derive(Debug, Clone)]
 pub enum ChallengeType {
@@ -6,5 +6,6 @@ pub enum ChallengeType {
     TraceHashZero(TraceStep, String),     // PROVER_TRACE_STEP, PROVER_STEP_HASH
     EntryPoint(TraceReadPC, u64, u32), // (PROVER_READ_PC, PROVER_READ_MICRO), PROVER_TRACE_STEP, ENTRYPOINT (only used on test)
     ProgramCounter(String, TraceStep, String, TraceReadPC),
+    InputData(TraceRead, TraceRead, u32, u32),
     No,
 }

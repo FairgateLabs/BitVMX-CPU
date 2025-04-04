@@ -303,6 +303,16 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
 
             program_counter_challenge(&mut stack);
         }
+        ChallengeType::InputData(read_1, read_2, address, input_for_address) => {
+            stack.number_u32(*input_for_address); //TODO: this should make input_wots[address]
+            stack.number_u32(read_1.address);
+            stack.number_u32(read_1.value);
+            stack.number_u64(read_1.last_step);
+            stack.number_u32(read_2.address);
+            stack.number_u32(read_2.value);
+            stack.number_u64(read_2.last_step);
+            input_challenge(&mut stack, *address);
+        }
         _ => {
             return false;
         }

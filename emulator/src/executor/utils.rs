@@ -1,4 +1,5 @@
 use bitvmx_cpu_definitions::trace::{TraceRWStep, TraceRead};
+use num_traits;
 
 use crate::loader::program::Program;
 
@@ -15,7 +16,30 @@ pub struct FailRead {
 impl FailRead {
     #[allow(clippy::ptr_arg)]
     pub fn new(args: &Vec<String>) -> Self {
+        fn parse_value<T>(value: &str) -> T
+        where
+            T: num_traits::Num + std::str::FromStr,
+            T: std::fmt::Debug,
+            <T as std::str::FromStr>::Err: std::fmt::Debug,
+        {
+            if value.starts_with("0x") {
+                T::from_str_radix(&value[2..], 16)
+                    .unwrap_or_else(|_| panic!("Invalid hexadecimal value"))
+            } else {
+                value.parse::<T>().expect("Invalid decimal value")
+            }
+        }
+
         Self {
+            step: parse_value::<u64>(&args[0]) - 1,
+            address_original: parse_value::<u32>(&args[1]),
+            value: parse_value::<u32>(&args[2]),
+            modified_address: parse_value::<u32>(&args[3]),
+            modified_last_step: parse_value::<u64>(&args[4]),
+            init: true,
+        }
+
+        /*Self {
             step: args[0].parse::<u64>().expect("Invalid modified_last_step") - 1,
             address_original: args[1]
                 .parse::<u32>()
@@ -26,7 +50,7 @@ impl FailRead {
                 .expect("Invalid modified_address value"),
             modified_last_step: args[4].parse::<u64>().expect("Invalid modified_last_step"),
             init: true,
-        }
+        }*/
     }
 
     pub fn patch_trace_read(&self, trace: &mut TraceRead) {
