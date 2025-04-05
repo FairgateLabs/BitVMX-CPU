@@ -227,6 +227,7 @@ pub enum ForceChallenge {
     TraceHashZero,
     EntryPoint,
     ProgramCounter,
+    InputData,
     No,
 }
 
@@ -238,7 +239,7 @@ pub fn verifier_choose_challenge(
     fail_config: Option<FailConfiguration>,
 ) -> Result<ChallengeType, EmulatorError> {
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
-    let program = program_def.load_program()?;
+    let program = program_def.load_program_from_checkpoint(checkpoint_path, 0)?;
     let nary_def = program_def.nary_def();
     let verifier_log = VerifierChallengeLog::load(checkpoint_path)?;
 
@@ -316,13 +317,15 @@ pub fn verifier_choose_challenge(
     let conflict_read_2 =
         trace.read_2.value != my_trace.read_2.value && trace.read_2.last_step == LAST_STEP_INIT;
     if conflict_read_1 || conflict_read_2 {
-        let (conflict_address, value) = if conflict_read_1 {
-            (trace.read_1.address, my_trace.read_1.value)
+        let conflict_address = if conflict_read_1 {
+            trace.read_1.address
         } else {
-            (trace.read_2.address, my_trace.read_2.value)
+            trace.read_2.address
         };
         let section = program.find_section(conflict_address)?;
-        if section.name == program_def.input_section_name {
+        //TODO: Check if the address is in the input section rom ram or registers
+        let value = program.read_mem(conflict_address)?;
+        if section.name == program_def.input_section_name || force == ForceChallenge::InputData {
             info!("Veifier choose to challenge invalid INPUT DATA");
             return Ok(ChallengeType::InputData(
                 trace.read_1.clone(),
@@ -404,8 +407,10 @@ mod tests {
     use tracing::Level;
 
     use crate::{
-        constants::REGISTERS_BASE_ADDRESS, decision::challenge::*,
-        executor::verifier::verify_script, loader::program_definition::ProgramDefinition,
+        constants::REGISTERS_BASE_ADDRESS,
+        decision::challenge::*,
+        executor::{utils::FailReads, verifier::verify_script},
+        loader::program_definition::ProgramDefinition,
     };
 
     use std::sync::Once;
@@ -428,8 +433,7 @@ mod tests {
 
     fn test_challenge_aux(
         id: &str,
-        input_prover: u8,
-        input_verifier: u8,
+        input: u8,
         execute_err: bool,
         fail_config_prover: Option<FailConfiguration>,
         fail_config_verifier: Option<FailConfiguration>,
@@ -437,8 +441,7 @@ mod tests {
         force: ForceChallenge,
     ) {
         let pdf = "../docker-riscv32/riscv32/build/hello-world.yaml";
-        let input_prover = vec![17, 17, 17, input_prover];
-        let input_verifier = vec![17, 17, 17, input_verifier];
+        let input = vec![17, 17, 17, input];
         let program_def = ProgramDefinition::from_config(pdf).unwrap();
         let nary_def = program_def.nary_def();
 
@@ -448,7 +451,7 @@ mod tests {
         // PROVER EXECUTES
         let result_1 = prover_execute(
             pdf,
-            input_prover,
+            input.clone(),
             chk_prover_path,
             true,
             fail_config_prover.clone(),
@@ -459,7 +462,7 @@ mod tests {
         // VERIFIER DECIDES TO CHALLENGE
         let result = verifier_check_execution(
             pdf,
-            input_verifier,
+            input,
             chk_verifier_path,
             result_1.1,
             &result_1.2,
@@ -531,9 +534,9 @@ mod tests {
     fn test_challenge_execution() {
         init_trace();
         //bad input: exepct execute step to fail
-        test_challenge_aux("1", 0, 0, true, None, None, false, ForceChallenge::No);
+        test_challenge_aux("1", 0, true, None, None, false, ForceChallenge::No);
         //good input: expect execute step to succeed
-        test_challenge_aux("2", 17, 17, false, None, None, false, ForceChallenge::No);
+        test_challenge_aux("2", 17, false, None, None, false, ForceChallenge::No);
     }
 
     #[test]
@@ -544,7 +547,6 @@ mod tests {
         test_challenge_aux(
             "3",
             17,
-            17,
             false,
             fail_hash.clone(),
             None,
@@ -553,7 +555,6 @@ mod tests {
         );
         test_challenge_aux(
             "4",
-            17,
             17,
             false,
             None,
@@ -571,7 +572,6 @@ mod tests {
         test_challenge_aux(
             "5",
             17,
-            17,
             false,
             fail_hash.clone(),
             None,
@@ -580,7 +580,6 @@ mod tests {
         );
         test_challenge_aux(
             "6",
-            17,
             17,
             false,
             None,
@@ -597,7 +596,6 @@ mod tests {
         test_challenge_aux(
             "7",
             17,
-            17,
             false,
             fail_entrypoint.clone(),
             None,
@@ -606,7 +604,6 @@ mod tests {
         );
         test_challenge_aux(
             "8",
-            17,
             17,
             false,
             None,
@@ -623,7 +620,6 @@ mod tests {
         test_challenge_aux(
             "9",
             17,
-            17,
             false,
             fail_pc.clone(),
             None,
@@ -633,7 +629,6 @@ mod tests {
         test_challenge_aux(
             "10",
             17,
-            17,
             false,
             None,
             fail_pc,
@@ -642,7 +637,9 @@ mod tests {
         );
     }
 
-    /*fn test_fail_reads() {
+    #[test]
+    fn test_challenge_input() {
+        init_trace();
         let fail_args = vec![
             "1106",
             "0xaa000000",
@@ -654,23 +651,27 @@ mod tests {
         .map(|x| x.to_string())
         .collect::<Vec<String>>();
         let fail_read_1 = Some(FailConfiguration::new_fail_reads(FailReads::new(
-            Some(&fail_args),
             None,
+            Some(&fail_args),
+            //None,
         )));
-    }*/
-
-    #[test]
-    fn test_challenge_input() {
-        init_trace();
         test_challenge_aux(
             "11",
-            17, //Fake input
-            0,  //this is the input published
+            0,
             false,
-            None,
+            fail_read_1.clone(),
             None,
             true,
             ForceChallenge::No,
+        );
+        test_challenge_aux(
+            "12",
+            17,
+            false,
+            None,
+            fail_read_1,
+            false,
+            ForceChallenge::InputData,
         );
     }
 }
