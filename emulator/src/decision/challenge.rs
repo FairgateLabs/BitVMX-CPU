@@ -95,6 +95,8 @@ pub fn verifier_check_execution(
     let (result, last_step, last_hash) =
         program_def.get_execution_result(input.clone(), checkpoint_path, fail_config)?;
 
+    let mut should_challenge = true;
+
     if result == ExecutionResult::Halt(0, last_step) {
         info!("The program executed successfully with the prover input");
         info!("Do not challenge.");
@@ -103,14 +105,16 @@ pub fn verifier_check_execution(
             warn!("The prover provided a valid input, but the last step or hash differs");
             warn!("Do not challenge (as the challenge is not waranteed to be successful)");
             warn!("Report this case to be evaluated by the security team");
-            if force_condition != ForceCondition::ValidInputWrongStepOrHash {
-                return Ok(None);
-            }
+            should_challenge = force_condition == ForceCondition::ValidInputWrongStepOrHash
+                || force_condition == ForceCondition::Allways;
+        } else {
+            should_challenge = force_condition == ForceCondition::ValidInputStepAndHash
+                || force_condition == ForceCondition::Allways;
         }
+    }
 
-        if force_condition != ForceCondition::ValidInput {
-            return Ok(None);
-        }
+    if !should_challenge {
+        return Ok(None);
     }
 
     warn!("There is a discrepancy between the prover and verifier execution");
@@ -234,8 +238,9 @@ pub enum ForceChallenge {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ForceCondition {
-    ValidInput,
+    ValidInputStepAndHash,
     ValidInputWrongStepOrHash,
+    Allways,
     No,
 }
 
@@ -474,7 +479,7 @@ mod tests {
             chk_verifier_path,
             result_1.1,
             &result_1.2,
-            ForceCondition::ValidInput,
+            ForceCondition::Allways,
             fail_config_verifier.clone(),
         )
         .unwrap();
