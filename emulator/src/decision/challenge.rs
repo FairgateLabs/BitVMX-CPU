@@ -88,7 +88,7 @@ pub fn verifier_check_execution(
     checkpoint_path: &str,
     claim_last_step: u64,
     claim_last_hash: &str,
-    force: bool,
+    force_condition: ForceCondition,
     fail_config: Option<FailConfiguration>,
 ) -> Result<Option<u64>, EmulatorError> {
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
@@ -98,16 +98,17 @@ pub fn verifier_check_execution(
     if result == ExecutionResult::Halt(0, last_step) {
         info!("The program executed successfully with the prover input");
         info!("Do not challenge.");
-        if !force {
-            return Ok(None);
-        }
-    }
 
-    if claim_last_step != last_step || claim_last_hash != last_hash {
-        warn!("The prover provided a valid input, but the last step or hash differs");
-        warn!("Do not challenge (as the challenge is not waranteed to be successful)");
-        warn!("Report this case to be evaluated by the security team");
-        if !force {
+        if claim_last_step != last_step || claim_last_hash != last_hash {
+            warn!("The prover provided a valid input, but the last step or hash differs");
+            warn!("Do not challenge (as the challenge is not waranteed to be successful)");
+            warn!("Report this case to be evaluated by the security team");
+            if force_condition != ForceCondition::ValidInputWrongStepOrHash {
+                return Ok(None);
+            }
+        }
+
+        if force_condition != ForceCondition::ValidInput {
             return Ok(None);
         }
     }
@@ -228,6 +229,13 @@ pub enum ForceChallenge {
     EntryPoint,
     ProgramCounter,
     InputData,
+    No,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ForceCondition {
+    ValidInput,
+    ValidInputWrongStepOrHash,
     No,
 }
 
@@ -466,7 +474,7 @@ mod tests {
             chk_verifier_path,
             result_1.1,
             &result_1.2,
-            true,
+            ForceCondition::ValidInput,
             fail_config_verifier.clone(),
         )
         .unwrap();
