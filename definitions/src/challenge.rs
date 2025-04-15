@@ -1,6 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 use crate::trace::{TraceRead, TraceReadPC, TraceStep};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ChallengeType {
     TraceHash(String, TraceStep, String), // PROVER_PREV_HASH, PROVER_TRACE_STEP, PROVER_STEP_HASH
     TraceHashZero(TraceStep, String),     // PROVER_TRACE_STEP, PROVER_STEP_HASH
