@@ -451,6 +451,7 @@ mod tests {
         fail_config_prover: Option<FailConfiguration>,
         fail_config_verifier: Option<FailConfiguration>,
         challenge_ok: bool,
+        force_condition: ForceCondition,
         force: ForceChallenge,
     ) {
         let pdf = "../docker-riscv32/riscv32/build/hello-world.yaml";
@@ -479,7 +480,7 @@ mod tests {
             chk_verifier_path,
             result_1.1,
             &result_1.2,
-            ForceCondition::Allways,
+            force_condition,
             fail_config_verifier.clone(),
         )
         .unwrap();
@@ -547,9 +548,27 @@ mod tests {
     fn test_challenge_execution() {
         init_trace();
         //bad input: exepct execute step to fail
-        test_challenge_aux("1", 0, true, None, None, false, ForceChallenge::No);
+        test_challenge_aux(
+            "1",
+            0,
+            true,
+            None,
+            None,
+            false,
+            ForceCondition::No,
+            ForceChallenge::No,
+        );
         //good input: expect execute step to succeed
-        test_challenge_aux("2", 17, false, None, None, false, ForceChallenge::No);
+        test_challenge_aux(
+            "2",
+            17,
+            false,
+            None,
+            None,
+            false,
+            ForceCondition::ValidInputStepAndHash,
+            ForceChallenge::No,
+        );
     }
 
     #[test]
@@ -564,6 +583,7 @@ mod tests {
             fail_hash.clone(),
             None,
             true,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::No,
         );
         test_challenge_aux(
@@ -573,6 +593,7 @@ mod tests {
             None,
             fail_hash,
             false,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::TraceHash,
         );
     }
@@ -589,6 +610,7 @@ mod tests {
             fail_hash.clone(),
             None,
             true,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::No,
         );
         test_challenge_aux(
@@ -598,6 +620,7 @@ mod tests {
             None,
             fail_hash,
             false,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::TraceHashZero,
         );
     }
@@ -613,6 +636,7 @@ mod tests {
             fail_entrypoint.clone(),
             None,
             true,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::No,
         );
         test_challenge_aux(
@@ -622,6 +646,7 @@ mod tests {
             None,
             fail_entrypoint,
             false,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::EntryPoint,
         );
     }
@@ -637,6 +662,7 @@ mod tests {
             fail_pc.clone(),
             None,
             true,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::No,
         );
         test_challenge_aux(
@@ -646,6 +672,7 @@ mod tests {
             None,
             fail_pc,
             false,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::ProgramCounter,
         );
     }
@@ -675,6 +702,7 @@ mod tests {
             fail_read_1.clone(),
             None,
             true,
+            ForceCondition::No,
             ForceChallenge::No,
         );
         test_challenge_aux(
@@ -684,6 +712,7 @@ mod tests {
             None,
             fail_read_1,
             false,
+            ForceCondition::ValidInputStepAndHash,
             ForceChallenge::InputData,
         );
     }
