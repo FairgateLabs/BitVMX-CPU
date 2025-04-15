@@ -105,9 +105,7 @@ pub fn entry_point_challenge(stack: &mut StackTracker, entry_point: u32) {
     let _provided_micro = stack.define(2, "provided_micro");
     let provided_step = stack.define(16, "provided_step");
 
-    let step_high = stack.number_u32(0);
-    stack.number_u32(1);
-    stack.join(step_high);
+    let step_high = stack.number_u64(1);
     stack.equals(provided_step, true, step_high, true);
 
     let real = stack.number_u32(entry_point);
@@ -330,19 +328,18 @@ mod tests {
 
     fn test_entry_point_challenge_aux(
         wots_prover_pc: u32,
-        wots_prover_micro: u32,
-        wots_step_low: u32,
+        wots_prover_micro: u8,
+        wots_step: u64,
         entry_point_real: u32,
     ) -> bool {
         let mut stack = StackTracker::new();
 
         //define entrypoint in the stack
         stack.number_u32(wots_prover_pc);
-        stack.byte(wots_prover_micro as u8);
+        stack.byte(wots_prover_micro);
 
         //define step in the stack
-        stack.number_u32(0);
-        stack.number_u32(wots_step_low);
+        stack.number_u64(wots_step);
 
         entry_point_challenge(&mut stack, entry_point_real);
         stack.op_true();
