@@ -1,6 +1,12 @@
 use bitcoin_script_riscv::riscv::instruction_mapping::create_verification_script_mapping;
+use bitvmx_cpu_definitions::trace::TraceRWStep;
+use clap::{Parser, Subcommand};
 use emulator::{
     constants::REGISTERS_BASE_ADDRESS,
+    decision::challenge::{
+        prover_execute, prover_final_trace, prover_get_hashes_for_round, verifier_check_execution,
+        verifier_choose_challenge, verifier_choose_segment, ForceChallenge,
+    },
     executor::{
         fetcher::execute_program,
         utils::{FailConfiguration, FailReads},
@@ -9,8 +15,8 @@ use emulator::{
     EmulatorError,
 };
 use hex::FromHex;
-
-use clap::{Parser, Subcommand};
+use serde_json::json;
+use std::io::Write;
 use tracing::{error, info, Level};
 
 /// BitVMX-CPU Emulator and Verifier
@@ -23,6 +29,166 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    ProverExcecute {
+        /// Yaml file to load
+        #[arg(short, long, value_name = "FILE")]
+        pdf: String,
+
+        /// Input
+        #[arg(short, long, value_name = "INPUT")]
+        input: Vec<u8>,
+
+        /// Checkpoint path
+        #[arg(short, long, value_name = "CHECKPOINT_PROVER_PATH")]
+        checkpoint_prover_path: String,
+
+        /// Force
+        #[arg(short, long, default_value = "true")]
+        force: bool,
+
+        /// Fail Configuration
+        #[arg(short, long, value_name = "FailConfigProver", default_value = "None")]
+        fail_config_prover: Option<FailConfiguration>,
+
+        /// Command File to write the result
+        #[arg(short, long, value_name = "COMMAND_PATH")]
+        command_file: String,
+    },
+
+    VerifierCheckExecution {
+        /// Yaml file to load
+        #[arg(short, long, value_name = "FILE")]
+        pdf: String,
+
+        /// Input
+        #[arg(short, long, value_name = "INPUT")]
+        input: Vec<u8>,
+
+        /// Checkpoint path
+        #[arg(short, long, value_name = "CHECKPOINT_VERIFIER_PATH")]
+        checkpoint_verifier_path: String,
+
+        /// Claim last step
+        #[arg(short, long, value_name = "CLAIM_LAST_STEP")]
+        claim_last_step: u64,
+
+        /// Claim last hash
+        #[arg(short, long, value_name = "CLAIM_LAST_HASH")]
+        claim_last_hash: String,
+
+        /// Force
+        #[arg(short, long, default_value = "true")]
+        force: bool,
+
+        /// Fail Configuration
+        #[arg(short, long, value_name = "FailConfigVerifier", default_value = "None")]
+        fail_config_verifier: Option<FailConfiguration>,
+
+        /// Command File to write the result
+        #[arg(short, long, value_name = "COMMAND_PATH")]
+        command_file: String,
+    },
+
+    ProverGetHashesForRound {
+        /// Yaml file to load
+        #[arg(short, long, value_name = "FILE")]
+        pdf: String,
+
+        /// Checkpoint prover path
+        #[arg(short, long, value_name = "CHECKPOINT_PROVER_PATH")]
+        checkpoint_prover_path: String,
+
+        /// Round number
+        #[arg(short, long, value_name = "ROUND_NUMBER")]
+        round_number: u8,
+
+        /// Verifier decision
+        #[arg(short, long, value_name = "VERIFIER_DECISION")]
+        v_decision: u32,
+
+        /// Fail Configuration
+        #[arg(short, long, value_name = "FailConfigProver", default_value = "None")]
+        fail_config_prover: Option<FailConfiguration>,
+
+        /// Command File to write the result
+        #[arg(short, long, value_name = "COMMAND_PATH")]
+        command_file: String,
+    },
+
+    VerifierChooseSegment {
+        /// Yaml file to load
+        #[arg(short, long, value_name = "FILE")]
+        pdf: String,
+
+        /// Checkpoint verifier path
+        #[arg(short, long, value_name = "CHECKPOINT_VERIFIER_PATH")]
+        checkpoint_verifier_path: String,
+
+        /// Round number
+        #[arg(short, long, value_name = "ROUND_NUMBER")]
+        round_number: u8,
+
+        /// Hashes
+        #[arg(short, long, value_name = "HASHES")]
+        hashes: Vec<String>,
+
+        /// Fail Configuration
+        #[arg(short, long, value_name = "FailConfigVerifier", default_value = "None")]
+        fail_config_verifier: Option<FailConfiguration>,
+
+        /// Command File to write the result
+        #[arg(short, long, value_name = "COMMAND_PATH")]
+        command_file: String,
+    },
+
+    ProverFinalTrace {
+        /// Yaml file to load
+        #[arg(short, long, value_name = "FILE")]
+        pdf: String,
+
+        /// Checkpoint prover path
+        #[arg(short, long, value_name = "CHECKPOINT_PROVER_PATH")]
+        checkpoint_prover_path: String,
+
+        /// Verifier decision
+        #[arg(short, long, value_name = "VERIFIER_DECISION")]
+        v_decision: u32,
+
+        /// Fail Configuration
+        #[arg(short, long, value_name = "FailConfigProver", default_value = "None")]
+        fail_config_prover: Option<FailConfiguration>,
+
+        /// Command File to write the result
+        #[arg(short, long, value_name = "COMMAND_PATH")]
+        command_file: String,
+    },
+
+    VerifierChooseChallenge {
+        /// Yaml file to load
+        #[arg(short, long, value_name = "FILE")]
+        pdf: String,
+
+        /// Checkpoint verifier path
+        #[arg(short, long, value_name = "CHECKPOINT_VERIFIER_PATH")]
+        checkpoint_verifier_path: String,
+
+        /// Prover final trace
+        #[arg(short, long, value_name = "PROVER_FINAL_TRACE")]
+        prover_final_trace: TraceRWStep,
+
+        /// Force
+        #[arg(short, long, default_value = "no")]
+        force: ForceChallenge,
+
+        /// Fail Configuration
+        #[arg(short, long, value_name = "FailConfigVerifier", default_value = "None")]
+        fail_config_verifier: Option<FailConfiguration>,
+
+        /// Command File to write the result
+        #[arg(short, long, value_name = "COMMAND_PATH")]
+        command_file: String,
+    },
+
     ///Generate the instruction mapping
     InstructionMapping,
 
@@ -123,6 +289,10 @@ enum Commands {
         /// Fail while reading the pc at the given step
         #[arg(long)]
         fail_pc: Option<u64>,
+
+        /// Command File to write the result
+        #[arg(short, long, value_name = "COMMAND_PATH")]
+        command_file: String,
     },
 }
 
@@ -173,6 +343,7 @@ fn main() -> Result<(), EmulatorError> {
             fail_read_2: fail_read_2_args,
             dump_mem,
             fail_pc,
+            command_file,
         }) => {
             if elf.is_none() && step.is_none() {
                 error!("To execute an elf file or a checkpoint step is required");
@@ -233,27 +404,203 @@ fn main() -> Result<(), EmulatorError> {
                 fail_reads,
                 fail_pc: *fail_pc,
             };
-            info!(
-                "{}",
-                execute_program(
-                    &mut program,
-                    input,
-                    &input_section.clone().unwrap_or(".input".to_string()),
-                    *input_as_little,
-                    &checkpoint_path,
-                    *limit,
-                    *trace,
-                    *verify,
-                    !*no_mapping,
-                    *stdout,
-                    debugvar,
-                    *no_hash,
-                    numbers,
-                    *dump_mem,
-                    fail_config,
-                )
-                .0
-            );
+            let result = execute_program(
+                &mut program,
+                input,
+                &input_section.clone().unwrap_or(".input".to_string()),
+                *input_as_little,
+                &checkpoint_path,
+                *limit,
+                *trace,
+                *verify,
+                !*no_mapping,
+                *stdout,
+                debugvar,
+                *no_hash,
+                numbers,
+                *dump_mem,
+                fail_config,
+            )
+            .0;
+            info!("Execution result: {:?}", result);
+            let mut file = create_or_open_file(command_file);
+            let json_result = json!({
+                    "type": "ExecuteResult",
+                    "data": {
+                        "result": result,
+                    }
+            });
+            file.write_all(json_result.to_string().as_bytes())
+                .expect("Failed to write JSON to file");
+        }
+        Some(Commands::ProverExcecute {
+            pdf,
+            input,
+            checkpoint_prover_path,
+            force,
+            fail_config_prover,
+            command_file,
+        }) => {
+            let mut file = create_or_open_file(command_file);
+
+            let result = prover_execute(
+                pdf,
+                input.clone(),
+                checkpoint_prover_path,
+                *force,
+                fail_config_prover.clone(),
+            )?;
+            info!("Prover excecute: {:?}", result);
+
+            let json_result = json!({
+                    "type": "ProverExecuteResult",
+                    "data": {
+                        "last_step": result.1,
+                        "last_hash": result.2,
+                    }
+            });
+            file.write_all(json_result.to_string().as_bytes())
+                .expect("Failed to write JSON to file");
+        }
+        Some(Commands::VerifierCheckExecution {
+            pdf,
+            input,
+            checkpoint_verifier_path,
+            claim_last_step,
+            claim_last_hash,
+            force,
+            fail_config_verifier,
+            command_file,
+        }) => {
+            let mut file = create_or_open_file(command_file);
+
+            let result = verifier_check_execution(
+                pdf,
+                input.clone(),
+                checkpoint_verifier_path,
+                *claim_last_step,
+                claim_last_hash,
+                *force,
+                fail_config_verifier.clone(),
+            )?;
+            info!("Verifier checks excecution: {:?}", result);
+
+            let json_result = json!({
+                    "type": "VerifierCheckExecutionResult",
+                    "data": {}
+            });
+            file.write_all(json_result.to_string().as_bytes())
+                .expect("Failed to write JSON to file");
+        }
+        Some(Commands::ProverGetHashesForRound {
+            pdf,
+            checkpoint_prover_path,
+            round_number,
+            v_decision,
+            fail_config_prover,
+            command_file,
+        }) => {
+            let mut file = create_or_open_file(command_file);
+
+            let result = prover_get_hashes_for_round(
+                pdf,
+                checkpoint_prover_path,
+                *round_number,
+                *v_decision,
+                fail_config_prover.clone(),
+            )?;
+            info!("Prover get hashes for round: {:?}", result);
+
+            let json_result = json!({
+                    "type": "ProverGetHashesForRoundResult",
+                    "data": {
+                        "hashes": result,
+                    }
+            });
+            file.write_all(json_result.to_string().as_bytes())
+                .expect("Failed to write JSON to file");
+        }
+        Some(Commands::VerifierChooseSegment {
+            pdf,
+            checkpoint_verifier_path,
+            round_number,
+            hashes,
+            fail_config_verifier,
+            command_file,
+        }) => {
+            let mut file = create_or_open_file(command_file);
+
+            let result = verifier_choose_segment(
+                pdf,
+                checkpoint_verifier_path,
+                *round_number,
+                hashes.clone(),
+                fail_config_verifier.clone(),
+            )?;
+            info!("Verifier choose segment: {:?}", result);
+
+            let json_result = json!({
+                    "type": "VerifierChooseSegmentResult",
+                    "data": {
+                        "v_decision": result,
+                    }
+            });
+            file.write_all(json_result.to_string().as_bytes())
+                .expect("Failed to write JSON to file");
+        }
+        Some(Commands::ProverFinalTrace {
+            pdf,
+            checkpoint_prover_path,
+            v_decision,
+            fail_config_prover,
+            command_file,
+        }) => {
+            let mut file = create_or_open_file(command_file);
+
+            let result: TraceRWStep = prover_final_trace(
+                pdf,
+                checkpoint_prover_path,
+                *v_decision,
+                fail_config_prover.clone(),
+            )?;
+            info!("Prover final trace: {:?}", result);
+
+            let json_result = json!({
+                    "type": "ProverFinalTraceResult",
+                    "data": {
+                        "final_trace": result,
+                    }
+            });
+            file.write_all(json_result.to_string().as_bytes())
+                .expect("Failed to write JSON to file");
+        }
+        Some(Commands::VerifierChooseChallenge {
+            pdf,
+            checkpoint_verifier_path,
+            prover_final_trace,
+            force,
+            fail_config_verifier,
+            command_file,
+        }) => {
+            let mut file = create_or_open_file(command_file);
+
+            let result = verifier_choose_challenge(
+                pdf,
+                checkpoint_verifier_path,
+                prover_final_trace.clone(),
+                force.clone(),
+                fail_config_verifier.clone(),
+            )?;
+            info!("Verifier choose challenge: {:?}", result);
+
+            let json_result = json!({
+                    "type": "VerifierChooseChallengeResult",
+                    "data": {
+                        "challenge": result,
+                    }
+            });
+            file.write_all(json_result.to_string().as_bytes())
+                .expect("Failed to write JSON to file");
         }
         None => {
             error!("No command specified");
@@ -261,4 +608,13 @@ fn main() -> Result<(), EmulatorError> {
     };
 
     Ok(())
+}
+
+fn create_or_open_file(file_path: &str) -> std::fs::File {
+    std::fs::OpenOptions::new()
+        .create(true) // create if it doesn't exist
+        .write(true) // enable write
+        .truncate(true) // clear existing content
+        .open(file_path)
+        .expect("Failed to open or create file")
 }

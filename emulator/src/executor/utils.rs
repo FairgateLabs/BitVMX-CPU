@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use bitvmx_cpu_definitions::trace::{TraceRWStep, TraceRead};
 use num_traits;
 
@@ -156,6 +158,20 @@ impl FailConfiguration {
             fail_pc: Some(fail_pc),
             ..Default::default()
         }
+    }
+}
+
+impl FromStr for FailConfiguration {
+    type Err = String;
+
+    fn from_str(_s: &str) -> Result<Self, Self::Err> {
+        // TODO: implement
+        Ok(FailConfiguration {
+            fail_hash: None,
+            fail_execute: None,
+            fail_reads: None,
+            fail_pc: None,
+        })
     }
 }
 

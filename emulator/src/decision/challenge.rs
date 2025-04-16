@@ -5,6 +5,7 @@ use bitvmx_cpu_definitions::{
     constants::LAST_STEP_INIT,
     trace::{generate_initial_step_hash, hashvec_to_string, validate_step_hash, TraceRWStep},
 };
+use clap::ValueEnum;
 use tracing::{error, info, warn};
 
 use crate::{
@@ -221,7 +222,7 @@ pub fn get_hashes(
     (claim_hash, claim_next_hash)
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, ValueEnum)]
 pub enum ForceChallenge {
     TraceHash,
     TraceHashZero,

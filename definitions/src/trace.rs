@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use crate::memory::MemoryWitness;
 use blake3::Hasher;
 use serde::{Deserialize, Serialize};
@@ -175,6 +177,14 @@ impl TraceRWStep {
             self.witness.unwrap_or(0),
             self.mem_witness.byte()
         )
+    }
+}
+
+impl FromStr for TraceRWStep {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        serde_json::from_str(s).map_err(|e| format!("Failed to parse TraceRWStep: {}", e))
     }
 }
 
