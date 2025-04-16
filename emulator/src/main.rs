@@ -29,14 +29,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    ProverExcecute {
+    ProverExecute {
         /// Yaml file to load
         #[arg(short, long, value_name = "FILE")]
         pdf: String,
 
         /// Input
-        #[arg(short, long, value_name = "INPUT")]
-        input: Vec<u8>,
+        #[arg(short, long, value_name = "INPUT (hex)")]
+        input: String,
 
         /// Checkpoint path
         #[arg(short, long, value_name = "CHECKPOINT_PROVER_PATH")]
@@ -61,8 +61,8 @@ enum Commands {
         pdf: String,
 
         /// Input
-        #[arg(short, long, value_name = "INPUT")]
-        input: Vec<u8>,
+        #[arg(short, long, value_name = "INPUT (hex)")]
+        input: String,
 
         /// Checkpoint path
         #[arg(short, long, value_name = "CHECKPOINT_VERIFIER_PATH")]
@@ -433,7 +433,7 @@ fn main() -> Result<(), EmulatorError> {
             file.write_all(json_result.to_string().as_bytes())
                 .expect("Failed to write JSON to file");
         }
-        Some(Commands::ProverExcecute {
+        Some(Commands::ProverExecute {
             pdf,
             input,
             checkpoint_prover_path,
@@ -443,14 +443,15 @@ fn main() -> Result<(), EmulatorError> {
         }) => {
             let mut file = create_or_open_file(command_file);
 
+            let input_bytes = hex::decode(input).expect("Invalid hex string");
             let result = prover_execute(
                 pdf,
-                input.clone(),
+                input_bytes.clone(),
                 checkpoint_prover_path,
                 *force,
                 fail_config_prover.clone(),
             )?;
-            info!("Prover excecute: {:?}", result);
+            info!("Prover execute: {:?}", result);
 
             let json_result = json!({
                     "type": "ProverExecuteResult",
@@ -474,9 +475,10 @@ fn main() -> Result<(), EmulatorError> {
         }) => {
             let mut file = create_or_open_file(command_file);
 
+            let input_bytes = hex::decode(input).expect("Invalid hex string");
             let result = verifier_check_execution(
                 pdf,
-                input.clone(),
+                input_bytes.clone(),
                 checkpoint_verifier_path,
                 *claim_last_step,
                 claim_last_hash,
