@@ -237,7 +237,7 @@ pub enum ForceChallenge {
     No,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, ValueEnum)]
 pub enum ForceCondition {
     ValidInputStepAndHash,
     ValidInputWrongStepOrHash,

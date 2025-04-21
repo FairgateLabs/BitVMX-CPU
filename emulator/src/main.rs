@@ -5,7 +5,7 @@ use emulator::{
     constants::REGISTERS_BASE_ADDRESS,
     decision::challenge::{
         prover_execute, prover_final_trace, prover_get_hashes_for_round, verifier_check_execution,
-        verifier_choose_challenge, verifier_choose_segment, ForceChallenge,
+        verifier_choose_challenge, verifier_choose_segment, ForceChallenge, ForceCondition,
     },
     executor::{
         fetcher::execute_program,
@@ -77,8 +77,8 @@ enum Commands {
         claim_last_hash: String,
 
         /// Force
-        #[arg(short, long, default_value = "true")]
-        force: bool,
+        #[arg(short, long, default_value = "no")]
+        force: ForceCondition,
 
         /// Fail Configuration
         #[arg(short, long, value_name = "FailConfigVerifier", default_value = "None")]
@@ -482,7 +482,7 @@ fn main() -> Result<(), EmulatorError> {
                 checkpoint_verifier_path,
                 *claim_last_step,
                 claim_last_hash,
-                *force,
+                force.clone(),
                 fail_config_verifier.clone(),
             )?;
             info!("Verifier checks excecution: {:?}", result);
