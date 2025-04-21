@@ -89,28 +89,33 @@ pub fn verifier_check_execution(
     checkpoint_path: &str,
     claim_last_step: u64,
     claim_last_hash: &str,
-    force: bool,
+    force_condition: ForceCondition,
     fail_config: Option<FailConfiguration>,
 ) -> Result<Option<u64>, EmulatorError> {
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
     let (result, last_step, last_hash) =
         program_def.get_execution_result(input.clone(), checkpoint_path, fail_config)?;
 
+    let mut should_challenge = true;
+
     if result == ExecutionResult::Halt(0, last_step) {
         info!("The program executed successfully with the prover input");
         info!("Do not challenge.");
-        if !force {
-            return Ok(None);
+
+        if claim_last_step != last_step || claim_last_hash != last_hash {
+            warn!("The prover provided a valid input, but the last step or hash differs");
+            warn!("Do not challenge (as the challenge is not waranteed to be successful)");
+            warn!("Report this case to be evaluated by the security team");
+            should_challenge = force_condition == ForceCondition::ValidInputWrongStepOrHash
+                || force_condition == ForceCondition::Allways;
+        } else {
+            should_challenge = force_condition == ForceCondition::ValidInputStepAndHash
+                || force_condition == ForceCondition::Allways;
         }
     }
 
-    if claim_last_step != last_step || claim_last_hash != last_hash {
-        warn!("The prover provided a valid input, but the last step or hash differs");
-        warn!("Do not challenge (as the challenge is not waranteed to be successful)");
-        warn!("Report this case to be evaluated by the security team");
-        if !force {
-            return Ok(None);
-        }
+    if !should_challenge {
+        return Ok(None);
     }
 
     warn!("There is a discrepancy between the prover and verifier execution");
@@ -229,6 +234,14 @@ pub enum ForceChallenge {
     EntryPoint,
     ProgramCounter,
     InputData,
+    No,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ForceCondition {
+    ValidInputStepAndHash,
+    ValidInputWrongStepOrHash,
+    Allways,
     No,
 }
 
@@ -439,6 +452,7 @@ mod tests {
         fail_config_prover: Option<FailConfiguration>,
         fail_config_verifier: Option<FailConfiguration>,
         challenge_ok: bool,
+        force_condition: ForceCondition,
         force: ForceChallenge,
     ) {
         let pdf = "../docker-riscv32/riscv32/build/hello-world.yaml";
@@ -467,7 +481,7 @@ mod tests {
             chk_verifier_path,
             result_1.1,
             &result_1.2,
-            true,
+            force_condition,
             fail_config_verifier.clone(),
         )
         .unwrap();
@@ -535,9 +549,27 @@ mod tests {
     fn test_challenge_execution() {
         init_trace();
         //bad input: exepct execute step to fail
-        test_challenge_aux("1", 0, true, None, None, false, ForceChallenge::No);
+        test_challenge_aux(
+            "1",
+            0,
+            true,
+            None,
+            None,
+            false,
+            ForceCondition::No,
+            ForceChallenge::No,
+        );
         //good input: expect execute step to succeed
-        test_challenge_aux("2", 17, false, None, None, false, ForceChallenge::No);
+        test_challenge_aux(
+            "2",
+            17,
+            false,
+            None,
+            None,
+            false,
+            ForceCondition::ValidInputStepAndHash,
+            ForceChallenge::No,
+        );
     }
 
     #[test]
@@ -552,6 +584,7 @@ mod tests {
             fail_hash.clone(),
             None,
             true,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::No,
         );
         test_challenge_aux(
@@ -561,6 +594,7 @@ mod tests {
             None,
             fail_hash,
             false,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::TraceHash,
         );
     }
@@ -577,6 +611,7 @@ mod tests {
             fail_hash.clone(),
             None,
             true,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::No,
         );
         test_challenge_aux(
@@ -586,6 +621,7 @@ mod tests {
             None,
             fail_hash,
             false,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::TraceHashZero,
         );
     }
@@ -601,6 +637,7 @@ mod tests {
             fail_entrypoint.clone(),
             None,
             true,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::No,
         );
         test_challenge_aux(
@@ -610,6 +647,7 @@ mod tests {
             None,
             fail_entrypoint,
             false,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::EntryPoint,
         );
     }
@@ -625,6 +663,7 @@ mod tests {
             fail_pc.clone(),
             None,
             true,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::No,
         );
         test_challenge_aux(
@@ -634,6 +673,7 @@ mod tests {
             None,
             fail_pc,
             false,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::ProgramCounter,
         );
     }
@@ -663,6 +703,7 @@ mod tests {
             fail_read_1.clone(),
             None,
             true,
+            ForceCondition::No,
             ForceChallenge::No,
         );
         test_challenge_aux(
@@ -672,6 +713,7 @@ mod tests {
             None,
             fail_read_1,
             false,
+            ForceCondition::ValidInputStepAndHash,
             ForceChallenge::InputData,
         );
     }
