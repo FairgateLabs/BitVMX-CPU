@@ -6,6 +6,10 @@ use bitvmx_cpu_definitions::{
     trace::{generate_initial_step_hash, hashvec_to_string},
 };
 
+use crate::riscv::script_utils::is_equal_to;
+
+use super::script_utils::is_lower_than;
+
 // TODO: Value commited in WOTS_PROVER_LAST_STEP should not be greater than the MAX_STEP_CONSTANT_VALUE
 // the script should block this.
 
@@ -256,6 +260,38 @@ pub fn trace_hash_zero_challenge(stack: &mut StackTracker) {
     let result = blake3::blake3(stack, (40 + 8 + 8 + 8 + 2) / 2, 5);
     stack.from_altstack();
     stack.not_equal(result, true, hash, true);
+}
+
+pub fn address_in_sections_challenge(stack: &mut StackTracker, sections: Vec<(u32, u32)>) {
+    assert!(sections.len() > 0);
+    stack.clear_definitions();
+
+    let address = stack.define(8, "address");
+    
+    for section in &sections {
+        let section_start = stack.number_u32(section.0);
+        let add = stack.copy_var(address);
+
+        is_equal_to(stack, &section_start, &add);
+        is_lower_than(stack, section_start, add, true);
+        stack.op_boolor();
+        
+        // address <= section_end - 3 ≡ address + 1 < section_end - 3 ≡ address < section_end - 2
+        //                          ^ when we do a read on an address, we also read the 3 addresses after
+        let section_end = stack.number_u32(section.1 - 2);
+        let add = stack.copy_var(address);
+        
+        is_lower_than(stack, add, section_end, true);
+
+        stack.op_booland();
+    }
+
+    for _ in 0..sections.len() - 1 {
+        stack.op_boolor();
+    }
+
+    stack.op_verify();
+    stack.drop(address);
 }
 
 //TODO: memory section challenge
@@ -649,5 +685,36 @@ mod tests {
         let read_1 = TraceRead::new(0x0000_0005, 0x1234_0000, LAST_STEP_INIT);
         let read_2 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
         assert!(test_input_aux(&read_1, &read_2, 0x0000_0002, 0x1234_0000));
+    }
+
+    fn test_address_in_sections_aux(address: u32, sections: Vec<(u32, u32)>) -> bool {
+        let mut stack = StackTracker::new();
+
+        stack.number_u32(address);
+        address_in_sections_challenge(&mut stack, sections);
+        stack.op_true();
+        let end = stack.run();
+
+        end.success
+    }
+
+    #[test]
+    fn test_address_in_sections() {
+        let sections = vec![(0xf, 0xffff + 3), (0xfffff, 0xfffffff + 3)];
+
+        assert!(test_address_in_sections_aux(0xf, sections.clone()));
+        assert!(test_address_in_sections_aux(0xfff, sections.clone()));
+        assert!(test_address_in_sections_aux(0xffff, sections.clone()));
+        assert!(!test_address_in_sections_aux(0xffff + 1, sections.clone()));
+        assert!(!test_address_in_sections_aux(0xe, sections.clone()));
+
+        assert!(test_address_in_sections_aux(0xfffff, sections.clone()));
+        assert!(test_address_in_sections_aux(0xffffff, sections.clone()));
+        assert!(test_address_in_sections_aux(0xfffffff, sections.clone()));
+        assert!(!test_address_in_sections_aux(
+            0xfffffff + 1,
+            sections.clone()
+        ));
+        assert!(!test_address_in_sections_aux(0xffffe, sections.clone()));
     }
 }
