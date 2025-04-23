@@ -1,5 +1,8 @@
 use bitcoin_script_stack::stack::{StackTracker, StackVariable};
 
+use bitvmx_cpu_definitions::memory::MemoryAccessType;
+use bitvmx_cpu_definitions::memory::MemoryWitness;
+use bitvmx_cpu_definitions::trace::TraceRWStep;
 use riscv_decode::Instruction;
 use riscv_decode::Instruction::*;
 
@@ -13,7 +16,7 @@ use super::instructions_store::op_store;
 use super::operations;
 use super::operations::*;
 use super::script_utils::*;
-use super::trace::{TraceRead, TraceStep};
+use super::trace::{STraceRead, STraceStep};
 
 pub const R_TYPE_OPCODE: u8 = 0x33;
 
@@ -40,8 +43,17 @@ pub fn validate_register_address(
     }
 }
 
-pub fn op_nop(stack: &mut StackTracker, trace_read: &TraceRead) -> TraceStep {
-    //TODO: Need to assert opcode and zeros ?
+pub fn verify_memory_witness(
+    stack: &mut StackTracker,
+    mem_witness: StackVariable,
+    expected_witness: MemoryWitness,
+) {
+    let witness = stack.byte(expected_witness.byte());
+    stack.equals(mem_witness, true, witness, true);
+}
+
+pub fn op_nop(stack: &mut StackTracker, trace_read: &STraceRead) -> STraceStep {
+    verify_memory_witness(stack, trace_read.mem_witness, MemoryWitness::default());
 
     move_and_drop(stack, trace_read.opcode);
     move_and_drop(stack, trace_read.micro);
@@ -62,7 +74,7 @@ pub fn op_nop(stack: &mut StackTracker, trace_read: &TraceRead) -> TraceStep {
     stack.from_altstack();
 
     let micro = stack.number(0);
-    TraceStep::new(write_add, write_value, pc, micro)
+    STraceStep::new(write_add, write_value, pc, micro)
 }
 
 pub const REGISTER_A0: usize = 10;
@@ -70,9 +82,9 @@ pub const REGISTER_A7_ECALL_ARG: usize = 17;
 
 pub fn op_ecall(
     stack: &mut StackTracker,
-    trace_read: &TraceRead,
+    trace_read: &STraceRead,
     base_register_address: u32,
-) -> TraceStep {
+) -> STraceStep {
     //compare the instruction number with the halt constant
     let constant = stack.number_u32(93);
     is_equal_to(stack, &trace_read.read_1_value, &constant);
@@ -84,6 +96,13 @@ pub fn op_ecall(
 
     //any opcode other than halt (93) is treated as a nop
     op_nop(&mut stack_if_false, trace_read);
+
+    //verify the memory witness
+    verify_memory_witness(
+        &mut stack_halt,
+        trace_read.mem_witness,
+        MemoryWitness::registers(),
+    );
 
     //asserts opcode
     let ecall = stack_halt.number_u32(0x00000073);
@@ -127,7 +146,7 @@ pub fn op_ecall(
     let ret = stack.end_if(
         stack_halt,
         stack_if_false,
-        7,
+        8,
         vec![
             (8, "write_address".to_string()),
             (8, "write_value".to_string()),
@@ -137,15 +156,15 @@ pub fn op_ecall(
         0,
     );
 
-    TraceStep::new(ret[0], ret[1], ret[2], ret[3])
+    STraceStep::new(ret[0], ret[1], ret[2], ret[3])
 }
 
 pub fn op_conditional(
     instruction: &Instruction,
     stack: &mut StackTracker,
-    trace_read: &TraceRead,
+    trace_read: &STraceRead,
     base_register_address: u32,
-) -> TraceStep {
+) -> STraceStep {
     let (func3, unsigned, lower, inverse) = match instruction {
         Beq(_) => (0, false, false, false),
         Bne(_) => (1, false, false, true),
@@ -160,6 +179,8 @@ pub fn op_conditional(
     stack.set_breakpoint(&format!("op_{:?}", instruction));
 
     let (imm, rs1, rs2) = decode_b_type(stack, &tables, trace_read.opcode, func3);
+
+    verify_memory_witness(stack, trace_read.mem_witness, MemoryWitness::no_write());
 
     //micro is not used
     move_and_drop(stack, trace_read.micro);
@@ -223,7 +244,7 @@ pub fn op_conditional(
     let micro = stack.number(0);
     stack.rename(micro, "write_micro");
 
-    let trace = TraceStep::new(write_add, write_value, write_pc, micro);
+    let trace = STraceStep::new(write_add, write_value, write_pc, micro);
     trace.to_altstack(stack);
     tables.drop(stack);
     trace.from_altstack(stack);
@@ -236,7 +257,11 @@ pub fn store_if_not_zero(
     rd: StackVariable,
     program_counter: StackVariable,
     base_register_address: u32,
+    mem_witness: StackVariable,
+    expected_if_zero: MemoryWitness,
+    expected: MemoryWitness,
 ) -> (StackVariable, StackVariable) {
+    stack.move_var(mem_witness);
     stack.move_var(program_counter);
     stack.move_var(rd);
 
@@ -250,11 +275,13 @@ pub fn store_if_not_zero(
     let (mut stack_if_true, mut stack_if_false) = stack.open_if();
 
     // if dest is zero, write data and value are zero
+    verify_memory_witness(&mut stack_if_true, mem_witness, expected_if_zero);
     stack_if_true.drop(rd);
     stack_if_true.drop(program_counter);
     stack_if_true.number_u32(0);
     stack_if_true.number_u32(0);
 
+    verify_memory_witness(&mut stack_if_false, mem_witness, expected);
     let write_add = number_u32_partial(&mut stack_if_false, base_register_address, 6);
     stack_if_false.move_var(rd);
     stack_if_false.join(write_add);
@@ -266,7 +293,7 @@ pub fn store_if_not_zero(
     let ret = stack.end_if(
         stack_if_true,
         stack_if_false,
-        2,
+        3,
         vec![
             (8, "write_address".to_string()),
             (8, "write_value".to_string()),
@@ -279,9 +306,9 @@ pub fn store_if_not_zero(
 pub fn op_jal(
     instruction: &Instruction,
     stack: &mut StackTracker,
-    trace_read: &TraceRead,
+    trace_read: &STraceRead,
     base_register_address: u32,
-) -> TraceStep {
+) -> STraceStep {
     let tables = StackTables::new(stack, true, true, 5, 5, 0);
 
     stack.set_breakpoint(&format!("op_{:?}", instruction));
@@ -303,6 +330,13 @@ pub fn op_jal(
         rd,
         trace_read.program_counter,
         base_register_address,
+        trace_read.mem_witness,
+        MemoryWitness::no_write(),
+        MemoryWitness::new(
+            MemoryAccessType::Unused,
+            MemoryAccessType::Unused,
+            MemoryAccessType::Register,
+        ),
     );
 
     let write_pc = add_with_bit_extension(stack, &tables, pc, imm, StackVariable::null());
@@ -311,7 +345,7 @@ pub fn op_jal(
     let micro = stack.number(0);
     stack.rename(micro, "write_micro");
 
-    let trace = TraceStep::new(write_add, write_value, write_pc, micro);
+    let trace = STraceStep::new(write_add, write_value, write_pc, micro);
     trace.to_altstack(stack);
     tables.drop(stack);
     trace.from_altstack(stack);
@@ -321,9 +355,9 @@ pub fn op_jal(
 pub fn op_jalr(
     instruction: &Instruction,
     stack: &mut StackTracker,
-    trace_read: &TraceRead,
+    trace_read: &STraceRead,
     base_register_address: u32,
-) -> TraceStep {
+) -> STraceStep {
     let tables = StackTables::new(stack, true, true, 1, 5, 0);
 
     stack.set_breakpoint(&format!("op_{:?}", instruction));
@@ -348,6 +382,13 @@ pub fn op_jalr(
         rd,
         trace_read.program_counter,
         base_register_address,
+        trace_read.mem_witness,
+        MemoryWitness::new(
+            MemoryAccessType::Register,
+            MemoryAccessType::Unused,
+            MemoryAccessType::Unused,
+        ),
+        MemoryWitness::rur(),
     );
 
     let write_pc =
@@ -357,7 +398,7 @@ pub fn op_jalr(
     let micro = stack.number(0);
     stack.rename(micro, "write_micro");
 
-    let trace = TraceStep::new(write_add, write_value, write_pc, micro);
+    let trace = STraceStep::new(write_add, write_value, write_pc, micro);
     trace.to_altstack(stack);
     tables.drop(stack);
     trace.from_altstack(stack);
@@ -367,9 +408,9 @@ pub fn op_jalr(
 pub fn op_arithmetic_imm(
     instruction: &Instruction,
     stack: &mut StackTracker,
-    trace_read: &TraceRead,
+    trace_read: &STraceRead,
     base_register_address: u32,
-) -> TraceStep {
+) -> STraceStep {
     let (mask, logic, func3, func7) = match instruction {
         Xori(_) => (LOGIC_MASK_XOR, Some(LogicOperation::Xor), 4, None),
         Andi(_) => (LOGIC_MASK_AND, Some(LogicOperation::And), 7, None),
@@ -395,6 +436,8 @@ pub fn op_arithmetic_imm(
     move_and_drop(stack, trace_read.read_2_add);
     move_and_drop(stack, trace_read.read_2_value);
     move_and_drop(stack, trace_read.micro);
+
+    verify_memory_witness(stack, trace_read.mem_witness, MemoryWitness::rur());
 
     // assert rs1 + base_register_address == read_1 address
     validate_register_address(stack, trace_read.read_1_add, rs1, base_register_address);
@@ -441,7 +484,7 @@ pub fn op_arithmetic_imm(
     //   write_add = base_register_address + rd
     //   write_value = read_1_value + (bitextended) imm
     //   program_counter = read_program_counter + 4
-    let trace = TraceStep::new(write_add, write_value, write_pc, micro);
+    let trace = STraceStep::new(write_add, write_value, write_pc, micro);
     trace.to_altstack(stack);
     tables.drop(stack);
     trace.from_altstack(stack);
@@ -451,11 +494,11 @@ pub fn op_arithmetic_imm(
 pub fn op_arithmetic(
     instruction: &Instruction,
     stack: &mut StackTracker,
-    trace_read: &TraceRead,
-    trace_step: &TraceStep,
+    trace_read: &STraceRead,
+    trace_step: &STraceStep,
     witness: Option<StackVariable>,
     base_register_address: u32,
-) -> TraceStep {
+) -> STraceStep {
     let (mask, logic, func3, func7, extra_shift_for_mask) = match instruction {
         Mul(_) => (0x0, None, 0x0, 0x1, 0),
         Mulh(_) => (0x0, None, 0x1, 0x1, 0),
@@ -490,6 +533,8 @@ pub fn op_arithmetic(
         R_TYPE_OPCODE,
         func7,
     );
+
+    verify_memory_witness(stack, trace_read.mem_witness, MemoryWitness::registers());
 
     //these value are not used. can be droped or we can avoid to commit them
     move_and_drop(stack, trace_read.micro);
@@ -640,7 +685,7 @@ pub fn op_arithmetic(
     //   write_addr = base_register_address + rd * 4
     //   write_value = read_1_value + read_2_value
     //   program_counter = read_program_counter + 4
-    let trace = TraceStep::new(write_addr, write_value, write_pc, micro);
+    let trace = STraceStep::new(write_addr, write_value, write_pc, micro);
     trace.to_altstack(stack);
     tables.drop(stack);
     trace.from_altstack(stack);
@@ -651,9 +696,9 @@ pub fn op_arithmetic(
 pub fn op_upper(
     instruction: &Instruction,
     stack: &mut StackTracker,
-    trace_read: &TraceRead,
+    trace_read: &STraceRead,
     base_register_address: u32,
-) -> TraceStep {
+) -> STraceStep {
     let tables = StackTables::new(stack, true, true, 1, 4, 0);
 
     stack.set_breakpoint(&format!("op_{:?}", instruction));
@@ -665,12 +710,23 @@ pub fn op_upper(
     };
 
     let (imm, rd) = decode_u_type(stack, &tables, trace_read.opcode, expected_opcode);
+
     // These value are not used
     move_and_drop(stack, trace_read.read_2_add);
     move_and_drop(stack, trace_read.read_2_value);
     move_and_drop(stack, trace_read.micro);
     move_and_drop(stack, trace_read.read_1_add);
     move_and_drop(stack, trace_read.read_1_value);
+
+    verify_memory_witness(
+        stack,
+        trace_read.mem_witness,
+        MemoryWitness::new(
+            MemoryAccessType::Unused,
+            MemoryAccessType::Unused,
+            MemoryAccessType::Register,
+        ),
+    );
 
     let write_addr = number_u32_partial(stack, base_register_address, 6);
     stack.move_var(rd);
@@ -690,7 +746,7 @@ pub fn op_upper(
     let micro = stack.number(0);
     stack.rename(micro, "write_micro");
 
-    let trace = TraceStep::new(write_addr, write_value, write_pc, micro);
+    let trace = STraceStep::new(write_addr, write_value, write_pc, micro);
     trace.to_altstack(stack);
     tables.drop(stack);
     trace.from_altstack(stack);
@@ -717,13 +773,13 @@ impl ProgramSpec {
 
 pub fn execute_step(
     stack: &mut StackTracker,
-    trace_read: &TraceRead,
-    trace_step: &TraceStep,
+    trace_read: &STraceRead,
+    trace_step: &STraceStep,
     witness: Option<StackVariable>,
     instruction: &Instruction,
     micro: u8,
     program: ProgramSpec,
-) -> Result<TraceStep, ScriptValidation> {
+) -> Result<STraceStep, ScriptValidation> {
     match instruction {
         Fence(_) | Ebreak => Ok(op_nop(stack, &trace_read)),
 
@@ -736,13 +792,19 @@ pub fn execute_step(
             program.base_register_address,
         )),
 
-        Lh(_) | Lhu(_) | Lw(_) | Lbu(_) | Lb(_) => Ok(op_load(
-            instruction,
-            stack,
-            trace_read,
-            micro,
-            program.base_register_address,
-        )),
+        Lh(x) | Lhu(x) | Lw(x) | Lbu(x) | Lb(x) => {
+            if x.rd() == 0 {
+                Ok(op_nop(stack, trace_read))
+            } else {
+                Ok(op_load(
+                    instruction,
+                    stack,
+                    trace_read,
+                    micro,
+                    program.base_register_address,
+                ))
+            }
+        }
 
         Sb(_) | Sh(_) | Sw(_) => Ok(op_store(
             instruction,
@@ -824,86 +886,16 @@ pub fn execute_step(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn load_trace_read_in_stack(
-    stack: &mut StackTracker,
-    r1: u32,
-    v1: u32,
-    r2: u32,
-    v2: u32,
-    pc: u32,
-    micro: u8,
-    opcode: u32,
-) -> TraceRead {
-    let read_1_add = stack.number_u32(r1);
-    stack.rename(read_1_add, "read_1_add");
-    let read_1_value = stack.number_u32(v1);
-    stack.rename(read_1_value, "read_1_value");
-    let read_2_add = stack.number_u32(r2);
-    stack.rename(read_2_add, "read_2_add");
-    let read_2_value = stack.number_u32(v2);
-    stack.rename(read_2_value, "read_2_value");
-    let program_counter = stack.number_u32(pc);
-    stack.rename(program_counter, "read_program_counter");
-    let micro = stack.number(micro as u32);
-    stack.rename(micro, "read_micro");
-    let opcode = stack.number_u32(opcode);
-    stack.rename(opcode, "read_opcode");
-    TraceRead {
-        read_1_add,
-        read_1_value,
-        read_2_add,
-        read_2_value,
-        program_counter,
-        micro,
-        opcode,
-    }
-}
-
-pub fn load_trace_step_in_stack(
-    stack: &mut StackTracker,
-    w1: u32,
-    v1: u32,
-    pc: u32,
-    micro: u8,
-) -> TraceStep {
-    let write_1_add = stack.number_u32(w1);
-    stack.rename(write_1_add, "write_1_add");
-    let write_1_value = stack.number_u32(v1);
-    stack.rename(write_1_value, "write_1_value");
-    let program_counter = stack.number_u32(pc);
-    stack.rename(program_counter, "write_program_counter");
-    let micro = stack.number(micro as u32);
-    stack.rename(micro, "write_micro");
-    TraceStep {
-        write_1_add,
-        write_1_value,
-        program_counter,
-        micro,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
 pub fn verify(
     instruction_mapping: &Option<InstructionMapping>,
     program: ProgramSpec,
-    r1: u32,
-    v1: u32,
-    r2: u32,
-    v2: u32,
-    pc: u32,
-    micro: u8,
-    opcode: u32,
-    w1: u32,
-    wv1: u32,
-    wpc: u32,
-    wmicro: u8,
-    witness: Option<u32>,
-) -> Result<bool, ScriptValidation> {
+    trace: &TraceRWStep,
+) -> Result<(), ScriptValidation> {
     let mut stack = StackTracker::new();
-    let trace_step = load_trace_step_in_stack(&mut stack, w1, wv1, wpc, wmicro);
+    let trace_step = STraceStep::from(&mut stack, &trace.trace_step);
     let mut consumes = 11;
 
-    let witness = match witness {
+    let witness = match trace.witness {
         Some(w) => {
             let witness = stack.number_u32(w);
             stack.rename(witness, "witness");
@@ -913,7 +905,9 @@ pub fn verify(
         None => None,
     };
 
-    let trace_read = load_trace_read_in_stack(&mut stack, r1, v1, r2, v2, pc, micro, opcode);
+    let trace_read = STraceRead::from(&mut stack, trace);
+    let opcode = trace.read_pc.opcode;
+    let micro = trace.read_pc.pc.get_micro();
 
     if let Some(mapping) = instruction_mapping {
         let instruction = riscv_decode::decode(opcode).unwrap();
@@ -928,16 +922,17 @@ pub fn verify(
 
     stack.op_true();
 
-    if !stack.run().success {
-        panic!("Verification failed");
+    let result = stack.run();
+    match result.success {
+        true => Ok(()),
+        false => Err(ScriptValidation::ValidationFail(result.error_msg)),
     }
-    Ok(true)
 }
 
 pub fn verify_execution(
     stack: &mut StackTracker,
-    trace_step: TraceStep,
-    trace_read: TraceRead,
+    trace_step: STraceStep,
+    trace_read: STraceRead,
     witness: Option<StackVariable>,
     opcode: u32,
     micro: u8,
@@ -960,8 +955,8 @@ pub fn verify_execution(
 
 pub fn compare_trace_step(
     stack: &mut StackTracker,
-    trace_step_commit: &TraceStep,
-    trace_step_result: &TraceStep,
+    trace_step_commit: &STraceStep,
+    trace_step_result: &STraceStep,
 ) {
     stack.set_breakpoint("verify execution");
 
@@ -1005,11 +1000,14 @@ mod tests {
         let opcode = 0x06f5C0e3; //beq
         let btype = BType(opcode);
         let instruction = Blt(btype);
+        let x = btype.imm() as i32;
 
-        //let program = ProgramSpec::new(0xA000_0000);
-        //let trace_step = load_trace_step_in_stack(&mut stack, 0xA000_0008, 0xDFFF_FFA0, 0x8000_00c4, 0);
-        let mut trace_read = load_trace_read_in_stack(
+        let pc = 0x8000_0000 as u32;
+        let next_pc = pc.wrapping_add(x as u32);
+        let trace_step = STraceStep::load(&mut stack, 0, 0, next_pc as u32, 0);
+        let mut trace_read = STraceRead::load(
             &mut stack,
+            MemoryWitness::no_write().byte(),
             0xA000_002c,
             0x0000_0001,
             0xA000_003c,
@@ -1018,12 +1016,18 @@ mod tests {
             0,
             opcode,
         );
-        op_conditional(
+        let ret = op_conditional(
             &instruction,
             &mut stack,
             &mut trace_read,
             BASE_REGISTER_ADDRESS,
         );
+        stack.join_count(ret.write_1_add, 3);
+        stack.join_count(trace_step.write_1_add, 3);
+        stack.equals(trace_step.write_1_add, true, ret.write_1_add, true);
+        stack.op_true();
+
+        assert!(stack.run().success);
     }
 
     #[test]
@@ -1072,10 +1076,10 @@ mod tests {
         let mut stack = StackTracker::new();
         let opcode = 0xfa010113;
         let program = ProgramSpec::new(0xA000_0000);
-        let trace_step =
-            load_trace_step_in_stack(&mut stack, 0xA000_0008, 0xDFFF_FFA0, 0x8000_00c4, 0);
-        let trace_read = load_trace_read_in_stack(
+        let trace_step = STraceStep::load(&mut stack, 0xA000_0008, 0xDFFF_FFA0, 0x8000_00c4, 0);
+        let trace_read = STraceRead::load(
             &mut stack,
+            MemoryWitness::rur().byte(),
             0xA000_0008,
             0xE000_0000,
             0,
@@ -1099,10 +1103,10 @@ mod tests {
         let mut stack = StackTracker::new();
 
         // reg_addr = BASE_REGISTER_ADDRESS + reg_num * 4;
-        let trace_step =
-            load_trace_step_in_stack(&mut stack, write_address, 0x0000_0007, 0x8000_00c4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(
+        let trace_step = STraceStep::load(&mut stack, write_address, 0x0000_0007, 0x8000_00c4, 0); // w, v, pc, micro
+        let trace_read = STraceRead::load(
             &mut stack,
+            MemoryWitness::registers().byte(),
             0xA000_0024,
             0x0000_0004,
             0xA000_0028,
@@ -1135,8 +1139,9 @@ mod tests {
 
         let mut stack = StackTracker::new();
 
-        let trace_read = load_trace_read_in_stack(
+        let trace_read = STraceRead::load(
             &mut stack,
+            MemoryWitness::registers().byte(),
             reg_address(rtype.rs1()),
             0x0000_1010,
             reg_address(rtype.rs2()),
@@ -1145,7 +1150,7 @@ mod tests {
             0,
             opcode, // pc, micro, opcode
         );
-        let trace_step = load_trace_step_in_stack(
+        let trace_step = STraceStep::load(
             &mut stack,
             reg_address(rtype.rd()),
             0x0000_0F0D,
@@ -1178,9 +1183,10 @@ mod tests {
         let mut stack = StackTracker::new();
 
         // reg_addr = BASE_REGISTER_ADDRESS + reg_num * 4;
-        let trace_step = load_trace_step_in_stack(&mut stack, 0xA000_002C, 0x1, 0x8000_00C4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(
+        let trace_step = STraceStep::load(&mut stack, 0xA000_002C, 0x1, 0x8000_00C4, 0); // w, v, pc, micro
+        let trace_read = STraceRead::load(
             &mut stack,
+            MemoryWitness::registers().byte(),
             0xA000_0024,
             0x3,
             0xA000_0028,
@@ -1201,9 +1207,10 @@ mod tests {
         let mut stack = StackTracker::new();
 
         // reg_addr = BASE_REGISTER_ADDRESS + reg_num * 4;
-        let trace_step = load_trace_step_in_stack(&mut stack, 0xA000_002C, 0x0, 0x8000_00C4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(
+        let trace_step = STraceStep::load(&mut stack, 0xA000_002C, 0x0, 0x8000_00C4, 0); // w, v, pc, micro
+        let trace_read = STraceRead::load(
             &mut stack,
+            MemoryWitness::registers().byte(),
             0xA000_0024,
             0x5,
             0xA000_0028,
@@ -1238,9 +1245,10 @@ mod tests {
         let mut stack = StackTracker::new();
 
         // reg_addr = BASE_REGISTER_ADDRESS + reg_num * 4;
-        let trace_step = load_trace_step_in_stack(&mut stack, 0xA000_002C, 0x1, 0x8000_00C4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(
+        let trace_step = STraceStep::load(&mut stack, 0xA000_002C, 0x1, 0x8000_00C4, 0); // w, v, pc, micro
+        let trace_read = STraceRead::load(
             &mut stack,
+            MemoryWitness::registers().byte(),
             0xA000_0024,
             0x3,
             0xA000_0028,
@@ -1261,9 +1269,10 @@ mod tests {
         let mut stack = StackTracker::new();
 
         // reg_addr = BASE_REGISTER_ADDRESS + reg_num * 4;
-        let trace_step = load_trace_step_in_stack(&mut stack, 0xA000_002C, 0x0, 0x8000_00C4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(
+        let trace_step = STraceStep::load(&mut stack, 0xA000_002C, 0x0, 0x8000_00C4, 0); // w, v, pc, micro
+        let trace_read = STraceRead::load(
             &mut stack,
+            MemoryWitness::registers().byte(),
             0xA000_0024,
             0x5,
             0xA000_0028,
@@ -1306,10 +1315,10 @@ mod tests {
         assert_eq!(read_value_2, 0x9ABCDEF0);
         assert_eq!(write_value, 0x88888888);
 
-        let trace_step =
-            load_trace_step_in_stack(&mut stack, write_address, write_value, 0x8000_00c4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(
+        let trace_step = STraceStep::load(&mut stack, write_address, write_value, 0x8000_00c4, 0); // w, v, pc, micro
+        let trace_read = STraceRead::load(
             &mut stack,
+            MemoryWitness::registers().byte(),
             0xA000_0024,
             read_value_1,
             0xA000_0028,
@@ -1352,10 +1361,10 @@ mod tests {
         assert_eq!(read_value_2, 0x9ABCDEF0);
         assert_eq!(write_value, 0x12345670);
 
-        let trace_step =
-            load_trace_step_in_stack(&mut stack, write_address, write_value, 0x8000_00c4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(
+        let trace_step = STraceStep::load(&mut stack, write_address, write_value, 0x8000_00c4, 0); // w, v, pc, micro
+        let trace_read = STraceRead::load(
             &mut stack,
+            MemoryWitness::registers().byte(),
             0xA000_0024,
             read_value_1,
             0xA000_0028,
@@ -1398,10 +1407,10 @@ mod tests {
         assert_eq!(read_value_2, 0x9ABCDEF0);
         assert_eq!(write_value, 0x9ABCDEF8);
 
-        let trace_step =
-            load_trace_step_in_stack(&mut stack, write_address, write_value, 0x8000_00c4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(
+        let trace_step = STraceStep::load(&mut stack, write_address, write_value, 0x8000_00c4, 0); // w, v, pc, micro
+        let trace_read = STraceRead::load(
             &mut stack,
+            MemoryWitness::registers().byte(),
             0xA000_0024,
             read_value_1,
             0xA000_0028,
@@ -1437,10 +1446,10 @@ mod tests {
         let read_1_value = 0b0000_0000_0000_0100;
         let write_value = 0b0000_0000_0100_0000; // left shifted by 4
 
-        let trace_step =
-            load_trace_step_in_stack(&mut stack, 0xA000_002C, write_value, 0x8000_00C4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(
+        let trace_step = STraceStep::load(&mut stack, 0xA000_002C, write_value, 0x8000_00C4, 0); // w, v, pc, micro
+        let trace_read = STraceRead::load(
             &mut stack,
+            MemoryWitness::rur().byte(),
             0xA000_0024,
             read_1_value,
             0,
@@ -1478,10 +1487,10 @@ mod tests {
         let write_value = 0b0000_0000_0000_1000; // left shifted by 1
 
         // reg_addr = BASE_REGISTER_ADDRESS + reg_num * 4;
-        let trace_step =
-            load_trace_step_in_stack(&mut stack, 0xA000_002C, write_value, 0x8000_00C4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(
+        let trace_step = STraceStep::load(&mut stack, 0xA000_002C, write_value, 0x8000_00C4, 0); // w, v, pc, micro
+        let trace_read = STraceRead::load(
             &mut stack,
+            MemoryWitness::registers().byte(),
             0xA000_0024,
             read_1_value,
             0xA000_0028,
@@ -1519,10 +1528,10 @@ mod tests {
         let write_value = 0b0000_0000_0000_0010; // right shifted by 1
 
         // reg_addr = BASE_REGISTER_ADDRESS + reg_num * 4;
-        let trace_step =
-            load_trace_step_in_stack(&mut stack, 0xA000_002C, write_value, 0x8000_00C4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(
+        let trace_step = STraceStep::load(&mut stack, 0xA000_002C, write_value, 0x8000_00C4, 0); // w, v, pc, micro
+        let trace_read = STraceRead::load(
             &mut stack,
+            MemoryWitness::registers().byte(),
             0xA000_0024,
             read_1_value,
             0xA000_0028,
@@ -1560,10 +1569,10 @@ mod tests {
         let write_value = 0b11000000000000000000000000000000; // right-arithmetical shifted by 1
 
         // reg_addr = BASE_REGISTER_ADDRESS + reg_num * 4;
-        let trace_step =
-            load_trace_step_in_stack(&mut stack, 0xA000_002C, write_value, 0x8000_00C4, 0); // w, v, pc, micro
-        let trace_read = load_trace_read_in_stack(
+        let trace_step = STraceStep::load(&mut stack, 0xA000_002C, write_value, 0x8000_00C4, 0); // w, v, pc, micro
+        let trace_read = STraceRead::load(
             &mut stack,
+            MemoryWitness::registers().byte(),
             0xA000_0024,
             read_1_value,
             0xA000_0028,

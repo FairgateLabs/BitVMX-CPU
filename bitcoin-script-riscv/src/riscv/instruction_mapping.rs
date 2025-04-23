@@ -9,7 +9,7 @@ use riscv_decode::{
 
 use super::{
     instructions::ProgramSpec,
-    trace::{TraceRead, TraceStep},
+    trace::{STraceRead, STraceStep},
 };
 use bitcoin_script_stack::stack::StackTracker;
 
@@ -116,7 +116,7 @@ pub fn get_key_from_instruction_and_micro(instruction: &Instruction, micro: u8) 
         Ecall => "ecall".to_string(),
         Ebreak => "nop".to_string(),
 
-        _ => panic!("Instruction not supported"),
+        _ => panic!("Instruction not supported {:?}", instruction),
     }
 }
 
@@ -201,13 +201,13 @@ pub fn generate_verification_script(
 ) -> Script {
     let mut stack = StackTracker::new();
     let program = ProgramSpec::new(base_register_address);
-    let trace_step = TraceStep::define(&mut stack);
+    let trace_step = STraceStep::define(&mut stack);
     let witness = match witness {
         true => Some(stack.define(8, "witness")),
         false => None,
     };
 
-    let trace_read = TraceRead::define(&mut stack);
+    let trace_read = STraceRead::define(&mut stack);
     let mut result = execute_step(
         &mut stack,
         &trace_read,
@@ -253,6 +253,10 @@ mod tests {
         for (instruction, micro) in sample {
             let key = get_key_from_instruction_and_micro(&instruction, micro);
             const REGISTERS_BASE_ADDRESS: u32 = 0xF000_0000;
+            println!(
+                "Instruction: {:?}, Micro: {}, Key: {},",
+                instruction, micro, key
+            );
             let script = generate_verification_script(
                 &instruction,
                 micro,

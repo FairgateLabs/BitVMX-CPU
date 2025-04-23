@@ -1,13 +1,21 @@
-use emulator::{executor::fetcher::execute_program, loader::program::load_elf, ExecutionResult};
+use emulator::{
+    executor::{
+        fetcher::{execute_program, FullTrace},
+        utils::FailConfiguration,
+    },
+    loader::program::load_elf,
+    EmulatorError, ExecutionResult,
+};
 use tracing::info;
 
 fn verify_file(
     fname: &str,
-    validate_on_chain: bool,
-) -> Result<(Vec<String>, ExecutionResult), ExecutionResult> {
+    verify_on_chain: bool,
+) -> Result<(ExecutionResult, FullTrace), EmulatorError> {
     let mut program = load_elf(&fname, false)?;
+
     info!("Execute program {}", fname);
-    execute_program(
+    Ok(execute_program(
         &mut program,
         Vec::new(),
         ".bss",
@@ -15,18 +23,15 @@ fn verify_file(
         &None,
         None,
         false,
-        validate_on_chain,
+        verify_on_chain,
+        false,
         false,
         false,
         true,
-        true,
         None,
         None,
-        None,
-        None,
-        None,
-        None,
-    )
+        FailConfiguration::default(),
+    ))
 }
 
 #[test]
@@ -42,9 +47,9 @@ fn list_files() {
                 let path = path.path();
                 let path = path.to_string_lossy();
 
-                let (_, result) = verify_file(&format!("{}", path), true).unwrap();
+                let (result, _) = verify_file(&format!("{}", path), true).unwrap();
                 match result {
-                    ExecutionResult::Halt(exit_code) => {
+                    ExecutionResult::Halt(exit_code, _) => {
                         assert!(exit_code == 0, "Error executing file {}", path);
                         info!("File {} executed successfully", path);
                         count += 1;

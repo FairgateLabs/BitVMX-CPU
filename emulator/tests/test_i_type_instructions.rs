@@ -151,7 +151,9 @@ fn test_load_byte(
 
     let start_address = program.find_section_by_name("test_data").unwrap().start;
 
-    program.write_mem(start_address + imm_value, set_mem);
+    program
+        .write_mem(start_address + imm_value, set_mem)
+        .unwrap();
     program.registers.set(idx_rs1, start_address, 0);
 
     let x = create_itype_from(imm_value, idx_rs1 as u8, rd as u8);
@@ -244,11 +246,15 @@ fn test_load_half_word(
 
     let start_address = program.find_section_by_name("test_data").unwrap().start;
 
-    program.write_mem(start_address + imm_value, set_mem_aux_1);
-    program.write_mem(
-        start_address + imm_value + mem_aux_2_byte_offset,
-        set_mem_aux_2,
-    );
+    program
+        .write_mem(start_address + imm_value, set_mem_aux_1)
+        .unwrap();
+    program
+        .write_mem(
+            start_address + imm_value + mem_aux_2_byte_offset,
+            set_mem_aux_2,
+        )
+        .unwrap();
     program.registers.set(idx_rs1, start_address, 0);
 
     let x = create_itype_from(imm_value, idx_rs1 as u8, rd as u8);
@@ -333,11 +339,15 @@ fn test_load_word(
 
     let start_address = program.find_section_by_name("test_data").unwrap().start;
 
-    program.write_mem(start_address + imm_value, set_mem_aux_1);
-    program.write_mem(
-        start_address + imm_value + mem_aux_2_byte_offset,
-        set_mem_aux_2,
-    );
+    program
+        .write_mem(start_address + imm_value, set_mem_aux_1)
+        .unwrap();
+    program
+        .write_mem(
+            start_address + imm_value + mem_aux_2_byte_offset,
+            set_mem_aux_2,
+        )
+        .unwrap();
     program.registers.set(idx_rs1, start_address, 0);
 
     let x = create_itype_from(imm_value, idx_rs1 as u8, rd as u8);

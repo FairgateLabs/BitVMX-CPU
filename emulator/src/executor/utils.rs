@@ -1,8 +1,11 @@
+use std::str::FromStr;
+
+use bitvmx_cpu_definitions::trace::{TraceRWStep, TraceRead};
+use num_traits;
+
 use crate::loader::program::Program;
 
-use super::trace::{TraceRWStep, TraceRead};
-
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct FailRead {
     pub address_original: u32,
     pub value: u32,
@@ -15,7 +18,30 @@ pub struct FailRead {
 impl FailRead {
     #[allow(clippy::ptr_arg)]
     pub fn new(args: &Vec<String>) -> Self {
+        fn parse_value<T>(value: &str) -> T
+        where
+            T: num_traits::Num + std::str::FromStr,
+            T: std::fmt::Debug,
+            <T as std::str::FromStr>::Err: std::fmt::Debug,
+        {
+            if value.starts_with("0x") {
+                T::from_str_radix(&value[2..], 16)
+                    .unwrap_or_else(|_| panic!("Invalid hexadecimal value"))
+            } else {
+                value.parse::<T>().expect("Invalid decimal value")
+            }
+        }
+
         Self {
+            step: parse_value::<u64>(&args[0]) - 1,
+            address_original: parse_value::<u32>(&args[1]),
+            value: parse_value::<u32>(&args[2]),
+            modified_address: parse_value::<u32>(&args[3]),
+            modified_last_step: parse_value::<u64>(&args[4]),
+            init: true,
+        }
+
+        /*Self {
             step: args[0].parse::<u64>().expect("Invalid modified_last_step") - 1,
             address_original: args[1]
                 .parse::<u32>()
@@ -26,7 +52,7 @@ impl FailRead {
                 .expect("Invalid modified_address value"),
             modified_last_step: args[4].parse::<u64>().expect("Invalid modified_last_step"),
             init: true,
-        }
+        }*/
     }
 
     pub fn patch_trace_read(&self, trace: &mut TraceRead) {
@@ -48,14 +74,16 @@ impl FailRead {
             program.registers.set(idx, self.value, program.step);
         }
 
-        if program.find_section(self.address_original).is_some() {
-            program.write_mem(self.address_original, self.value);
+        if program.find_section(self.address_original).is_ok() {
+            program
+                .write_mem(self.address_original, self.value)
+                .unwrap();
             return;
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FailReads {
     read_1: FailRead,
     read_2: FailRead,
@@ -95,6 +123,55 @@ impl FailReads {
         if self.read_2.init && should_patch.1 {
             self.read_2.patch_trace_read(&mut trace.read_2);
         }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct FailConfiguration {
+    pub fail_hash: Option<u64>,
+    pub fail_execute: Option<u64>,
+    pub fail_reads: Option<FailReads>,
+    pub fail_pc: Option<u64>,
+}
+
+impl FailConfiguration {
+    pub fn new_fail_hash(fail_hash: u64) -> Self {
+        Self {
+            fail_hash: Some(fail_hash),
+            ..Default::default()
+        }
+    }
+    pub fn new_fail_execute(fail_execute: u64) -> Self {
+        Self {
+            fail_execute: Some(fail_execute),
+            ..Default::default()
+        }
+    }
+    pub fn new_fail_reads(fail_reads: FailReads) -> Self {
+        Self {
+            fail_reads: Some(fail_reads),
+            ..Default::default()
+        }
+    }
+    pub fn new_fail_pc(fail_pc: u64) -> Self {
+        Self {
+            fail_pc: Some(fail_pc),
+            ..Default::default()
+        }
+    }
+}
+
+impl FromStr for FailConfiguration {
+    type Err = String;
+
+    fn from_str(_s: &str) -> Result<Self, Self::Err> {
+        // TODO: implement
+        Ok(FailConfiguration {
+            fail_hash: None,
+            fail_execute: None,
+            fail_reads: None,
+            fail_pc: None,
+        })
     }
 }
 
@@ -150,6 +227,7 @@ mod utils_tests {
             size: 16,
             is_code: false,
             initialized: true,
+            registers: false,
         });
         let fail_read_1_args = vec![
             "10".to_string(),
@@ -162,7 +240,7 @@ mod utils_tests {
         program.step = 9;
         fail_reads.patch_mem(&mut program);
 
-        assert_eq!(program.read_mem(4096), 10);
+        assert_eq!(program.read_mem(4096).unwrap(), 10);
     }
 
     #[test]
@@ -176,6 +254,7 @@ mod utils_tests {
             size: 16,
             is_code: false,
             initialized: true,
+            registers: false,
         });
         let fail_read_2_args = vec![
             "10".to_string(),
@@ -188,7 +267,7 @@ mod utils_tests {
         program.step = 9;
         fail_reads.patch_mem(&mut program);
 
-        assert_eq!(program.read_mem(4100), 11);
+        assert_eq!(program.read_mem(4100).unwrap(), 11);
     }
 
     #[test]
@@ -202,11 +281,12 @@ mod utils_tests {
             size: 16,
             is_code: false,
             initialized: true,
+            registers: false,
         });
         let fail_reads = FailReads::new(None, None);
         program.step = 10;
         fail_reads.patch_mem(&mut program);
 
-        assert_eq!(program.read_mem(4100), 0);
+        assert_eq!(program.read_mem(4100).unwrap(), 0);
     }
 }

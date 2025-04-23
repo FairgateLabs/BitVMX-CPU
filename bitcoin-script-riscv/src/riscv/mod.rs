@@ -1,3 +1,4 @@
+pub mod challenges;
 pub mod decoder;
 pub mod instruction_mapping;
 pub mod instructions;

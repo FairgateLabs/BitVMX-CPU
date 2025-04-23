@@ -1,5 +1,6 @@
 #![allow(dead_code)]
-use emulator::loader::program::{Program, ProgramCounter, Registers, Section};
+use bitvmx_cpu_definitions::trace::ProgramCounter;
+use emulator::loader::program::{Program, Registers, Section};
 use rand::Rng;
 use riscv_decode::types::{BType, IType, JType, RType, SType, ShiftType, UType};
 use std::ops::RangeInclusive;
@@ -51,7 +52,7 @@ pub fn get_new_program() -> Program {
         registers: Registers::new(0, 0),
         pc: ProgramCounter::new(0, 0),
         step: 0,
-        hash: [0; 32],
+        hash: [0; 20],
         halt: false,
     }
 }
@@ -65,6 +66,7 @@ pub fn get_new_section() -> Section {
         size: 20 * 4,
         is_code: false,
         initialized: true,
+        registers: false,
     }
 }
 
