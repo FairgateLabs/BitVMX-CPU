@@ -9,5 +9,6 @@ pub enum ChallengeType {
     EntryPoint(TraceReadPC, u64, u32), // (PROVER_READ_PC, PROVER_READ_MICRO), PROVER_TRACE_STEP, ENTRYPOINT (only used on test)
     ProgramCounter(String, TraceStep, String, TraceReadPC),
     InputData(TraceRead, TraceRead, u32, u32),
+    AddressInSections(u32, Vec<(u32, u32)>),
     No,
 }

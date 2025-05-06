@@ -152,6 +152,13 @@ impl TraceRWStep {
         }
     }
 
+    pub fn from_step(step_number: u64) -> Self {
+        TraceRWStep {
+            step_number,
+            ..Default::default()
+        }
+    }
+
     pub fn get_trace_step(&self) -> &TraceStep {
         &self.trace_step
     }

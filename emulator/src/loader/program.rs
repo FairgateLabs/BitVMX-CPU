@@ -7,7 +7,7 @@ use bitvmx_cpu_definitions::{
     constants::LAST_STEP_INIT,
     trace::{generate_initial_step_hash, ProgramCounter, TraceRead, TraceWrite},
 };
-use elf::{abi::SHF_EXECINSTR, endian::LittleEndian, ElfBytes};
+use elf::{abi::SHF_EXECINSTR, abi::SHF_WRITE, endian::LittleEndian, ElfBytes};
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 use tracing::{error, info};
@@ -22,12 +22,20 @@ pub struct Section {
     pub start: u32,
     pub size: u32,
     pub is_code: bool,
+    pub is_write: bool,
     pub initialized: bool,
     pub registers: bool, // special section for registers
 }
 
 impl Section {
-    pub fn new(name: &str, start: u32, size: u32, is_code: bool, registers: bool) -> Section {
+    pub fn new(
+        name: &str,
+        start: u32,
+        size: u32,
+        is_code: bool,
+        is_write: bool,
+        registers: bool,
+    ) -> Section {
         Section {
             name: name.to_string(),
             data: vec![0; size as usize / 4],
@@ -35,6 +43,7 @@ impl Section {
             start,
             size,
             is_code,
+            is_write,
             initialized: false,
             registers,
         }
@@ -46,6 +55,7 @@ impl Section {
         start: u32,
         size: u32,
         is_code: bool,
+        is_write: bool,
         initialized: bool,
     ) -> Section {
         Section {
@@ -55,6 +65,7 @@ impl Section {
             start,
             size,
             is_code,
+            is_write,
             initialized,
             registers: false,
         }
@@ -285,8 +296,8 @@ impl Program {
     pub fn write_mem(&mut self, address: u32, value: u32) -> Result<(), ExecutionResult> {
         let step = self.step;
         let section = self.find_section_mut(address)?;
-        if section.is_code {
-            return Err(ExecutionResult::WriteToCodeSection);
+        if !section.is_write {
+            return Err(ExecutionResult::WriteToReadOnlySection);
         }
         section.data[(address - section.start) as usize / 4] = value.to_be();
         section.last_step[(address - section.start) as usize / 4] = step;
@@ -332,6 +343,24 @@ impl Program {
             }
         }
         info!("\n================================================\n");
+    }
+
+    pub fn valid_address(
+        &self,
+        address: u32,
+        section_filter: impl Fn(&&Section) -> bool,
+    ) -> (bool, Vec<(u32, u32)>) {
+        let sections_ranges: Vec<(u32, u32)> = self
+            .sections
+            .iter()
+            .filter(section_filter)
+            .map(|section| (section.start, section.start + section.size))
+            .collect();
+
+        let is_valid = sections_ranges
+            .iter()
+            .any(|&(start, end)| start <= address && address <= end - 3);
+        (is_valid, sections_ranges)
     }
 }
 
@@ -392,6 +421,7 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Result<Program, EmulatorErr
         ((RISCV32_REGISTERS + AUX_REGISTERS) * 4) as u32,
         false,
         true,
+        true,
     ));
     if show_sections {
         info!("Loading section: {} Start: 0x{:08x} Size: 0x{:08x} Initialized: {} Flags: {:0b} Type: {:0b} ", "registers", REGISTERS_BASE_ADDRESS, ((RISCV32_REGISTERS + AUX_REGISTERS) * 4) as u32, false, 0, 0);
@@ -436,7 +466,10 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Result<Program, EmulatorErr
             info!("Loading section: {} Start: 0x{:08x} Size: 0x{:08x} Initialized: {} Flags: {:0b} Type: {:0b} ", name, start, size, initialized, phdr.sh_flags, phdr.sh_type);
         }
 
-        program.add_section(Section::new_with_data(&name, data, start, size, phdr.sh_flags as u32 & SHF_EXECINSTR == SHF_EXECINSTR, initialized));
+        let is_code = phdr.sh_flags as u32 & SHF_EXECINSTR == SHF_EXECINSTR;
+        let is_write = phdr.sh_flags as u32 & SHF_WRITE == SHF_WRITE;
+
+        program.add_section(Section::new_with_data(&name, data, start, size, is_code, is_write, initialized));
     });
 
     program.sanity_check()?;
@@ -529,15 +562,15 @@ mod tests {
     #[test]
     fn test_overlap_sections() {
         let mut program = Program::new(0, 0, 0);
-        program.add_section(Section::new("test_1", 0, 10, false, false));
-        program.add_section(Section::new("test_2", 9, 5, false, false));
+        program.add_section(Section::new("test_1", 0, 10, false, true, false));
+        program.add_section(Section::new("test_2", 9, 5, false, true, false));
         assert!(program.sanity_check().is_err());
     }
 
     #[test]
     fn test_invalid_use_of_registers_section() {
         let mut program = Program::new(0, 0, 0);
-        program.add_section(Section::new("registers", 0, 10, false, true));
+        program.add_section(Section::new("registers", 0, 10, false, true, true));
         assert_eq!(
             program.find_section(0),
             Err(ExecutionResult::RegistersSectionFail)
@@ -549,12 +582,12 @@ mod tests {
     }
 
     #[test]
-    fn test_write_to_code_section() {
+    fn test_write_to_read_only_section() {
         let mut program = Program::new(0, 0, 0);
-        program.add_section(Section::new("code", 0, 10, true, false));
+        program.add_section(Section::new("code", 0, 10, true, false, false));
         assert_eq!(
             program.write_mem(0, 123),
-            Err(ExecutionResult::WriteToCodeSection)
+            Err(ExecutionResult::WriteToReadOnlySection)
         );
     }
 }
