@@ -150,7 +150,7 @@ pub fn execute_program(
             if trace_set.is_none() || trace_set.as_ref().unwrap().contains(&program.step) {
                 let hash_hex = hash_to_string(&program.hash);
                 traces.push((
-                    trace.as_ref().unwrap_or(&TraceRWStep::default()).clone(),
+                    trace.as_ref().unwrap_or(&TraceRWStep::from_step(program.step)).clone(),
                     hash_hex.clone(),
                 ));
                 if debug {

@@ -234,6 +234,10 @@ pub enum ForceChallenge {
     EntryPoint,
     ProgramCounter,
     InputData,
+    ProgramCounterSection,
+    Read1Section,
+    Read2Section,
+    WriteSection,
     No,
 }
 
@@ -264,7 +268,7 @@ pub fn verifier_choose_challenge(
     );
 
     // check trace_hash
-    if !validate_step_hash(&step_hash, &trace.trace_step, &next_hash)
+    if !validate_step_hash(&step_hash, &trace.trace_step, &next_hash) && force == ForceChallenge::No
         || force == ForceChallenge::TraceHash
         || force == ForceChallenge::TraceHashZero
     {
@@ -298,7 +302,9 @@ pub fn verifier_choose_challenge(
 
     // check entrypoint
     if trace.read_pc.pc.get_address() != my_trace.read_pc.pc.get_address()
+        && force == ForceChallenge::No
         || trace.read_pc.pc.get_micro() != my_trace.read_pc.pc.get_micro()
+            && force == ForceChallenge::No
         || force == ForceChallenge::EntryPoint
         || force == ForceChallenge::ProgramCounter
     {
@@ -324,6 +330,33 @@ pub fn verifier_choose_challenge(
 
     // TODO: limit exception
     // TODO: segmentation fault
+    let pc_address = trace.read_pc.pc.get_address();
+    let (is_valid, code_sections) = program.valid_address(pc_address, |section| section.is_code);
+    if !is_valid && force == ForceChallenge::No || force == ForceChallenge::ProgramCounterSection {
+        return Ok(ChallengeType::AddressInSections(pc_address, code_sections));
+    }
+
+    let read1_address = trace.read_1.address;
+    let (is_valid, sections) = program.valid_address(read1_address, |_| true);
+    if !is_valid && force == ForceChallenge::No || force == ForceChallenge::Read1Section {
+        return Ok(ChallengeType::AddressInSections(read1_address, sections));
+    }
+
+    let read2_address = trace.read_1.address;
+    let (is_valid, sections) = program.valid_address(read2_address, |_| true);
+    if !is_valid && force == ForceChallenge::No || force == ForceChallenge::Read2Section {
+        return Ok(ChallengeType::AddressInSections(read2_address, sections));
+    }
+
+    let write_address = trace.trace_step.write_1.address;
+    let (is_valid, write_sections) =
+        program.valid_address(write_address, |section| section.is_write);
+    if !is_valid && force == ForceChallenge::No || force == ForceChallenge::WriteSection {
+        return Ok(ChallengeType::AddressInSections(
+            write_address,
+            write_sections,
+        ));
+    }
 
     // check const read value
     let conflict_read_1 =
@@ -339,7 +372,9 @@ pub fn verifier_choose_challenge(
         let section = program.find_section(conflict_address)?;
         //TODO: Check if the address is in the input section rom ram or registers
         let value = program.read_mem(conflict_address)?;
-        if section.name == program_def.input_section_name || force == ForceChallenge::InputData {
+        if section.name == program_def.input_section_name && force == ForceChallenge::No
+            || force == ForceChallenge::InputData
+        {
             info!("Veifier choose to challenge invalid INPUT DATA");
             return Ok(ChallengeType::InputData(
                 trace.read_1.clone(),
@@ -447,15 +482,16 @@ mod tests {
 
     fn test_challenge_aux(
         id: &str,
+        pdf: &str,
         input: u8,
-        execute_err: bool,
+        execute_err: Option<bool>,
         fail_config_prover: Option<FailConfiguration>,
         fail_config_verifier: Option<FailConfiguration>,
         challenge_ok: bool,
         force_condition: ForceCondition,
         force: ForceChallenge,
     ) {
-        let pdf = "../docker-riscv32/riscv32/build/hello-world.yaml";
+        let pdf = &format!("../docker-riscv32/riscv32/build/{}", pdf);
         let input = vec![17, 17, 17, input];
         let program_def = ProgramDefinition::from_config(pdf).unwrap();
         let nary_def = program_def.nary_def();
@@ -520,15 +556,17 @@ mod tests {
             prover_final_trace(pdf, chk_prover_path, v_decision + 1, fail_config_prover).unwrap();
         info!("Prover final trace: {:?}", final_trace.to_csv());
 
-        let result = verify_script(&final_trace, REGISTERS_BASE_ADDRESS, &None);
-        info!("Validation result: {:?}", result);
+        if execute_err.is_some() {
+            let result = verify_script(&final_trace, REGISTERS_BASE_ADDRESS, &None);
+            info!("Validation result: {:?}", result);
 
-        if execute_err {
-            assert!(result.is_err());
-            //once execution fails there is no need to execute more steps
-            return;
-        } else {
-            assert!(result.is_ok());
+            if execute_err.unwrap() {
+                assert!(result.is_err());
+                //once execution fails there is no need to execute more steps
+                return;
+            } else {
+                assert!(result.is_ok());
+            }
         }
 
         let challenge = verifier_choose_challenge(
@@ -551,8 +589,9 @@ mod tests {
         //bad input: exepct execute step to fail
         test_challenge_aux(
             "1",
+            "hello-world.yaml",
             0,
-            true,
+            Some(true),
             None,
             None,
             false,
@@ -562,8 +601,9 @@ mod tests {
         //good input: expect execute step to succeed
         test_challenge_aux(
             "2",
+            "hello-world.yaml",
             17,
-            false,
+            Some(false),
             None,
             None,
             false,
@@ -579,8 +619,9 @@ mod tests {
         let fail_hash = Some(FailConfiguration::new_fail_hash(100));
         test_challenge_aux(
             "3",
+            "hello-world.yaml",
             17,
-            false,
+            Some(false),
             fail_hash.clone(),
             None,
             true,
@@ -589,8 +630,9 @@ mod tests {
         );
         test_challenge_aux(
             "4",
+            "hello-world.yaml",
             17,
-            false,
+            Some(false),
             None,
             fail_hash,
             false,
@@ -606,8 +648,9 @@ mod tests {
         let fail_hash = Some(FailConfiguration::new_fail_hash(1));
         test_challenge_aux(
             "5",
+            "hello-world.yaml",
             17,
-            false,
+            Some(false),
             fail_hash.clone(),
             None,
             true,
@@ -616,8 +659,9 @@ mod tests {
         );
         test_challenge_aux(
             "6",
+            "hello-world.yaml",
             17,
-            false,
+            Some(false),
             None,
             fail_hash,
             false,
@@ -632,8 +676,9 @@ mod tests {
         let fail_entrypoint = Some(FailConfiguration::new_fail_pc(0));
         test_challenge_aux(
             "7",
+            "hello-world.yaml",
             17,
-            false,
+            Some(false),
             fail_entrypoint.clone(),
             None,
             true,
@@ -642,8 +687,9 @@ mod tests {
         );
         test_challenge_aux(
             "8",
+            "hello-world.yaml",
             17,
-            false,
+            Some(false),
             None,
             fail_entrypoint,
             false,
@@ -658,8 +704,9 @@ mod tests {
         let fail_pc = Some(FailConfiguration::new_fail_pc(1));
         test_challenge_aux(
             "9",
+            "hello-world.yaml",
             17,
-            false,
+            Some(false),
             fail_pc.clone(),
             None,
             true,
@@ -668,8 +715,9 @@ mod tests {
         );
         test_challenge_aux(
             "10",
+            "hello-world.yaml",
             17,
-            false,
+            Some(false),
             None,
             fail_pc,
             false,
@@ -691,16 +739,17 @@ mod tests {
         .iter()
         .map(|x| x.to_string())
         .collect::<Vec<String>>();
-        let fail_read_1 = Some(FailConfiguration::new_fail_reads(FailReads::new(
+        let fail_read_2 = Some(FailConfiguration::new_fail_reads(FailReads::new(
             None,
             Some(&fail_args),
             //None,
         )));
         test_challenge_aux(
             "11",
+            "hello-world.yaml",
             0,
-            false,
-            fail_read_1.clone(),
+            Some(false),
+            fail_read_2.clone(),
             None,
             true,
             ForceCondition::No,
@@ -708,13 +757,126 @@ mod tests {
         );
         test_challenge_aux(
             "12",
+            "hello-world.yaml",
             17,
-            false,
+            Some(false),
             None,
-            fail_read_1,
+            fail_read_2,
             false,
             ForceCondition::ValidInputStepAndHash,
             ForceChallenge::InputData,
         );
+    }
+
+    #[test]
+    fn test_read_out_of_bounds() {
+        init_trace();
+
+        let fail_args = vec![
+            "1106",
+            "0xaa000000",
+            "0x11111100",
+            "0x00000000",
+            "0xffffffffffffffff",
+        ]
+        .iter()
+        .map(|x| x.to_string())
+        .collect::<Vec<String>>();
+        let fail_read_2 = Some(FailConfiguration::new_fail_reads(FailReads::new(
+            None,
+            Some(&fail_args),
+        )));
+
+        test_challenge_aux(
+            "13",
+            "read_invalid.yaml",
+            0,
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::Read2Section,
+        );
+
+        test_challenge_aux(
+            "14",
+            "read_reg.yaml",
+            0,
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::Read2Section,
+        );
+
+        test_challenge_aux(
+            "15",
+            "hello-world.yaml",
+            17,
+            Some(false),
+            None,
+            fail_read_2.clone(),
+            false,
+            ForceCondition::No,
+            ForceChallenge::Read1Section,
+        );
+
+        test_challenge_aux(
+            "16",
+            "hello-world.yaml",
+            17,
+            Some(false),
+            None,
+            fail_read_2,
+            false,
+            ForceCondition::No,
+            ForceChallenge::Read2Section,
+        );
+    }
+
+    #[test]
+    fn test_write_out_of_bounds() {
+        init_trace();
+
+        test_challenge_aux(
+            "17",
+            "write_invalid.yaml",
+            0,
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::WriteSection,
+        );
+
+        test_challenge_aux(
+            "18",
+            "write_reg.yaml",
+            0,
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::WriteSection,
+        );
+
+        test_challenge_aux(
+            "19",
+            "write_protected.yaml",
+            0,
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::WriteSection,
+        );
+
+        // TODO: Should not be able to challenge correct write.
+        // Maybe we need a failWrite
     }
 }

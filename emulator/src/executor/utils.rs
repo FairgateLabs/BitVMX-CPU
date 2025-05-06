@@ -226,6 +226,7 @@ mod utils_tests {
             start: 0x1000,
             size: 16,
             is_code: false,
+            is_write: true,
             initialized: true,
             registers: false,
         });
@@ -253,6 +254,7 @@ mod utils_tests {
             start: 0x1000,
             size: 16,
             is_code: false,
+            is_write: true,
             initialized: true,
             registers: false,
         });
@@ -280,6 +282,7 @@ mod utils_tests {
             start: 0x1000,
             size: 16,
             is_code: false,
+            is_write: true,
             initialized: true,
             registers: false,
         });
