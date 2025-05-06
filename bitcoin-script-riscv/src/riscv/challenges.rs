@@ -6,9 +6,10 @@ use bitvmx_cpu_definitions::{
     trace::{generate_initial_step_hash, hashvec_to_string},
 };
 
-use crate::riscv::script_utils::is_equal_to;
-
-use super::script_utils::is_lower_than;
+use crate::riscv::{
+    memory_alignment::is_aligned,
+    script_utils::is_lower_than,
+};
 
 // TODO: Value commited in WOTS_PROVER_LAST_STEP should not be greater than the MAX_STEP_CONSTANT_VALUE
 // the script should block this.
@@ -267,28 +268,30 @@ pub fn address_in_sections_challenge(stack: &mut StackTracker, sections: Vec<(u3
     stack.clear_definitions();
 
     let address = stack.define(8, "address");
-    
+
+    is_aligned(stack, address, false);
+    stack.op_not();
+
     for section in &sections {
         let section_start = stack.number_u32(section.0);
         let add = stack.copy_var(address);
 
-        is_equal_to(stack, &section_start, &add);
-        is_lower_than(stack, section_start, add, true);
-        stack.op_boolor();
-        
-        // address <= section_end - 3 ≡ address + 1 < section_end - 3 ≡ address < section_end - 2
-        //                          ^ when we do a read on an address, we also read the 3 addresses after
-        let section_end = stack.number_u32(section.1 - 2);
-        let add = stack.copy_var(address);
-        
-        is_lower_than(stack, add, section_end, true);
+        is_lower_than(stack, add, section_start, true);
 
-        stack.op_booland();
+        // when we do a read on an address, we also read the 3 addresses after
+        let section_end = stack.number_u32(section.1 - 3);
+        let add = stack.copy_var(address);
+
+        is_lower_than(stack, section_end, add, true);
+
+        stack.op_boolor();
     }
 
     for _ in 0..sections.len() - 1 {
-        stack.op_boolor();
+        stack.op_booland();
     }
+
+    stack.op_boolor();
 
     stack.op_verify();
     stack.drop(address);
@@ -346,6 +349,10 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             stack.number_u32(read_2.value);
             stack.number_u64(read_2.last_step);
             input_challenge(&mut stack, *address);
+        }
+        ChallengeType::AddressInSections(address, sections) => {
+            stack.number_u32(*address);
+            address_in_sections_challenge(&mut stack, sections.clone());
         }
         _ => {
             return false;
@@ -692,29 +699,52 @@ mod tests {
 
         stack.number_u32(address);
         address_in_sections_challenge(&mut stack, sections);
-        stack.op_true();
-        let end = stack.run();
 
-        end.success
+        stack.op_true();
+        stack.run().success
     }
 
     #[test]
     fn test_address_in_sections() {
-        let sections = vec![(0xf, 0xffff + 3), (0xfffff, 0xfffffff + 3)];
+        let sections = vec![(0x0000_00f0, 0x0000_fff3), (0x000f_fff0, 0x0fff_fff3)];
 
-        assert!(test_address_in_sections_aux(0xf, sections.clone()));
-        assert!(test_address_in_sections_aux(0xfff, sections.clone()));
-        assert!(test_address_in_sections_aux(0xffff, sections.clone()));
-        assert!(!test_address_in_sections_aux(0xffff + 1, sections.clone()));
-        assert!(!test_address_in_sections_aux(0xe, sections.clone()));
+        // can't challenge if address is aligned and equal to the start of the first section
+        assert!(!test_address_in_sections_aux(0x0000_00f0, sections.clone()));
 
-        assert!(test_address_in_sections_aux(0xfffff, sections.clone()));
-        assert!(test_address_in_sections_aux(0xffffff, sections.clone()));
-        assert!(test_address_in_sections_aux(0xfffffff, sections.clone()));
+        // can't challenge if address is aligned and 3 less than the end of the first section
         assert!(!test_address_in_sections_aux(
-            0xfffffff + 1,
+            0x0000_fff3 - 3,
             sections.clone()
         ));
-        assert!(!test_address_in_sections_aux(0xffffe, sections.clone()));
+
+        // can't challenge if address is aligned and between start and end of first section
+        assert!(!test_address_in_sections_aux(0x0000_0ff0, sections.clone()));
+
+        // can't challenge if address is aligned and equal to the start of the second section
+        assert!(!test_address_in_sections_aux(0x000f_fff0, sections.clone()));
+
+        // can't challenge if address is aligned and 3 less than the end of the first section
+        assert!(!test_address_in_sections_aux(
+            0x0fff_fff3 - 3,
+            sections.clone()
+        ));
+
+        // can't challenge if address is aligned and between start and end of first section
+        assert!(!test_address_in_sections_aux(0x00ff_fff0, sections.clone()));
+
+        // challenges are valid if address is aligned and outside every section
+        assert!(test_address_in_sections_aux(0x0000_00f0-4, sections.clone())); // before section 1
+        assert!(test_address_in_sections_aux(0x0000_fff4, sections.clone())); // after section 1
+        assert!(test_address_in_sections_aux(0x000f_fff0-4, sections.clone())); // before section 2
+        assert!(test_address_in_sections_aux(0x0fff_fff4, sections.clone())); // after section 2
+        
+        // challenges are valid if address it not aligned
+        assert!(test_address_in_sections_aux(0x0000_00f1, sections.clone()));
+        assert!(test_address_in_sections_aux(0x0000_00f2, sections.clone()));
+        assert!(test_address_in_sections_aux(0x0000_00f3, sections.clone()));
+        assert!(test_address_in_sections_aux(0x000f_fff1, sections.clone()));
+        assert!(test_address_in_sections_aux(0x000f_fff2, sections.clone()));
+        assert!(test_address_in_sections_aux(0x000f_fff3, sections.clone()));
+
     }
 }
