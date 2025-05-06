@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use bitvmx_cpu_definitions::{
     challenge::ChallengeType,
     constants::LAST_STEP_INIT,
+    memory::MemoryAccessType,
     trace::{generate_initial_step_hash, hashvec_to_string, validate_step_hash, TraceRWStep},
 };
 use clap::ValueEnum;
@@ -337,20 +338,26 @@ pub fn verifier_choose_challenge(
     }
 
     let read1_address = trace.read_1.address;
-    let (is_valid, sections) = program.valid_address(read1_address, |_| true);
+    let (is_valid, sections) = program.valid_address(read1_address, |section| {
+        (trace.mem_witness.read_1() == MemoryAccessType::Register) == section.registers
+    });
     if !is_valid && force == ForceChallenge::No || force == ForceChallenge::Read1Section {
         return Ok(ChallengeType::AddressInSections(read1_address, sections));
     }
 
-    let read2_address = trace.read_1.address;
-    let (is_valid, sections) = program.valid_address(read2_address, |_| true);
+    let read2_address = trace.read_2.address;
+    let (is_valid, sections) = program.valid_address(read2_address, |section| {
+        (trace.mem_witness.read_2() == MemoryAccessType::Register) == section.registers
+    });
     if !is_valid && force == ForceChallenge::No || force == ForceChallenge::Read2Section {
         return Ok(ChallengeType::AddressInSections(read2_address, sections));
     }
 
     let write_address = trace.trace_step.write_1.address;
-    let (is_valid, write_sections) =
-        program.valid_address(write_address, |section| section.is_write);
+    let (is_valid, write_sections) = program.valid_address(write_address, |section| {
+        (trace.mem_witness.write() == MemoryAccessType::Register) == section.registers
+            && section.is_write
+    });
     if !is_valid && force == ForceChallenge::No || force == ForceChallenge::WriteSection {
         return Ok(ChallengeType::AddressInSections(
             write_address,
