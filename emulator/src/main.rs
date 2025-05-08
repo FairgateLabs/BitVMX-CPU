@@ -1,5 +1,5 @@
 use bitcoin_script_riscv::riscv::instruction_mapping::create_verification_script_mapping;
-use bitvmx_cpu_definitions::trace::TraceRWStep;
+use bitvmx_cpu_definitions::{challenge::EmulatorResultType, trace::TraceRWStep};
 use clap::{Parser, Subcommand};
 use emulator::{
     constants::REGISTERS_BASE_ADDRESS,
@@ -12,10 +12,9 @@ use emulator::{
         utils::{FailConfiguration, FailReads},
     },
     loader::program::{generate_rom_commitment, load_elf, Program},
-    EmulatorError,
+    EmulatorError, ExecutionResult,
 };
 use hex::FromHex;
-use serde_json::json;
 use std::io::Write;
 use tracing::{error, info, Level};
 
@@ -343,7 +342,7 @@ fn main() -> Result<(), EmulatorError> {
             fail_read_2: fail_read_2_args,
             dump_mem,
             fail_pc,
-            command_file,
+            command_file: _,
         }) => {
             if elf.is_none() && step.is_none() {
                 error!("To execute an elf file or a checkpoint step is required");
@@ -423,15 +422,6 @@ fn main() -> Result<(), EmulatorError> {
             )
             .0;
             info!("Execution result: {:?}", result);
-            let mut file = create_or_open_file(command_file);
-            let json_result = json!({
-                    "type": "ExecuteResult",
-                    "data": {
-                        "result": result,
-                    }
-            });
-            file.write_all(json_result.to_string().as_bytes())
-                .expect("Failed to write JSON to file");
         }
         Some(Commands::ProverExecute {
             pdf,
@@ -453,14 +443,19 @@ fn main() -> Result<(), EmulatorError> {
             )?;
             info!("Prover execute: {:?}", result);
 
-            let json_result = json!({
-                    "type": "ProverExecuteResult",
-                    "data": {
-                        "last_step": result.1,
-                        "last_hash": result.2,
-                    }
-            });
-            file.write_all(json_result.to_string().as_bytes())
+            let halt = match result.0 {
+                ExecutionResult::Halt(result, step) => Some((result, step)),
+                _ => None,
+            };
+
+            let result = EmulatorResultType::ProverExecuteResult {
+                last_step: result.1,
+                last_hash: result.2,
+                halt: halt,
+            }
+            .to_value()?;
+
+            file.write_all(result.to_string().as_bytes())
                 .expect("Failed to write JSON to file");
         }
         Some(Commands::VerifierCheckExecution {
@@ -485,13 +480,11 @@ fn main() -> Result<(), EmulatorError> {
                 force.clone(),
                 fail_config_verifier.clone(),
             )?;
-            info!("Verifier checks excecution: {:?}", result);
+            info!("Verifier checks execution: {:?}", result);
 
-            let json_result = json!({
-                    "type": "VerifierCheckExecutionResult",
-                    "data": {}
-            });
-            file.write_all(json_result.to_string().as_bytes())
+            let result =
+                EmulatorResultType::VerifierCheckExecutionResult { step: result }.to_value()?;
+            file.write_all(result.to_string().as_bytes())
                 .expect("Failed to write JSON to file");
         }
         Some(Commands::ProverGetHashesForRound {
@@ -513,13 +506,11 @@ fn main() -> Result<(), EmulatorError> {
             )?;
             info!("Prover get hashes for round: {:?}", result);
 
-            let json_result = json!({
-                    "type": "ProverGetHashesForRoundResult",
-                    "data": {
-                        "hashes": result,
-                    }
-            });
-            file.write_all(json_result.to_string().as_bytes())
+            let result = EmulatorResultType::ProverGetHashesForRoundResult {
+                hashes: result.clone(),
+            }
+            .to_value()?;
+            file.write_all(result.to_string().as_bytes())
                 .expect("Failed to write JSON to file");
         }
         Some(Commands::VerifierChooseSegment {
@@ -541,13 +532,11 @@ fn main() -> Result<(), EmulatorError> {
             )?;
             info!("Verifier choose segment: {:?}", result);
 
-            let json_result = json!({
-                    "type": "VerifierChooseSegmentResult",
-                    "data": {
-                        "v_decision": result,
-                    }
-            });
-            file.write_all(json_result.to_string().as_bytes())
+            let result = EmulatorResultType::VerifierChooseSegmentResult {
+                v_decision: result.clone(),
+            }
+            .to_value()?;
+            file.write_all(result.to_string().as_bytes())
                 .expect("Failed to write JSON to file");
         }
         Some(Commands::ProverFinalTrace {
@@ -567,13 +556,11 @@ fn main() -> Result<(), EmulatorError> {
             )?;
             info!("Prover final trace: {:?}", result);
 
-            let json_result = json!({
-                    "type": "ProverFinalTraceResult",
-                    "data": {
-                        "final_trace": result,
-                    }
-            });
-            file.write_all(json_result.to_string().as_bytes())
+            let result = EmulatorResultType::ProverFinalTraceResult {
+                final_trace: result.clone(),
+            }
+            .to_value()?;
+            file.write_all(result.to_string().as_bytes())
                 .expect("Failed to write JSON to file");
         }
         Some(Commands::VerifierChooseChallenge {
@@ -595,13 +582,11 @@ fn main() -> Result<(), EmulatorError> {
             )?;
             info!("Verifier choose challenge: {:?}", result);
 
-            let json_result = json!({
-                    "type": "VerifierChooseChallengeResult",
-                    "data": {
-                        "challenge": result,
-                    }
-            });
-            file.write_all(json_result.to_string().as_bytes())
+            let result = EmulatorResultType::VerifierChooseChallengeResult {
+                challenge: result.clone(),
+            }
+            .to_value()?;
+            file.write_all(result.to_string().as_bytes())
                 .expect("Failed to write JSON to file");
         }
         None => {
