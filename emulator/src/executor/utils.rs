@@ -2,10 +2,11 @@ use std::str::FromStr;
 
 use bitvmx_cpu_definitions::trace::{TraceRWStep, TraceRead};
 use num_traits;
+use serde::{Deserialize, Serialize};
 
 use crate::loader::program::Program;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct FailRead {
     pub address_original: u32,
     pub value: u32,
@@ -83,7 +84,7 @@ impl FailRead {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FailReads {
     read_1: FailRead,
     read_2: FailRead,
@@ -126,7 +127,7 @@ impl FailReads {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct FailConfiguration {
     pub fail_hash: Option<u64>,
     pub fail_execute: Option<u64>,
@@ -164,14 +165,14 @@ impl FailConfiguration {
 impl FromStr for FailConfiguration {
     type Err = String;
 
-    fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        // TODO: implement
-        Ok(FailConfiguration {
-            fail_hash: None,
-            fail_execute: None,
-            fail_reads: None,
-            fail_pc: None,
-        })
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        serde_json::from_str(s).map_err(|e| e.to_string())
+    }
+}
+
+impl ToString for FailConfiguration {
+    fn to_string(&self) -> String {
+        serde_json::to_string(self).unwrap_or_else(|_| "Failed to serialize".to_string())
     }
 }
 

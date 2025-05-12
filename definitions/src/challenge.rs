@@ -26,9 +26,11 @@ pub enum EmulatorResultType {
     },
     ProverGetHashesForRoundResult {
         hashes: Vec<String>,
+        round: u8,
     },
     VerifierChooseSegmentResult {
         v_decision: u32,
+        round: u8,
     },
     ProverFinalTraceResult {
         final_trace: TraceRWStep,
@@ -79,18 +81,22 @@ impl EmulatorResultType {
         }
     }
 
-    pub fn as_prover_hashes(&self) -> Result<Vec<String>, EmulatorResultError> {
+    pub fn as_prover_hashes(&self) -> Result<(Vec<String>, u8), EmulatorResultError> {
         match self {
-            EmulatorResultType::ProverGetHashesForRoundResult { hashes } => Ok(hashes.clone()),
+            EmulatorResultType::ProverGetHashesForRoundResult { hashes, round } => {
+                Ok((hashes.clone(), round.clone()))
+            }
             _ => Err(EmulatorResultError::GenericError(
                 "Expected ProverGetHashesForRoundResult".to_string(),
             )),
         }
     }
 
-    pub fn as_v_decision(&self) -> Result<u32, EmulatorResultError> {
+    pub fn as_v_decision(&self) -> Result<(u32, u8), EmulatorResultError> {
         match self {
-            EmulatorResultType::VerifierChooseSegmentResult { v_decision } => Ok(*v_decision),
+            EmulatorResultType::VerifierChooseSegmentResult { v_decision, round } => {
+                Ok((*v_decision, round.clone()))
+            }
             _ => Err(EmulatorResultError::GenericError(
                 "Expected VerifierChooseSegmentResult".to_string(),
             )),
