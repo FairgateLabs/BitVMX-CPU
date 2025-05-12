@@ -9,7 +9,7 @@ use emulator::{
     },
     executor::{
         fetcher::execute_program,
-        utils::{FailConfiguration, FailReads},
+        utils::{FailConfiguration, FailReads, FailWrite},
     },
     loader::program::{generate_rom_commitment, load_elf, Program},
     EmulatorError,
@@ -282,6 +282,10 @@ enum Commands {
         #[arg(long, value_names = &["step", "address_original", "value", "modified_address", "modified_last_step"], num_args = 5)]
         fail_read_2: Option<Vec<String>>,
 
+        /// Fail write at a given step
+        #[arg(long, value_names = &["step", "address_original", "value", "modified_address"], num_args = 4)]
+        fail_write: Option<Vec<String>>,
+
         /// Memory dump at given step
         #[arg(short, long)]
         dump_mem: Option<u64>,
@@ -341,6 +345,7 @@ fn main() -> Result<(), EmulatorError> {
             list,
             fail_read_1: fail_read_1_args,
             fail_read_2: fail_read_2_args,
+            fail_write: fail_write_args,
             dump_mem,
             fail_pc,
             command_file,
@@ -397,11 +402,14 @@ fn main() -> Result<(), EmulatorError> {
                 None
             };
 
+            let fail_write = fail_write_args.as_ref().map(FailWrite::new);
+
             let debugvar = *debug;
             let fail_config = FailConfiguration {
                 fail_hash: *fail_hash,
                 fail_execute: *fail_execute,
                 fail_reads,
+                fail_write,
                 fail_pc: *fail_pc,
             };
             let result = execute_program(

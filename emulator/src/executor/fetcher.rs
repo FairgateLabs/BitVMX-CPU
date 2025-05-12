@@ -89,6 +89,11 @@ pub fn execute_program(
 
         let mut trace = execute_step(program, print_program_stdout, debug);
 
+        let mut should_patch_write = false;
+        if let Some(fw) = &fail_config.fail_write {
+            should_patch_write = fw.patch_mem(program);
+        }
+
         if trace.is_err() {
             if debug {
                 info!("Result: {:?}", trace);
@@ -121,6 +126,10 @@ pub fn execute_program(
                 fr.patch_trace_reads(trace.as_mut().unwrap(), should_patch); // patches trace reads only at the right step
             }
 
+            if let Some(fw) = &fail_config.fail_write {
+                fw.patch_trace_write(trace.as_mut().unwrap(), should_patch_write);
+            }
+            
             if let Some(fail) = fail_config.fail_execute {
                 if fail == program.step {
                     let value = &mut trace.as_mut().unwrap().trace_step.write_1.value;
@@ -135,6 +144,14 @@ pub fn execute_program(
                     if fail == program.step {
                         program.hash = compute_step_hash(&mut hasher, &program.hash, &trace_bytes);
                     }
+                }
+            }
+        } else if !no_hash {
+            let trace_bytes = TraceRWStep::from_step(program.step).trace_step.to_bytes();
+            program.hash = compute_step_hash(&mut hasher, &program.hash, &trace_bytes);
+            if let Some(fail) = fail_config.fail_hash {
+                if fail == program.step {
+                    program.hash = compute_step_hash(&mut hasher, &program.hash, &trace_bytes);
                 }
             }
         }

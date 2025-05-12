@@ -465,7 +465,10 @@ mod tests {
     use crate::{
         constants::REGISTERS_BASE_ADDRESS,
         decision::challenge::*,
-        executor::{utils::FailReads, verifier::verify_script},
+        executor::{
+            utils::{FailReads, FailWrite},
+            verifier::verify_script,
+        },
         loader::program_definition::ProgramDefinition,
     };
 
@@ -771,12 +774,12 @@ mod tests {
             fail_read_2,
             false,
             ForceCondition::ValidInputStepAndHash,
-            ForceChallenge::InputData,
+            ForceChallenge::InputData, // It's currently not challenging, we should fail_read a different input
         );
     }
 
     #[test]
-    fn test_read_out_of_bounds() {
+    fn test_challenge_read_invalid() {
         init_trace();
 
         let fail_args = vec![
@@ -803,35 +806,11 @@ mod tests {
             None,
             true,
             ForceCondition::No,
-            ForceChallenge::Read2Section,
+            ForceChallenge::No,
         );
 
         test_challenge_aux(
             "14",
-            "read_reg.yaml",
-            0,
-            None,
-            None,
-            None,
-            true,
-            ForceCondition::No,
-            ForceChallenge::Read2Section,
-        );
-
-        test_challenge_aux(
-            "15",
-            "hello-world.yaml",
-            17,
-            Some(false),
-            None,
-            fail_read_2.clone(),
-            false,
-            ForceCondition::No,
-            ForceChallenge::Read1Section,
-        );
-
-        test_challenge_aux(
-            "16",
             "hello-world.yaml",
             17,
             Some(false),
@@ -844,8 +823,60 @@ mod tests {
     }
 
     #[test]
-    fn test_write_out_of_bounds() {
+    fn test_challenge_read_reg() {
         init_trace();
+
+        let fail_args = vec![
+            "1106",
+            "0xaa000000",
+            "0x11111100",
+            "0xf0000004",
+            "0xffffffffffffffff",
+        ]
+        .iter()
+        .map(|x| x.to_string())
+        .collect::<Vec<String>>();
+        let fail_read_2 = Some(FailConfiguration::new_fail_reads(FailReads::new(
+            None,
+            Some(&fail_args),
+        )));
+
+        test_challenge_aux(
+            "15",
+            "read_reg.yaml",
+            0,
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::Read2Section,
+        );
+
+        test_challenge_aux(
+            "16",
+            "hello-world.yaml",
+            17,
+            None,
+            None,
+            fail_read_2,
+            false,
+            ForceCondition::No,
+            ForceChallenge::Read2Section,
+        );
+    }
+
+    #[test]
+    fn test_challenge_write_invalid() {
+        init_trace();
+
+        let fail_args = vec!["1106", "0xaa000000", "0x11111100", "0x00000000"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+        let fail_write = Some(FailConfiguration::new_fail_write(FailWrite::new(
+            &fail_args,
+        )));
 
         test_challenge_aux(
             "17",
@@ -861,6 +892,29 @@ mod tests {
 
         test_challenge_aux(
             "18",
+            "hello-world.yaml",
+            17,
+            Some(false),
+            None,
+            fail_write,
+            false,
+            ForceCondition::No,
+            ForceChallenge::WriteSection,
+        );
+    }
+
+    #[test]
+    fn test_challenge_write_reg() {
+        init_trace();
+        let fail_args = vec!["1106", "0xaa000000", "0x11111100", "0xf0000004"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+        let fail_write = Some(FailConfiguration::new_fail_write(FailWrite::new(
+            &fail_args,
+        )));
+        test_challenge_aux(
+            "19",
             "write_reg.yaml",
             0,
             None,
@@ -872,9 +926,34 @@ mod tests {
         );
 
         test_challenge_aux(
-            "19",
+            "20",
+            "hello-world.yaml",
+            17,
+            Some(false),
+            None,
+            fail_write,
+            false,
+            ForceCondition::No,
+            ForceChallenge::WriteSection,
+        );
+    }
+
+    #[test]
+    fn test_challenge_write_protected(){
+        init_trace();
+
+        let fail_args = vec!["1106", "0xaa000000", "0x11111100", "0x80000000"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+        let fail_write = Some(FailConfiguration::new_fail_write(FailWrite::new(
+            &fail_args,
+        )));
+
+        test_challenge_aux(
+            "21",
             "write_protected.yaml",
-            0,
+            17,
             None,
             None,
             None,
@@ -883,7 +962,50 @@ mod tests {
             ForceChallenge::WriteSection,
         );
 
-        // TODO: Should not be able to challenge correct write.
-        // Maybe we need a failWrite
+        test_challenge_aux(
+            "22",
+            "hello-world.yaml",
+            17,
+            Some(false),
+            None,
+            fail_write,
+            false,
+            ForceCondition::No,
+            ForceChallenge::WriteSection,
+        );
+    }
+
+
+    // we don't need to test the program counter in an invalid or register section due to a fail_pc because the
+    // test_challenge_program_counter test already covers it
+    #[test]
+    fn test_challenge_pc_invalid() {
+        init_trace();
+        test_challenge_aux(
+            "23",
+            "pc_invalid.yaml",
+            0,
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::ProgramCounterSection,
+        );
+    }
+
+    #[test]
+    fn test_challenge_pc_reg() {
+        test_challenge_aux(
+            "24",
+            "pc_reg.yaml",
+            0,
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::ProgramCounterSection,
+        );
     }
 }
