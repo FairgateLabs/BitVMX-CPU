@@ -464,11 +464,15 @@ fn main() -> Result<(), EmulatorError> {
             checkpoint_verifier_path,
             claim_last_step,
             claim_last_hash,
-            force,
+            //force,
             fail_config_verifier,
             command_file,
+            ..
         }) => {
             let mut file = create_or_open_file(command_file);
+
+            //TOOD: Fix this
+            let force = ForceCondition::Allways;
 
             let input_bytes = hex::decode(input).expect("Invalid hex string");
             let result = verifier_check_execution(
