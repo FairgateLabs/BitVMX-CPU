@@ -6,6 +6,7 @@ use bitvmx_cpu_definitions::{
     trace::{generate_initial_step_hash, hashvec_to_string, validate_step_hash, TraceRWStep},
 };
 use clap::ValueEnum;
+use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 
 use crate::{
@@ -237,7 +238,7 @@ pub enum ForceChallenge {
     No,
 }
 
-#[derive(Debug, Clone, PartialEq, ValueEnum)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ValueEnum)]
 pub enum ForceCondition {
     ValidInputStepAndHash,
     ValidInputWrongStepOrHash,

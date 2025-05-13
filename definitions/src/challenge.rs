@@ -25,6 +25,7 @@ pub enum EmulatorResultType {
         step: Option<u64>, // step to challenge
     },
     ProverGetHashesForRoundResult {
+        // hashes for the round
         hashes: Vec<String>,
         round: u8,
     },
