@@ -46,7 +46,7 @@ enum Commands {
         force: bool,
 
         /// Fail Configuration
-        #[arg(short, long, value_name = "FailConfigProver", default_value = "None")]
+        #[arg(short, long, value_name = "FailConfigProver")]
         fail_config_prover: Option<FailConfiguration>,
 
         /// Command File to write the result
@@ -80,7 +80,7 @@ enum Commands {
         force: ForceCondition,
 
         /// Fail Configuration
-        #[arg(short, long, value_name = "FailConfigVerifier", default_value = "None")]
+        #[arg(short, long, value_name = "FailConfigVerifier")]
         fail_config_verifier: Option<FailConfiguration>,
 
         /// Command File to write the result
@@ -106,7 +106,7 @@ enum Commands {
         v_decision: u32,
 
         /// Fail Configuration
-        #[arg(short, long, value_name = "FailConfigProver", default_value = "None")]
+        #[arg(short, long, value_name = "FailConfigProver")]
         fail_config_prover: Option<FailConfiguration>,
 
         /// Command File to write the result
@@ -132,7 +132,7 @@ enum Commands {
         hashes: Vec<String>,
 
         /// Fail Configuration
-        #[arg(short, long, value_name = "FailConfigVerifier", default_value = "None")]
+        #[arg(short, long, value_name = "FailConfigVerifier")]
         fail_config_verifier: Option<FailConfiguration>,
 
         /// Command File to write the result
@@ -154,7 +154,7 @@ enum Commands {
         v_decision: u32,
 
         /// Fail Configuration
-        #[arg(short, long, value_name = "FailConfigProver", default_value = "None")]
+        #[arg(short, long, value_name = "FailConfigProver")]
         fail_config_prover: Option<FailConfiguration>,
 
         /// Command File to write the result
@@ -180,7 +180,7 @@ enum Commands {
         force: ForceChallenge,
 
         /// Fail Configuration
-        #[arg(short, long, value_name = "FailConfigVerifier", default_value = "None")]
+        #[arg(short, long, value_name = "FailConfigVerifier")]
         fail_config_verifier: Option<FailConfiguration>,
 
         /// Command File to write the result
@@ -288,10 +288,6 @@ enum Commands {
         /// Fail while reading the pc at the given step
         #[arg(long)]
         fail_pc: Option<u64>,
-
-        /// Command File to write the result
-        #[arg(short, long, value_name = "COMMAND_PATH")]
-        command_file: String,
     },
 }
 
@@ -342,7 +338,6 @@ fn main() -> Result<(), EmulatorError> {
             fail_read_2: fail_read_2_args,
             dump_mem,
             fail_pc,
-            command_file: _,
         }) => {
             if elf.is_none() && step.is_none() {
                 error!("To execute an elf file or a checkpoint step is required");
@@ -512,6 +507,7 @@ fn main() -> Result<(), EmulatorError> {
 
             let result = EmulatorResultType::ProverGetHashesForRoundResult {
                 hashes: result.clone(),
+                round: *round_number,
             }
             .to_value()?;
             file.write_all(result.to_string().as_bytes())
@@ -538,6 +534,7 @@ fn main() -> Result<(), EmulatorError> {
 
             let result = EmulatorResultType::VerifierChooseSegmentResult {
                 v_decision: result.clone(),
+                round: *round_number,
             }
             .to_value()?;
             file.write_all(result.to_string().as_bytes())
