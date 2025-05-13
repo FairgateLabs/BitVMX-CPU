@@ -288,10 +288,6 @@ enum Commands {
         /// Fail while reading the pc at the given step
         #[arg(long)]
         fail_pc: Option<u64>,
-
-        /// Command File to write the result
-        #[arg(short, long, value_name = "COMMAND_PATH")]
-        command_file: String,
     },
 }
 
@@ -342,7 +338,6 @@ fn main() -> Result<(), EmulatorError> {
             fail_read_2: fail_read_2_args,
             dump_mem,
             fail_pc,
-            command_file: _,
         }) => {
             if elf.is_none() && step.is_none() {
                 error!("To execute an elf file or a checkpoint step is required");
