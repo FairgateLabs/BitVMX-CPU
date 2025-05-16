@@ -3,6 +3,7 @@ pub mod executor;
 pub mod loader;
 
 use bitcoin_script_riscv::ScriptValidation;
+use bitvmx_cpu_definitions::challenge::EmulatorResultError;
 use loader::program_definition::ProgramDefinitionError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -26,6 +27,9 @@ pub enum EmulatorError {
 
     #[error("Error with program definition {0}")]
     ProgramDefinition(#[from] ProgramDefinitionError),
+
+    #[error("Error with emulator result {0}")]
+    EmulatorResultError(#[from] EmulatorResultError),
 }
 
 #[derive(Error, Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -4,6 +4,7 @@ use bitvmx_cpu_definitions::trace::{TraceRWStep, TraceRead};
 use num_traits;
 
 use crate::loader::program::Program;
+use serde::{Deserialize, Serialize};
 
 //use this method to determine if the address is a register or a memory address until both are consolidated
 fn is_register_address(program: &Program, address: u32) -> bool {
@@ -24,7 +25,7 @@ where
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct FailRead {
     pub step: u64,
     pub address_original: u32,
@@ -37,6 +38,20 @@ pub struct FailRead {
 impl FailRead {
     #[allow(clippy::ptr_arg)]
     pub fn new(args: &Vec<String>) -> Self {
+        fn parse_value<T>(value: &str) -> T
+        where
+            T: num_traits::Num + std::str::FromStr,
+            T: std::fmt::Debug,
+            <T as std::str::FromStr>::Err: std::fmt::Debug,
+        {
+            if value.starts_with("0x") {
+                T::from_str_radix(&value[2..], 16)
+                    .unwrap_or_else(|_| panic!("Invalid hexadecimal value"))
+            } else {
+                value.parse::<T>().expect("Invalid decimal value")
+            }
+        }
+
         Self {
             step: parse_value::<u64>(&args[0]) - 1,
             address_original: parse_value::<u32>(&args[1]),
@@ -82,7 +97,7 @@ impl FailRead {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FailReads {
     read_1: FailRead,
     read_2: FailRead,
@@ -186,7 +201,7 @@ impl FailExecute {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct FailConfiguration {
     pub fail_hash: Option<u64>,
     pub fail_execute: Option<FailExecute>,
@@ -231,15 +246,14 @@ impl FailConfiguration {
 impl FromStr for FailConfiguration {
     type Err = String;
 
-    fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        // TODO: implement
-        Ok(FailConfiguration {
-            fail_hash: None,
-            fail_execute: None,
-            fail_reads: None,
-            fail_write: None,
-            fail_pc: None,
-        })
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        serde_json::from_str(s).map_err(|e| e.to_string())
+    }
+}
+
+impl ToString for FailConfiguration {
+    fn to_string(&self) -> String {
+        serde_json::to_string(self).unwrap_or_else(|_| "Failed to serialize".to_string())
     }
 }
 
