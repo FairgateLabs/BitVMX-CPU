@@ -498,7 +498,7 @@ mod tests {
         id: &str,
         pdf: &str,
         input: u8,
-        execute_err: Option<bool>,
+        execute_err: bool,
         fail_config_prover: Option<FailConfiguration>,
         fail_config_verifier: Option<FailConfiguration>,
         challenge_ok: bool,
@@ -570,18 +570,17 @@ mod tests {
             prover_final_trace(pdf, chk_prover_path, v_decision + 1, fail_config_prover).unwrap();
         info!("Prover final trace: {:?}", final_trace.to_csv());
 
-        if execute_err.is_some() {
-            let result = verify_script(&final_trace, REGISTERS_BASE_ADDRESS, &None);
-            info!("Validation result: {:?}", result);
+        let result = verify_script(&final_trace, REGISTERS_BASE_ADDRESS, &None);
+        info!("Validation result: {:?}", result);
 
-            if execute_err.unwrap() {
-                assert!(result.is_err());
-                //once execution fails there is no need to execute more steps
-                return;
-            } else {
-                assert!(result.is_ok());
-            }
+        if execute_err {
+            assert!(result.is_err());
+            //once execution fails there is no need to execute more steps
+            return;
+        } else {
+            assert!(result.is_ok());
         }
+    
 
         let challenge = verifier_choose_challenge(
             pdf,
@@ -605,7 +604,7 @@ mod tests {
             "1",
             "hello-world.yaml",
             0,
-            Some(true),
+            true,
             None,
             None,
             false,
@@ -617,7 +616,7 @@ mod tests {
             "2",
             "hello-world.yaml",
             17,
-            Some(false),
+            false,
             None,
             None,
             false,
@@ -635,7 +634,7 @@ mod tests {
             "3",
             "hello-world.yaml",
             17,
-            Some(false),
+            false,
             fail_hash.clone(),
             None,
             true,
@@ -646,7 +645,7 @@ mod tests {
             "4",
             "hello-world.yaml",
             17,
-            Some(false),
+            false,
             None,
             fail_hash,
             false,
@@ -664,7 +663,7 @@ mod tests {
             "5",
             "hello-world.yaml",
             17,
-            Some(false),
+            false,
             fail_hash.clone(),
             None,
             true,
@@ -675,7 +674,7 @@ mod tests {
             "6",
             "hello-world.yaml",
             17,
-            Some(false),
+            false,
             None,
             fail_hash,
             false,
@@ -692,7 +691,7 @@ mod tests {
             "7",
             "hello-world.yaml",
             17,
-            Some(false),
+            false,
             fail_entrypoint.clone(),
             None,
             true,
@@ -703,7 +702,7 @@ mod tests {
             "8",
             "hello-world.yaml",
             17,
-            Some(false),
+            false,
             None,
             fail_entrypoint,
             false,
@@ -720,7 +719,7 @@ mod tests {
             "9",
             "hello-world.yaml",
             17,
-            Some(false),
+            false,
             fail_pc.clone(),
             None,
             true,
@@ -731,7 +730,7 @@ mod tests {
             "10",
             "hello-world.yaml",
             17,
-            Some(false),
+            false,
             None,
             fail_pc,
             false,
@@ -762,7 +761,7 @@ mod tests {
             "11",
             "hello-world.yaml",
             0,
-            Some(false),
+            false,
             fail_read_2,
             None,
             true,
@@ -789,7 +788,7 @@ mod tests {
             "12",
             "hello-world.yaml",
             17,
-            Some(false),
+            false,
             None,
             fail_read_2,
             false,
@@ -828,7 +827,7 @@ mod tests {
             "13",
             "read_invalid.yaml",
             0,
-            Some(false),
+            false,
             fail_execute,
             None,
             true,
@@ -855,7 +854,7 @@ mod tests {
             "14",
             "hello-world.yaml",
             17,
-            Some(false),
+            false,
             None,
             fail_read_2,
             false,
@@ -894,7 +893,7 @@ mod tests {
             "15",
             "read_reg.yaml",
             0,
-            Some(false),
+            false,
             fail_execute,
             None,
             true,
@@ -921,7 +920,7 @@ mod tests {
             "16",
             "hello-world.yaml",
             17,
-            None,
+            false,
             None,
             fail_read_2,
             false,
@@ -957,7 +956,7 @@ mod tests {
             "17",
             "write_invalid.yaml",
             0,
-            Some(false),
+            false,
             fail_execute,
             None,
             true,
@@ -977,7 +976,7 @@ mod tests {
             "18",
             "hello-world.yaml",
             17,
-            Some(false),
+            false,
             None,
             fail_write,
             false,
@@ -1016,7 +1015,7 @@ mod tests {
             "19",
             "write_reg.yaml",
             0,
-            Some(false),
+            false,
             fail_execute,
             None,
             true,
@@ -1035,7 +1034,7 @@ mod tests {
             "20",
             "hello-world.yaml",
             17,
-            Some(false),
+            false,
             None,
             fail_write,
             false,
@@ -1074,7 +1073,7 @@ mod tests {
             "21",
             "write_protected.yaml",
             17,
-            Some(false),
+            false,
             fail_execute,
             None,
             true,
@@ -1094,7 +1093,7 @@ mod tests {
             "22",
             "hello-world.yaml",
             17,
-            Some(false),
+            false,
             None,
             fail_write,
             false,
@@ -1132,7 +1131,7 @@ mod tests {
             "23",
             "pc_invalid.yaml",
             0,
-            Some(false),
+            false,
             fail_execute,
             None,
             true,
@@ -1168,7 +1167,7 @@ mod tests {
             "24",
             "pc_reg.yaml",
             0,
-            Some(false),
+            false,
             fail_execute,
             None,
             true,
