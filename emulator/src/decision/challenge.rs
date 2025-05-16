@@ -392,6 +392,34 @@ pub fn verifier_choose_challenge(
         }
     }
 
+    // check entrypoint
+    if trace.read_pc.pc.get_address() != my_trace.read_pc.pc.get_address()
+        && force == ForceChallenge::No
+        || trace.read_pc.pc.get_micro() != my_trace.read_pc.pc.get_micro()
+            && force == ForceChallenge::No
+        || force == ForceChallenge::EntryPoint
+        || force == ForceChallenge::ProgramCounter
+    {
+        if trace.step_number == 1 {
+            info!("Veifier choose to challenge ENTRYPOINT");
+            return Ok(ChallengeType::EntryPoint(
+                trace.read_pc,
+                trace.step_number,
+                program.pc.get_address(), //this parameter is only used for the test
+            ));
+        } else {
+            info!("Veifier choose to challenge PROGRAM_COUNTER");
+            let pre_pre_hash = my_execution[0].1.clone();
+            let pre_step = my_execution[1].0.clone();
+            return Ok(ChallengeType::ProgramCounter(
+                pre_pre_hash,
+                pre_step.trace_step,
+                step_hash,
+                trace.read_pc,
+            ));
+        }
+    }
+
     Ok(ChallengeType::No)
 }
 
