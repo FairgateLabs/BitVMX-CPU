@@ -359,7 +359,8 @@ impl Program {
 
         let is_valid = sections_ranges
             .iter()
-            .any(|&(start, end)| start <= address && address <= end - 3);
+            .any(|&(start, end)| start <= address && address <= end - 3)
+            && address % 4 == 0;
         (is_valid, sections_ranges)
     }
 }
