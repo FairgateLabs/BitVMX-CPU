@@ -140,7 +140,7 @@ impl FailReads {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct FailWrite {
     pub step: u64,
     pub address_original: u32,
@@ -186,7 +186,7 @@ impl FailWrite {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct FailExecute {
     pub step: u64,
     pub fake_trace: TraceRWStep,
