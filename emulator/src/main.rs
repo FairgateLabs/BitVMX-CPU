@@ -15,7 +15,6 @@ use emulator::{
     EmulatorError, ExecutionResult,
 };
 use hex::FromHex;
-use serde_json::json;
 use std::io::Write;
 use tracing::{error, info, Level};
 
@@ -293,10 +292,6 @@ enum Commands {
         /// Fail while reading the pc at the given step
         #[arg(long)]
         fail_pc: Option<u64>,
-
-        /// Command File to write the result
-        #[arg(short, long, value_name = "COMMAND_PATH")]
-        command_file: String,
     },
 }
 
@@ -348,7 +343,6 @@ fn main() -> Result<(), EmulatorError> {
             fail_write: fail_write_args,
             dump_mem,
             fail_pc,
-            command_file,
         }) => {
             if elf.is_none() && step.is_none() {
                 error!("To execute an elf file or a checkpoint step is required");
