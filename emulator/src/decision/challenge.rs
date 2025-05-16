@@ -301,34 +301,6 @@ pub fn verifier_choose_challenge(
     info!("execution: {:?}", my_execution);
     let my_trace = my_execution[my_trace_idx].0.clone();
 
-    // check entrypoint
-    if trace.read_pc.pc.get_address() != my_trace.read_pc.pc.get_address()
-        && force == ForceChallenge::No
-        || trace.read_pc.pc.get_micro() != my_trace.read_pc.pc.get_micro()
-            && force == ForceChallenge::No
-        || force == ForceChallenge::EntryPoint
-        || force == ForceChallenge::ProgramCounter
-    {
-        if trace.step_number == 1 {
-            info!("Veifier choose to challenge ENTRYPOINT");
-            return Ok(ChallengeType::EntryPoint(
-                trace.read_pc,
-                trace.step_number,
-                program.pc.get_address(), //this parameter is only used for the test
-            ));
-        } else {
-            info!("Veifier choose to challenge PROGRAM_COUNTER");
-            let pre_pre_hash = my_execution[0].1.clone();
-            let pre_step = my_execution[1].0.clone();
-            return Ok(ChallengeType::ProgramCounter(
-                pre_pre_hash,
-                pre_step.trace_step,
-                step_hash,
-                trace.read_pc,
-            ));
-        }
-    }
-
     // TODO: limit exception
     // TODO: segmentation fault
     let pc_address = trace.read_pc.pc.get_address();
@@ -488,13 +460,17 @@ pub fn verifier_choose_challenge(
 #[cfg(test)]
 mod tests {
     use bitcoin_script_riscv::riscv::challenges::execute_challenge;
+    use bitvmx_cpu_definitions::{
+        memory::MemoryWitness,
+        trace::{ProgramCounter, TraceRead, TraceReadPC, TraceStep, TraceWrite},
+    };
     use tracing::Level;
 
     use crate::{
         constants::REGISTERS_BASE_ADDRESS,
         decision::challenge::*,
         executor::{
-            utils::{FailReads, FailWrite},
+            utils::{FailExecute, FailReads, FailWrite},
             verifier::verify_script,
         },
         loader::program_definition::ProgramDefinition,
@@ -767,6 +743,7 @@ mod tests {
     #[test]
     fn test_challenge_input() {
         init_trace();
+
         let fail_args = vec![
             "1106",
             "0xaa000000",
@@ -780,19 +757,34 @@ mod tests {
         let fail_read_2 = Some(FailConfiguration::new_fail_reads(FailReads::new(
             None,
             Some(&fail_args),
-            //None,
         )));
         test_challenge_aux(
             "11",
             "hello-world.yaml",
             0,
             Some(false),
-            fail_read_2.clone(),
+            fail_read_2,
             None,
             true,
             ForceCondition::No,
             ForceChallenge::No,
         );
+
+        let fail_args = vec![
+            "1106",
+            "0xaa000000",
+            "0x11111100",
+            "0xaa000000",
+            "0xffffffffffffffff",
+        ]
+        .iter()
+        .map(|x| x.to_string())
+        .collect::<Vec<String>>();
+        let fail_read_2 = Some(FailConfiguration::new_fail_reads(FailReads::new(
+            None,
+            Some(&fail_args),
+        )));
+
         test_challenge_aux(
             "12",
             "hello-world.yaml",
@@ -802,13 +794,47 @@ mod tests {
             fail_read_2,
             false,
             ForceCondition::ValidInputStepAndHash,
-            ForceChallenge::InputData, // It's currently not challenging, we should fail_read a different input
+            ForceChallenge::InputData,
         );
     }
 
     #[test]
     fn test_challenge_read_invalid() {
         init_trace();
+
+        let fail_execute = FailExecute {
+            step: 9,
+            fake_trace: TraceRWStep::new(
+                9,
+                TraceRead::new(4026531900, 0, 8),
+                TraceRead::new(0, 0, 0xffffffffffffffff),
+                TraceReadPC::new(ProgramCounter::new(2147483672, 0), 501635),
+                TraceStep::new(
+                    TraceWrite::new(4026531900, 0),
+                    ProgramCounter::new(2147483676, 0),
+                ),
+                None,
+                MemoryWitness::new(
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Memory,
+                    MemoryAccessType::Register,
+                ),
+            ),
+        };
+
+        let fail_execute = Some(FailConfiguration::new_fail_execute(fail_execute));
+
+        test_challenge_aux(
+            "13",
+            "read_invalid.yaml",
+            0,
+            Some(false),
+            fail_execute,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+        );
 
         let fail_args = vec![
             "1106",
@@ -824,18 +850,6 @@ mod tests {
             None,
             Some(&fail_args),
         )));
-
-        test_challenge_aux(
-            "13",
-            "read_invalid.yaml",
-            0,
-            None,
-            None,
-            None,
-            true,
-            ForceCondition::No,
-            ForceChallenge::No,
-        );
 
         test_challenge_aux(
             "14",
@@ -854,6 +868,40 @@ mod tests {
     fn test_challenge_read_reg() {
         init_trace();
 
+        let fail_execute = FailExecute {
+            step: 10,
+            fake_trace: TraceRWStep::new(
+                10,
+                TraceRead::new(4026531900, 4026531840, 9),
+                TraceRead::new(4026531840, 0, 0xffffffffffffffff),
+                TraceReadPC::new(ProgramCounter::new(2147483676, 0), 501635),
+                TraceStep::new(
+                    TraceWrite::new(4026531900, 0),
+                    ProgramCounter::new(2147483680, 0),
+                ),
+                None,
+                MemoryWitness::new(
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Memory,
+                    MemoryAccessType::Register,
+                ),
+            ),
+        };
+
+        let fail_execute = Some(FailConfiguration::new_fail_execute(fail_execute));
+
+        test_challenge_aux(
+            "15",
+            "read_reg.yaml",
+            0,
+            Some(false),
+            fail_execute,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+        );
+
         let fail_args = vec![
             "1106",
             "0xaa000000",
@@ -868,18 +916,6 @@ mod tests {
             None,
             Some(&fail_args),
         )));
-
-        test_challenge_aux(
-            "15",
-            "read_reg.yaml",
-            0,
-            None,
-            None,
-            None,
-            true,
-            ForceCondition::No,
-            ForceChallenge::Read2Section,
-        );
 
         test_challenge_aux(
             "16",
@@ -898,6 +934,37 @@ mod tests {
     fn test_challenge_write_invalid() {
         init_trace();
 
+        let fail_execute = FailExecute {
+            step: 10,
+            fake_trace: TraceRWStep::new(
+                10,
+                TraceRead::new(4026531900, 0, 8),
+                TraceRead::new(4026531896, 1234, 9),
+                TraceReadPC::new(ProgramCounter::new(2147483676, 0), 15179811),
+                TraceStep::new(TraceWrite::new(0, 1234), ProgramCounter::new(2147483680, 0)),
+                None,
+                MemoryWitness::new(
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Memory,
+                ),
+            ),
+        };
+
+        let fail_execute = Some(FailConfiguration::new_fail_execute(fail_execute));
+
+        test_challenge_aux(
+            "17",
+            "write_invalid.yaml",
+            0,
+            Some(false),
+            fail_execute,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+        );
+
         let fail_args = vec!["1106", "0xaa000000", "0x11111100", "0x00000000"]
             .iter()
             .map(|x| x.to_string())
@@ -905,18 +972,6 @@ mod tests {
         let fail_write = Some(FailConfiguration::new_fail_write(FailWrite::new(
             &fail_args,
         )));
-
-        test_challenge_aux(
-            "17",
-            "write_invalid.yaml",
-            0,
-            None,
-            None,
-            None,
-            true,
-            ForceCondition::No,
-            ForceChallenge::WriteSection,
-        );
 
         test_challenge_aux(
             "18",
@@ -934,6 +989,40 @@ mod tests {
     #[test]
     fn test_challenge_write_reg() {
         init_trace();
+
+        let fail_execute = FailExecute {
+            step: 11,
+            fake_trace: TraceRWStep::new(
+                11,
+                TraceRead::new(4026531900, 4026531840, 9),
+                TraceRead::new(4026531896, 1234, 10),
+                TraceReadPC::new(ProgramCounter::new(2147483680, 0), 15179811),
+                TraceStep::new(
+                    TraceWrite::new(4026531840, 1234),
+                    ProgramCounter::new(2147483684, 0),
+                ),
+                None,
+                MemoryWitness::new(
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Memory,
+                ),
+            ),
+        };
+
+        let fail_execute = Some(FailConfiguration::new_fail_execute(fail_execute));
+
+        test_challenge_aux(
+            "19",
+            "write_reg.yaml",
+            0,
+            Some(false),
+            fail_execute,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+        );
         let fail_args = vec!["1106", "0xaa000000", "0x11111100", "0xf0000004"]
             .iter()
             .map(|x| x.to_string())
@@ -941,17 +1030,6 @@ mod tests {
         let fail_write = Some(FailConfiguration::new_fail_write(FailWrite::new(
             &fail_args,
         )));
-        test_challenge_aux(
-            "19",
-            "write_reg.yaml",
-            0,
-            None,
-            None,
-            None,
-            true,
-            ForceCondition::No,
-            ForceChallenge::WriteSection,
-        );
 
         test_challenge_aux(
             "20",
@@ -967,8 +1045,42 @@ mod tests {
     }
 
     #[test]
-    fn test_challenge_write_protected(){
+    fn test_challenge_write_protected() {
         init_trace();
+
+        let fail_execute = FailExecute {
+            step: 11,
+            fake_trace: TraceRWStep::new(
+                11,
+                TraceRead::new(4026531900, 2147483648, 9),
+                TraceRead::new(4026531896, 1234, 10),
+                TraceReadPC::new(ProgramCounter::new(2147483680, 0), 15179811),
+                TraceStep::new(
+                    TraceWrite::new(2147483648, 1234),
+                    ProgramCounter::new(2147483684, 0),
+                ),
+                None,
+                MemoryWitness::new(
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Memory,
+                ),
+            ),
+        };
+
+        let fail_execute = Some(FailConfiguration::new_fail_execute(fail_execute));
+
+        test_challenge_aux(
+            "21",
+            "write_protected.yaml",
+            17,
+            Some(false),
+            fail_execute,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+        );
 
         let fail_args = vec!["1106", "0xaa000000", "0x11111100", "0x80000000"]
             .iter()
@@ -977,18 +1089,6 @@ mod tests {
         let fail_write = Some(FailConfiguration::new_fail_write(FailWrite::new(
             &fail_args,
         )));
-
-        test_challenge_aux(
-            "21",
-            "write_protected.yaml",
-            17,
-            None,
-            None,
-            None,
-            true,
-            ForceCondition::No,
-            ForceChallenge::WriteSection,
-        );
 
         test_challenge_aux(
             "22",
@@ -1003,37 +1103,77 @@ mod tests {
         );
     }
 
-
     // we don't need to test the program counter in an invalid or register section due to a fail_pc because the
     // test_challenge_program_counter test already covers it
     #[test]
     fn test_challenge_pc_invalid() {
         init_trace();
+
+        let fail_execute = FailExecute {
+            step: 9,
+            fake_trace: TraceRWStep::new(
+                9,
+                TraceRead::new(4026531844, 2147483700, 2),
+                TraceRead::default(),
+                TraceReadPC::new(ProgramCounter::new(0, 0), 32871),
+                TraceStep::new(TraceWrite::default(), ProgramCounter::new(2147483700, 0)),
+                None,
+                MemoryWitness::new(
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Unused,
+                    MemoryAccessType::Unused,
+                ),
+            ),
+        };
+
+        let fail_execute = Some(FailConfiguration::new_fail_execute(fail_execute));
+
         test_challenge_aux(
             "23",
             "pc_invalid.yaml",
             0,
-            None,
-            None,
+            Some(false),
+            fail_execute,
             None,
             true,
             ForceCondition::No,
-            ForceChallenge::ProgramCounterSection,
+            ForceChallenge::No,
         );
     }
 
     #[test]
     fn test_challenge_pc_reg() {
+        init_trace();
+
+        let fail_execute = FailExecute {
+            step: 9,
+            fake_trace: TraceRWStep::new(
+                9,
+                TraceRead::new(4026531844, 2147483700, 2),
+                TraceRead::default(),
+                TraceReadPC::new(ProgramCounter::new(4026531840, 0), 32871),
+                TraceStep::new(TraceWrite::default(), ProgramCounter::new(2147483700, 0)),
+                None,
+                MemoryWitness::new(
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Unused,
+                    MemoryAccessType::Unused,
+                ),
+            ),
+        };
+
+        let fail_execute = Some(FailConfiguration::new_fail_execute(fail_execute));
+
         test_challenge_aux(
             "24",
             "pc_reg.yaml",
             0,
-            None,
-            None,
+            Some(false),
+            fail_execute,
             None,
             true,
             ForceCondition::No,
-            ForceChallenge::ProgramCounterSection,
+            ForceChallenge::No,
         );
     }
 }

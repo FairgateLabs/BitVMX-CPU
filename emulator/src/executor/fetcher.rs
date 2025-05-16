@@ -87,7 +87,14 @@ pub fn execute_program(
             }
         }
 
-        let mut trace = execute_step(program, print_program_stdout, debug);
+        let mut trace = match &fail_config.fail_execute {
+            Some(fe) if fe.step - 1 == program.step => {
+                program.step += 1;
+                program.pc.next_address();
+                Ok(fe.fake_trace.clone())
+            }
+            _ => execute_step(program, print_program_stdout, debug),
+        };
 
         let mut should_patch_write = false;
         if let Some(fw) = &fail_config.fail_write {
@@ -129,13 +136,6 @@ pub fn execute_program(
             if let Some(fw) = &fail_config.fail_write {
                 fw.patch_trace_write(trace.as_mut().unwrap(), should_patch_write);
             }
-            
-            if let Some(fail) = fail_config.fail_execute {
-                if fail == program.step {
-                    let value = &mut trace.as_mut().unwrap().trace_step.write_1.value;
-                    *value = value.wrapping_add(1);
-                }
-            }
 
             if !no_hash {
                 let trace_bytes = trace.as_ref().unwrap().trace_step.to_bytes();
@@ -167,7 +167,10 @@ pub fn execute_program(
             if trace_set.is_none() || trace_set.as_ref().unwrap().contains(&program.step) {
                 let hash_hex = hash_to_string(&program.hash);
                 traces.push((
-                    trace.as_ref().unwrap_or(&TraceRWStep::from_step(program.step)).clone(),
+                    trace
+                        .as_ref()
+                        .unwrap_or(&TraceRWStep::from_step(program.step))
+                        .clone(),
                     hash_hex.clone(),
                 ));
                 if debug {

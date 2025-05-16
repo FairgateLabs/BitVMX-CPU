@@ -9,7 +9,7 @@ use emulator::{
     },
     executor::{
         fetcher::execute_program,
-        utils::{FailConfiguration, FailReads, FailWrite},
+        utils::{FailConfiguration, FailExecute, FailReads, FailWrite},
     },
     loader::program::{generate_rom_commitment, load_elf, Program},
     EmulatorError,
@@ -267,8 +267,8 @@ enum Commands {
         fail_hash: Option<u64>,
 
         /// Fail producing the write value for a specific step
-        #[arg(long)]
-        fail_execute: Option<u64>,
+        #[arg(long, value_names = &["step", "fake_trace"], num_args = 2)]
+        fail_execute: Option<Vec<String>>,
 
         /// List of specific trace step to print
         #[arg(long, value_name = "TraceList")]
@@ -341,7 +341,7 @@ fn main() -> Result<(), EmulatorError> {
             sections,
             checkpoint_path,
             fail_hash,
-            fail_execute,
+            fail_execute: fail_execute_args,
             list,
             fail_read_1: fail_read_1_args,
             fail_read_2: fail_read_2_args,
@@ -393,6 +393,8 @@ fn main() -> Result<(), EmulatorError> {
                 None => None,
             };
 
+            let fail_execute = fail_execute_args.as_ref().map(FailExecute::new);
+
             let fail_reads = if fail_read_1_args.is_some() || fail_read_2_args.is_some() {
                 Some(FailReads::new(
                     fail_read_1_args.as_ref(),
@@ -407,7 +409,7 @@ fn main() -> Result<(), EmulatorError> {
             let debugvar = *debug;
             let fail_config = FailConfiguration {
                 fail_hash: *fail_hash,
-                fail_execute: *fail_execute,
+                fail_execute,
                 fail_reads,
                 fail_write,
                 fail_pc: *fail_pc,

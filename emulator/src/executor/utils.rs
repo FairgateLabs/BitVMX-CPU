@@ -18,8 +18,7 @@ where
     <T as std::str::FromStr>::Err: std::fmt::Debug,
 {
     if value.starts_with("0x") {
-        T::from_str_radix(&value[2..], 16)
-            .unwrap_or_else(|_| panic!("Invalid hexadecimal value"))
+        T::from_str_radix(&value[2..], 16).unwrap_or_else(|_| panic!("Invalid hexadecimal value"))
     } else {
         value.parse::<T>().expect("Invalid decimal value")
     }
@@ -173,9 +172,24 @@ impl FailWrite {
 }
 
 #[derive(Clone, Debug, Default)]
+pub struct FailExecute {
+    pub step: u64,
+    pub fake_trace: TraceRWStep,
+}
+
+impl FailExecute {
+    pub fn new(args: &Vec<String>) -> Self {
+        Self {
+            step: parse_value::<u64>(&args[0]) - 1,
+            fake_trace: TraceRWStep::from_str(&args[1]).unwrap(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct FailConfiguration {
     pub fail_hash: Option<u64>,
-    pub fail_execute: Option<u64>,
+    pub fail_execute: Option<FailExecute>,
     pub fail_reads: Option<FailReads>,
     pub fail_write: Option<FailWrite>,
     pub fail_pc: Option<u64>,
@@ -188,7 +202,7 @@ impl FailConfiguration {
             ..Default::default()
         }
     }
-    pub fn new_fail_execute(fail_execute: u64) -> Self {
+    pub fn new_fail_execute(fail_execute: FailExecute) -> Self {
         Self {
             fail_execute: Some(fail_execute),
             ..Default::default()
