@@ -433,15 +433,6 @@ fn main() -> Result<(), EmulatorError> {
             )
             .0;
             info!("Execution result: {:?}", result);
-            let mut file = create_or_open_file(command_file);
-            let json_result = json!({
-                    "type": "ExecuteResult",
-                    "data": {
-                        "result": result,
-                    }
-            });
-            file.write_all(json_result.to_string().as_bytes())
-                .expect("Failed to write JSON to file");
         }
         Some(Commands::ProverExecute {
             pdf,
