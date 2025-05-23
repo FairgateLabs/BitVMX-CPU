@@ -120,6 +120,14 @@ pub fn get_key_from_instruction_and_micro(instruction: &Instruction, micro: u8) 
     }
 }
 
+pub fn get_key_from_opcode(opcode: u32, micro: u8) -> Option<String> {
+    let instruction = riscv_decode::decode(opcode);
+    match instruction {
+        Ok(instruction) => Some(get_key_from_instruction_and_micro(&instruction, micro)),
+        Err(_) => None,
+    }
+}
+
 pub fn get_required_microinstruction(instruction: &Instruction) -> u8 {
     match instruction {
         Lh(_) => 4,

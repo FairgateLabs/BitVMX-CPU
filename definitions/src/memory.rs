@@ -88,6 +88,10 @@ impl MemoryWitness {
         }
     }
 
+    pub fn from_byte(data: u8) -> Self {
+        Self { data }
+    }
+
     pub fn read_1(&self) -> MemoryAccessType {
         (self.data >> 4).into()
     }
