@@ -345,23 +345,28 @@ impl Program {
         info!("\n================================================\n");
     }
 
-    pub fn valid_address(
-        &self,
-        address: u32,
-        section_filter: impl Fn(&&Section) -> bool,
-    ) -> (bool, Vec<(u32, u32)>) {
-        let sections_ranges: Vec<(u32, u32)> = self
-            .sections
+    pub fn get_sections(&self, section_filter: impl Fn(&&Section) -> bool) -> Vec<(u32, u32)> {
+        self.sections
             .iter()
             .filter(section_filter)
-            .map(|section| (section.start, section.start + section.size))
-            .collect();
+            .map(|section| (section.start, section.start + section.size-1))
+            .collect()
+    }
 
-        let is_valid = sections_ranges
-            .iter()
-            .any(|&(start, end)| start <= address && address <= end - 3)
-            && address % 4 == 0;
-        (is_valid, sections_ranges)
+    pub fn get_read_write_sections(&self) -> Vec<(u32, u32)> {
+        self.get_sections(|section| section.is_write && !section.registers)
+    }
+
+    pub fn get_read_only_sections(&self) -> Vec<(u32, u32)> {
+        self.get_sections(|section| !section.is_write && !section.registers)
+    }
+
+    pub fn get_register_sections(&self) -> Vec<(u32, u32)> {
+        self.get_sections(|section| section.registers)
+    }
+
+    pub fn get_code_sections(&self) -> Vec<(u32, u32)> {
+        self.get_sections(|section| section.is_code)
     }
 }
 

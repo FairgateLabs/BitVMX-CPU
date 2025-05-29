@@ -236,11 +236,9 @@ pub enum ForceChallenge {
     TraceHashZero,
     EntryPoint,
     ProgramCounter,
+    Opcode,
     InputData,
-    ProgramCounterSection,
-    Read1Section,
-    Read2Section,
-    WriteSection,
+    AddressesSections,
     No,
 }
 
@@ -250,6 +248,13 @@ pub enum ForceCondition {
     ValidInputWrongStepOrHash,
     Allways,
     No,
+}
+
+fn address_in_sections(address: u32, sections: &Vec<(u32, u32)>) -> bool {
+    sections
+        .iter()
+        .any(|&(start, end)| start <= address && address <= end - 3)
+        && address % 4 == 0
 }
 
 pub fn verifier_choose_challenge(
@@ -304,66 +309,56 @@ pub fn verifier_choose_challenge(
     let my_trace = my_execution[my_trace_idx].0.clone();
 
     // TODO: limit exception
-    // TODO: segmentation fault
-    let pc_address = trace.read_pc.pc.get_address();
-    let (is_valid, code_sections) = program.valid_address(pc_address, |section| section.is_code);
-    if !is_valid && force == ForceChallenge::No || force == ForceChallenge::ProgramCounterSection {
-        return Ok(ChallengeType::AddressInSections(pc_address, code_sections));
-    }
 
-    let read1_address = trace.read_1.address;
-    let (is_valid, sections) = program.valid_address(read1_address, |section| {
-        (trace.mem_witness.read_1() == MemoryAccessType::Register) == section.registers
-    });
-    if !is_valid && force == ForceChallenge::No || force == ForceChallenge::Read1Section {
-        return Ok(ChallengeType::AddressInSections(read1_address, sections));
-    }
+    let read_write_sections = &program.get_read_write_sections();
+    let read_only_sections = &program.get_read_only_sections();
+    let register_sections = &program.get_register_sections();
+    let code_sections = &program.get_code_sections();
 
-    let read2_address = trace.read_2.address;
-    let (is_valid, sections) = program.valid_address(read2_address, |section| {
-        (trace.mem_witness.read_2() == MemoryAccessType::Register) == section.registers
-    });
-    if !is_valid && force == ForceChallenge::No || force == ForceChallenge::Read2Section {
-        return Ok(ChallengeType::AddressInSections(read2_address, sections));
-    }
-
-    let write_address = trace.trace_step.write_1.address;
-    let (is_valid, write_sections) = program.valid_address(write_address, |section| {
-        (trace.mem_witness.write() == MemoryAccessType::Register) == section.registers
-            && section.is_write
-    });
-    if !is_valid && force == ForceChallenge::No || force == ForceChallenge::WriteSection {
-        return Ok(ChallengeType::AddressInSections(
-            write_address,
-            write_sections,
-        ));
-    }
-
-    // check const read value
-    let conflict_read_1 =
-        trace.read_1.value != my_trace.read_1.value && trace.read_1.last_step == LAST_STEP_INIT;
-    let conflict_read_2 =
-        trace.read_2.value != my_trace.read_2.value && trace.read_2.last_step == LAST_STEP_INIT;
-    if conflict_read_1 || conflict_read_2 {
-        let conflict_address = if conflict_read_1 {
-            trace.read_1.address
-        } else {
-            trace.read_2.address
-        };
-        let section = program.find_section(conflict_address)?;
-        //TODO: Check if the address is in the input section rom ram or registers
-        let value = program.read_mem(conflict_address)?;
-        if section.name == program_def.input_section_name && force == ForceChallenge::No
-            || force == ForceChallenge::InputData
-        {
-            info!("Veifier choose to challenge invalid INPUT DATA");
-            return Ok(ChallengeType::InputData(
-                trace.read_1.clone(),
-                trace.read_2.clone(),
-                conflict_address,
-                value,
-            ));
+    let is_valid_read_1 = match trace.mem_witness.read_1() {
+        MemoryAccessType::Unused => true,
+        MemoryAccessType::Register => address_in_sections(trace.read_1.address, register_sections),
+        MemoryAccessType::Memory => {
+            address_in_sections(trace.read_1.address, read_write_sections)
+                || address_in_sections(trace.read_1.address, read_only_sections)
         }
+    };
+
+    let is_valid_read_2 = match trace.mem_witness.read_2() {
+        MemoryAccessType::Unused => true,
+        MemoryAccessType::Register => address_in_sections(trace.read_2.address, register_sections),
+        MemoryAccessType::Memory => {
+            address_in_sections(trace.read_2.address, read_write_sections)
+                || address_in_sections(trace.read_2.address, read_only_sections)
+        }
+    };
+
+    let is_valid_write = match trace.mem_witness.write() {
+        MemoryAccessType::Unused => true,
+        MemoryAccessType::Register => {
+            address_in_sections(trace.trace_step.write_1.address, register_sections)
+        }
+        MemoryAccessType::Memory => {
+            address_in_sections(trace.trace_step.write_1.address, read_write_sections)
+        }
+    };
+    let is_valid_pc = address_in_sections(trace.read_pc.pc.get_address(), code_sections);
+
+    if !(is_valid_read_1 && is_valid_read_2 && is_valid_write && is_valid_pc)
+        && force == ForceChallenge::No
+        || force == ForceChallenge::AddressesSections
+    {
+        return Ok(ChallengeType::AddressesSections(
+            trace.read_1,
+            trace.read_2,
+            trace.trace_step.write_1,
+            trace.mem_witness,
+            trace.read_pc.pc,
+            read_write_sections.clone(),
+            read_only_sections.clone(),
+            register_sections.clone(),
+            code_sections.clone(),
+        ));
     }
 
     // check entrypoint
@@ -390,6 +385,33 @@ pub fn verifier_choose_challenge(
                 pre_step.trace_step,
                 step_hash,
                 trace.read_pc,
+            ));
+        }
+    }
+
+    // check const read value
+    let conflict_read_1 =
+        trace.read_1.value != my_trace.read_1.value && trace.read_1.last_step == LAST_STEP_INIT;
+    let conflict_read_2 =
+        trace.read_2.value != my_trace.read_2.value && trace.read_2.last_step == LAST_STEP_INIT;
+    if conflict_read_1 || conflict_read_2 {
+        let conflict_address = if conflict_read_1 {
+            trace.read_1.address
+        } else {
+            trace.read_2.address
+        };
+        let section = program.find_section(conflict_address)?;
+        //TODO: Check if the address is in the input section rom ram or registers
+        let value = program.read_mem(conflict_address)?;
+        if section.name == program_def.input_section_name && force == ForceChallenge::No
+            || force == ForceChallenge::InputData
+        {
+            info!("Veifier choose to challenge invalid INPUT DATA");
+            return Ok(ChallengeType::InputData(
+                trace.read_1.clone(),
+                trace.read_2.clone(),
+                conflict_address,
+                value,
             ));
         }
     }
@@ -859,7 +881,7 @@ mod tests {
             fail_read_2,
             false,
             ForceCondition::No,
-            ForceChallenge::Read2Section,
+            ForceChallenge::AddressesSections,
         );
     }
 
@@ -925,7 +947,7 @@ mod tests {
             fail_read_2,
             false,
             ForceCondition::No,
-            ForceChallenge::Read2Section,
+            ForceChallenge::AddressesSections,
         );
     }
 
@@ -981,7 +1003,7 @@ mod tests {
             fail_write,
             false,
             ForceCondition::No,
-            ForceChallenge::WriteSection,
+            ForceChallenge::AddressesSections,
         );
     }
 
@@ -1039,7 +1061,7 @@ mod tests {
             fail_write,
             false,
             ForceCondition::No,
-            ForceChallenge::WriteSection,
+            ForceChallenge::AddressesSections,
         );
     }
 
@@ -1098,12 +1120,10 @@ mod tests {
             fail_write,
             false,
             ForceCondition::No,
-            ForceChallenge::WriteSection,
+            ForceChallenge::AddressesSections,
         );
     }
 
-    // we don't need to test the program counter in an invalid or register section due to a fail_pc because the
-    // test_challenge_program_counter test already covers it
     #[test]
     fn test_challenge_pc_invalid() {
         init_trace();
@@ -1132,11 +1152,23 @@ mod tests {
             "pc_invalid.yaml",
             0,
             false,
-            fail_execute,
+            fail_execute.clone(),
             None,
             true,
             ForceCondition::No,
             ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "24",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            fail_execute,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::AddressesSections,
         );
     }
 
@@ -1164,15 +1196,27 @@ mod tests {
         let fail_execute = Some(FailConfiguration::new_fail_execute(fail_execute));
 
         test_challenge_aux(
-            "24",
+            "25",
             "pc_reg.yaml",
             0,
             false,
-            fail_execute,
+            fail_execute.clone(),
             None,
             true,
             ForceCondition::No,
             ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "26",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            fail_execute,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::AddressesSections,
         );
     }
 }

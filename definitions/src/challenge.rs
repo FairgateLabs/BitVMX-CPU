@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::trace::{TraceRWStep, TraceRead, TraceReadPC, TraceStep};
+use crate::{
+    memory::MemoryWitness,
+    trace::{ProgramCounter, TraceRWStep, TraceRead, TraceReadPC, TraceStep, TraceWrite},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ChallengeType {
@@ -10,7 +13,17 @@ pub enum ChallengeType {
     EntryPoint(TraceReadPC, u64, u32), // (PROVER_READ_PC, PROVER_READ_MICRO), PROVER_TRACE_STEP, ENTRYPOINT (only used on test)
     ProgramCounter(String, TraceStep, String, TraceReadPC),
     InputData(TraceRead, TraceRead, u32, u32),
-    AddressInSections(u32, Vec<(u32, u32)>),
+    AddressesSections(
+        TraceRead,
+        TraceRead,
+        TraceWrite,
+        MemoryWitness,
+        ProgramCounter,
+        Vec<(u32, u32)>, // read write sections
+        Vec<(u32, u32)>, // read only sections
+        Vec<(u32, u32)>, // register sections
+        Vec<(u32, u32)>, // code sections
+    ),
     No,
 }
 

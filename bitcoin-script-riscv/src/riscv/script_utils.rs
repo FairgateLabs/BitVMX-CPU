@@ -3,6 +3,7 @@ use bitcoin_script_stack::stack::{StackTracker, StackVariable};
 pub use bitcoin_script::{define_pushable, script};
 define_pushable!();
 pub use bitcoin::ScriptBuf as Script;
+use bitvmx_cpu_definitions::memory::MemoryAccessType;
 
 use super::operations::{sort_nibbles, sub};
 
@@ -705,7 +706,7 @@ pub fn is_lower_than(
     ret
 }
 
-pub fn mulitply_by_8(stack: &mut StackTracker) {
+pub fn multiply_by_8(stack: &mut StackTracker) {
     for _ in 0..3 {
         stack.op_dup();
         stack.op_add();
@@ -761,7 +762,7 @@ impl WordTable {
     pub fn peek(&self, stack: &mut StackTracker) -> StackVariable {
         stack.number(1);
         stack.op_add();
-        mulitply_by_8(stack);
+        multiply_by_8(stack);
 
         for i in 0..8 {
             if i > 0 {
@@ -1396,8 +1397,58 @@ pub fn rem(
     )
 }
 
+pub fn witness_equals(
+    stack: &mut StackTracker,
+    stack_tables: &StackTables,
+    witness_shift: u32,
+    memory_witness: &StackVariable,
+    expected_access_type: MemoryAccessType,
+) {
+    let memory_witness_copy = stack.copy_var(*memory_witness);
+
+    let to_shift = stack.number(witness_shift);
+    let shifted = shift_number(stack, to_shift, memory_witness_copy, true, false);
+
+    stack.move_var_sub_n(shifted, 1);
+    stack.number(0b11);
+    stack_tables.logic_op(stack, &LogicOperation::And);
+
+    stack.number(expected_access_type as u32);
+    stack.op_equal();
+    
+    stack.move_var(shifted);
+    stack.drop(shifted);
+}
+
+pub fn address_not_in_sections(
+    stack: &mut StackTracker,
+    address: &StackVariable,
+    sections: &Vec<(u32, u32)>,
+) {
+    for section in sections {
+        assert!(section.0 + 3 <= section.1);
+        let section_start = stack.number_u32(section.0);
+        let address_copy: StackVariable = stack.copy_var(*address);
+
+        is_lower_than(stack, address_copy, section_start, true);
+
+        // when we do a read on an address, we also read the 3 addresses after
+        let section_end = stack.number_u32(section.1 - 3);
+        let address_copy = stack.copy_var(*address);
+
+        is_lower_than(stack, section_end, address_copy, true);
+
+        stack.op_boolor();
+    }
+
+    for _ in 0..sections.len() - 1 {
+        stack.op_booland();
+    }
+}
 #[cfg(test)]
 mod tests {
+
+    use bitvmx_cpu_definitions::memory::MemoryWitness;
 
     use super::*;
 
@@ -1681,5 +1732,83 @@ mod tests {
         stack.equals(expected, true, res, true);
         stack.op_true();
         assert!(stack.run().success);
+    }
+
+    fn test_witness_equals_aux_2(
+        memory_witness: &MemoryWitness,
+        witness_shift: u32,
+        expected_access_type: MemoryAccessType,
+    ) {
+        let mut stack = StackTracker::new();
+        let stack_tables = &StackTables::new(&mut stack, false, false, 0, 0, LOGIC_MASK_AND);
+
+        let memory_witness = stack.byte(memory_witness.byte());
+
+        witness_equals(
+            &mut stack,
+            stack_tables,
+            witness_shift,
+            &memory_witness,
+            expected_access_type,
+        );
+        stack.op_verify();
+        stack.drop(memory_witness);
+        stack_tables.drop(&mut stack);
+        stack.op_true();
+        assert!(stack.run().success);
+    }
+
+    fn test_witness_equals_aux(memory_access_type: MemoryAccessType) {
+        let memory_witness = &MemoryWitness::new(
+            memory_access_type,
+            memory_access_type,
+            memory_access_type,
+        );
+
+        test_witness_equals_aux_2(memory_witness, 4, memory_access_type);
+        test_witness_equals_aux_2(memory_witness, 2, memory_access_type);
+        test_witness_equals_aux_2(memory_witness, 0, memory_access_type);
+    }
+
+    #[test]
+    fn test_witness_equals() {
+        test_witness_equals_aux(MemoryAccessType::Memory);
+        test_witness_equals_aux(MemoryAccessType::Register);
+        test_witness_equals_aux(MemoryAccessType::Unused);
+    }
+
+    fn test_address_not_in_sections_aux(address: u32, sections: &Vec<(u32, u32)>) -> bool {
+        let mut stack = StackTracker::new();
+
+        let address = stack.number_u32(address);
+
+        address_not_in_sections(&mut stack, &address, sections);
+
+        stack.op_verify();
+        stack.drop(address);
+        stack.op_true();
+        stack.run().success
+    }
+
+    #[test]
+    fn test_address_not_in_sections() {
+        const START_1: u32 = 0x0000_00f0;
+        const START_2: u32 = 0x000f_00f0;
+        const END_1: u32 = 0x0000_f003;
+        const END_2: u32 = 0x000f_f003;
+
+        let sections = &vec![(START_1, END_1), (START_2, END_2)];
+
+        assert!(!test_address_not_in_sections_aux(START_1, sections));
+        assert!(!test_address_not_in_sections_aux(0x0000_0f00, sections));
+        assert!(!test_address_not_in_sections_aux(END_1-3, sections));
+        assert!(!test_address_not_in_sections_aux(START_2, sections));
+        assert!(!test_address_not_in_sections_aux(0x000f_0f00, sections));
+        assert!(!test_address_not_in_sections_aux(END_2-3, sections));
+
+        assert!(test_address_not_in_sections_aux(START_1-1, sections));
+        assert!(test_address_not_in_sections_aux(END_1-2, sections));
+        assert!(test_address_not_in_sections_aux(START_2-1, sections));
+        assert!(test_address_not_in_sections_aux(END_2-2, sections));
     }
 }
