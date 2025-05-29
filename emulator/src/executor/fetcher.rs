@@ -430,7 +430,7 @@ pub fn op_jal(
 
     let (write_1, mem_witness) = if dest_register == REGISTER_ZERO as u32 {
         //used by direct jumps without return address
-        (TraceWrite::default(), MemoryWitness::no_write())
+        (TraceWrite::default(), MemoryWitness::default())
     } else {
         //state modification
         program

@@ -331,7 +331,7 @@ pub fn op_jal(
         trace_read.program_counter,
         base_register_address,
         trace_read.mem_witness,
-        MemoryWitness::no_write(),
+        MemoryWitness::default(),
         MemoryWitness::new(
             MemoryAccessType::Unused,
             MemoryAccessType::Unused,
