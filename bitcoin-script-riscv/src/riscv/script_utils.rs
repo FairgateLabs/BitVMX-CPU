@@ -74,20 +74,20 @@ pub fn shift_number(
     right: bool,
     msb: bool,
 ) -> StackVariable {
+    let size = stack.get_size(number);
     let number = reverse(stack, number);
     stack.explode(number);
-
-    for _ in 0..8 {
+    for _ in 0..size {
         nib_to_bin(stack);
     }
 
     if !right {
-        for _ in 0..32 {
+        for _ in 0..size*4 {
             stack.number(0);
         }
     }
 
-    for _ in 0..32 {
+    for _ in 0..size*4 {
         stack.from_altstack();
         //reverse_4(&mut stack);
     }
@@ -96,15 +96,15 @@ pub fn shift_number(
         if msb {
             stack.op_dup();
             stack.op_dup();
-            for _ in 0..15 {
+            for _ in 0..size*2-1 {
                 stack.op_2dup();
             }
         } else {
-            for _ in 0..32 {
+            for _ in 0..size*4 {
                 stack.number(0);
             }
         }
-        stack.number(32);
+        stack.number(size*4);
     }
 
     stack.move_var(to_shift);
@@ -112,7 +112,7 @@ pub fn shift_number(
         to_shift = stack.op_sub();
     }
 
-    for i in 0..8 {
+    for i in 0..size {
         stack.number(0);
         for n in 0..4 {
             if n > 0 {
@@ -132,11 +132,11 @@ pub fn shift_number(
     }
 
     stack.drop(to_shift);
-    for _ in 0..32 {
+    for _ in 0..size*4 {
         stack.op_2drop();
     }
 
-    let shifted = stack.from_altstack_joined(8, "shift_left");
+    let shifted = stack.from_altstack_joined(size, "shift_left");
     reverse(stack, shifted)
 }
 
