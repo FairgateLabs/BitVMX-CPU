@@ -791,10 +791,14 @@ mod tests {
             ForceChallenge::No,
         );
 
+        // if we use the same fail_read as before, the prover won't challenge
+        // because there is no hash difference, the previous fail_read reads
+        // the value 0x11111111 and that's what we are already reading 
+        // because we pass 17 as input instead of 0
         let fail_args = vec![
             "1106",
             "0xaa000000",
-            "0x11111100",
+            "0x11111100", // different input value
             "0xaa000000",
             "0xffffffffffffffff",
         ]
@@ -828,6 +832,7 @@ mod tests {
             fake_trace: TraceRWStep::new(
                 9,
                 TraceRead::new(4026531900, 0, 8),
+                // reads from nullptr (address 0)
                 TraceRead::new(0, 0, 0xffffffffffffffff),
                 TraceReadPC::new(ProgramCounter::new(2147483672, 0), 501635),
                 TraceStep::new(
@@ -894,6 +899,7 @@ mod tests {
             fake_trace: TraceRWStep::new(
                 10,
                 TraceRead::new(4026531900, 4026531840, 9),
+                // reads from register address but should be from memory
                 TraceRead::new(4026531840, 0, 0xffffffffffffffff),
                 TraceReadPC::new(ProgramCounter::new(2147483676, 0), 501635),
                 TraceStep::new(
@@ -962,6 +968,7 @@ mod tests {
                 TraceRead::new(4026531900, 0, 8),
                 TraceRead::new(4026531896, 1234, 9),
                 TraceReadPC::new(ProgramCounter::new(2147483676, 0), 15179811),
+                // writes to nullptr (address 0)
                 TraceStep::new(TraceWrite::new(0, 1234), ProgramCounter::new(2147483680, 0)),
                 None,
                 MemoryWitness::new(
@@ -1019,6 +1026,7 @@ mod tests {
                 TraceRead::new(4026531896, 1234, 10),
                 TraceReadPC::new(ProgramCounter::new(2147483680, 0), 15179811),
                 TraceStep::new(
+                    // writes to register address but should be to memory
                     TraceWrite::new(4026531840, 1234),
                     ProgramCounter::new(2147483684, 0),
                 ),
@@ -1077,6 +1085,7 @@ mod tests {
                 TraceRead::new(4026531896, 1234, 10),
                 TraceReadPC::new(ProgramCounter::new(2147483680, 0), 15179811),
                 TraceStep::new(
+                    // writes to read only address
                     TraceWrite::new(2147483648, 1234),
                     ProgramCounter::new(2147483684, 0),
                 ),
@@ -1134,7 +1143,8 @@ mod tests {
                 9,
                 TraceRead::new(4026531844, 2147483700, 2),
                 TraceRead::default(),
-                TraceReadPC::new(ProgramCounter::new(0, 0), 32871),
+                // ProgramCounter points to nullptr (address 0)
+                TraceReadPC::new(ProgramCounter::new(0, 0), 32871), // Jalr
                 TraceStep::new(TraceWrite::default(), ProgramCounter::new(2147483700, 0)),
                 None,
                 MemoryWitness::new(
@@ -1182,6 +1192,7 @@ mod tests {
                 9,
                 TraceRead::new(4026531844, 2147483700, 2),
                 TraceRead::default(),
+                // ProgramCounter points to register address
                 TraceReadPC::new(ProgramCounter::new(4026531840, 0), 32871),
                 TraceStep::new(TraceWrite::default(), ProgramCounter::new(2147483700, 0)),
                 None,
