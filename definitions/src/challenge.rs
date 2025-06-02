@@ -12,6 +12,7 @@ pub enum ChallengeType {
     TraceHashZero(TraceStep, String),     // PROVER_TRACE_STEP, PROVER_STEP_HASH
     EntryPoint(TraceReadPC, u64, u32), // (PROVER_READ_PC, PROVER_READ_MICRO), PROVER_TRACE_STEP, ENTRYPOINT (only used on test)
     ProgramCounter(String, TraceStep, String, TraceReadPC),
+    Opcode(TraceReadPC, u32, Vec<u32>), // (PROVER_PC, PROVER_OPCODE), CHUNK_BASE_ADDRESS, OPCODES_CHUNK
     InputData(TraceRead, TraceRead, u32, u32),
     AddressesSections(
         TraceRead,

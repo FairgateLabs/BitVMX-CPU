@@ -16,7 +16,7 @@ use crate::{
         execution_log::VerifierChallengeLog,
         nary_search::{choose_segment, ExecutionHashes},
     },
-    executor::utils::FailConfiguration,
+    executor::utils::{get_chunk_base_addr_and_start_index, FailConfiguration},
     loader::program_definition::ProgramDefinition,
     EmulatorError, ExecutionResult,
 };
@@ -389,6 +389,32 @@ pub fn verifier_choose_challenge(
         }
     }
 
+    if trace.read_pc.opcode != my_trace.read_pc.opcode && force == ForceChallenge::No
+        || force == ForceChallenge::Opcode
+    {
+        let pc = trace.read_pc.pc.get_address();
+        let section = program.find_section(pc).unwrap();
+        let section_start = section.start;
+
+        const CHUNK_SIZE: u32 = 500;
+
+        let (chunk_base_addr, chunk_start) =
+            get_chunk_base_addr_and_start_index(pc, section_start, CHUNK_SIZE);
+
+        let chunk_end = (chunk_start + CHUNK_SIZE as usize).min(section.data.len());
+
+        let opcodes_chunk: Vec<u32> = section.data[chunk_start..chunk_end]
+            .iter()
+            .map(|opcode| u32::from_be(*opcode))
+            .collect();
+
+        return Ok(ChallengeType::Opcode(
+            trace.read_pc,
+            chunk_base_addr,
+            opcodes_chunk,
+        ));
+    }
+
     // check const read value
     let conflict_read_1 =
         trace.read_1.value != my_trace.read_1.value && trace.read_1.last_step == LAST_STEP_INIT;
@@ -406,7 +432,7 @@ pub fn verifier_choose_challenge(
         if section.name == program_def.input_section_name && force == ForceChallenge::No
             || force == ForceChallenge::InputData
         {
-            info!("Veifier choose to challenge invalid INPUT DATA");
+            info!("Verifier choose to challenge invalid INPUT DATA");
             return Ok(ChallengeType::InputData(
                 trace.read_1.clone(),
                 trace.read_2.clone(),
@@ -494,7 +520,7 @@ mod tests {
         constants::REGISTERS_BASE_ADDRESS,
         decision::challenge::*,
         executor::{
-            utils::{FailExecute, FailReads, FailWrite},
+            utils::{FailExecute, FailOpcode, FailReads, FailWrite},
             verifier::verify_script,
         },
         loader::program_definition::ProgramDefinition,
@@ -793,7 +819,7 @@ mod tests {
 
         // if we use the same fail_read as before, the prover won't challenge
         // because there is no hash difference, the previous fail_read reads
-        // the value 0x11111111 and that's what we are already reading 
+        // the value 0x11111111 and that's what we are already reading
         // because we pass 17 as input instead of 0
         let fail_args = vec![
             "1106",
@@ -1228,6 +1254,43 @@ mod tests {
             false,
             ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::AddressesSections,
+        );
+    }
+
+    #[test]
+    fn test_challenge_opcode() {
+        init_trace();
+
+        let fail_args = vec!["2", "0x100073"] // Ebreak (NOP)
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+        let fail_opcode = Some(FailConfiguration::new_fail_opcode(FailOpcode::new(
+            &fail_args,
+        )));
+
+        test_challenge_aux(
+            "27",
+            "hello-world.yaml",
+            17,
+            false,
+            fail_opcode.clone(),
+            None,
+            true,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "28",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            fail_opcode,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::Opcode,
         );
     }
 }

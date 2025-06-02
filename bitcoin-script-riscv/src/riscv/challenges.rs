@@ -9,7 +9,11 @@ use bitvmx_cpu_definitions::{
 
 use crate::riscv::{
     memory_alignment::is_aligned,
-    script_utils::{address_not_in_sections, witness_equals, StackTables, LOGIC_MASK_AND},
+    operations::sub,
+    script_utils::{
+        address_not_in_sections, is_equal_to, is_lower_than, nibbles_to_number, shift_number,
+        witness_equals, StackTables, WordTable, LOGIC_MASK_AND,
+    },
 };
 
 // TODO: Value commited in WOTS_PROVER_LAST_STEP should not be greater than the MAX_STEP_CONSTANT_VALUE
@@ -408,6 +412,45 @@ pub fn addresses_sections_challenge(
     stack.drop(memory_witness);
 }
 
+pub fn opcode_challenge(stack: &mut StackTracker, chunk_base: u32, opcodes_chunk: &Vec<u32>) {
+    stack.clear_definitions();
+
+    let pc = stack.define(8, "prover_pc");
+    let opcode = stack.define(8, "prover_opcode");
+    let tables = StackTables::new(stack, true, false, 0, 0, 0);
+
+    let start = stack.number_u32(chunk_base);
+    let end = stack.number_u32(chunk_base + 4 * opcodes_chunk.len() as u32);
+
+    let start_copy = stack.copy_var(start);
+    let pc_copy = stack.copy_var(pc);
+    is_equal_to(stack, &start_copy, &pc_copy);
+    is_lower_than(stack, start_copy, pc_copy, true);
+    stack.op_boolor();
+
+    let pc_copy = stack.copy_var(pc);
+    is_lower_than(stack, pc_copy, end, true);
+    stack.op_booland();
+
+    stack.op_verify();
+
+    let opcodes_table = WordTable::new(stack, opcodes_chunk.clone());
+
+    let to_shift = stack.number(2);
+    let opcode_offset = sub(stack, &tables, pc, start);
+    let opcode_index = shift_number(stack, to_shift, opcode_offset, true, false);
+
+    let index_nibbles = stack.explode(opcode_index);
+    nibbles_to_number(stack, index_nibbles);
+
+    let real_opcode = opcodes_table.peek(stack);
+
+    stack.equality(real_opcode, true, opcode, true, false, true);
+
+    opcodes_table.drop(stack);
+    tables.drop(stack);
+}
+
 //TODO: memory section challenge
 //TODO: program crash challenge - this might be more about finding the right place to challenge that a challenge itself
 
@@ -485,6 +528,11 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
                 register_sections,
                 code_sections,
             );
+        }
+        ChallengeType::Opcode(pc_read, chunk_base, opcodes_chunk) => {
+            stack.number_u32(pc_read.pc.get_address());
+            stack.number_u32(pc_read.opcode);
+            opcode_challenge(&mut stack, *chunk_base, opcodes_chunk);
         }
         _ => {
             return false;
@@ -1167,5 +1215,34 @@ mod tests {
             registers,
             code_sections
         ));
+    }
+
+    fn test_opcode_aux(pc: u32, opcode: u32, chunk_base: u32, opcodes_chunk: &Vec<u32>) -> bool {
+        let mut stack = StackTracker::new();
+
+        stack.number_u32(pc);
+        stack.number_u32(opcode);
+
+        opcode_challenge(&mut stack, chunk_base, opcodes_chunk);
+
+        stack.op_true();
+        let r = stack.run();
+
+        r.success
+    }
+
+    #[test]
+    fn test_opcode() {
+        let opcodes = &vec![1234, 5678];
+        // can't challenge correct opcode
+        assert!(!test_opcode_aux(0xab00_0000, 1234, 0xab00_0000, opcodes));
+        assert!(!test_opcode_aux(0xab00_0004, 5678, 0xab00_0000, opcodes));
+
+        // can't challenge address outside chunk
+        assert!(!test_opcode_aux(0xab00_0008, 8888, 0xab00_0000, opcodes));
+
+        // can challenge invalid opcodes
+        assert!(test_opcode_aux(0xab00_0000, 8888, 0xab00_0000, opcodes));
+        assert!(test_opcode_aux(0xab00_0004, 8888, 0xab00_0000, opcodes));
     }
 }
