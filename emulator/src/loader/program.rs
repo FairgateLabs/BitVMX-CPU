@@ -296,7 +296,7 @@ impl Program {
     pub fn write_mem(&mut self, address: u32, value: u32) -> Result<(), ExecutionResult> {
         let step = self.step;
         let section = self.find_section_mut(address)?;
-        if !section.is_write {
+        if !section.is_write || section.is_code {
             return Err(ExecutionResult::WriteToReadOnlySection);
         }
         section.data[(address - section.start) as usize / 4] = value.to_be();
@@ -354,7 +354,7 @@ impl Program {
     }
 
     pub fn get_read_write_sections(&self) -> Vec<(u32, u32)> {
-        self.get_sections(|section| section.is_write && !section.registers)
+        self.get_sections(|section| section.is_write && !section.registers && !section.is_code)
     }
 
     pub fn get_read_only_sections(&self) -> Vec<(u32, u32)> {
@@ -366,7 +366,7 @@ impl Program {
     }
 
     pub fn get_code_sections(&self) -> Vec<(u32, u32)> {
-        self.get_sections(|section| section.is_code)
+        self.get_sections(|section| section.is_code && !section.is_write)
     }
 }
 
