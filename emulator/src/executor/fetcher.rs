@@ -93,7 +93,7 @@ pub fn execute_program(
                 program.pc.next_address();
                 Ok(fe.fake_trace.clone())
             }
-            _ => execute_step(program, print_program_stdout, debug),
+            _ => execute_step(program, print_program_stdout, debug, fail_config.clone()),
         };
 
         let mut should_patch_write = false;
@@ -253,11 +253,16 @@ pub fn execute_step(
     program: &mut Program,
     print_program_stdout: bool,
     debug: bool,
+    fail_config: FailConfiguration
 ) -> Result<TraceRWStep, ExecutionResult> {
     let pc = program.pc.clone();
     program.step += 1;
 
-    let opcode = program.read_mem(pc.get_address())?;
+    let opcode = match fail_config.fail_opcode {
+        Some(fo) if fo.step == program.step => fo.opcode,
+        _ => program.read_mem(pc.get_address())?
+    };
+
     let instruction = riscv_decode::decode(opcode).unwrap();
 
     if debug && program.step % 100000000 < 10000 {

@@ -202,12 +202,28 @@ impl FailExecute {
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct FailOpcode {
+    pub step: u64,
+    pub opcode: u32,
+}
+
+impl FailOpcode {
+    pub fn new(args: &Vec<String>) -> Self {
+        Self {
+            step: parse_value(&args[0]),
+            opcode: parse_value(&args[1]),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct FailConfiguration {
     pub fail_hash: Option<u64>,
     pub fail_execute: Option<FailExecute>,
     pub fail_reads: Option<FailReads>,
     pub fail_write: Option<FailWrite>,
     pub fail_pc: Option<u64>,
+    pub fail_opcode: Option<FailOpcode>,
 }
 
 impl FailConfiguration {
@@ -238,6 +254,12 @@ impl FailConfiguration {
     pub fn new_fail_pc(fail_pc: u64) -> Self {
         Self {
             fail_pc: Some(fail_pc),
+            ..Default::default()
+        }
+    }
+    pub fn new_fail_opcode(fail_opcode: FailOpcode) -> Self {
+        Self {
+            fail_opcode: Some(fail_opcode),
             ..Default::default()
         }
     }
