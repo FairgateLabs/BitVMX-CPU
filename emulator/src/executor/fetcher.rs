@@ -136,18 +136,15 @@ pub fn execute_program(
             if let Some(fw) = &fail_config.fail_write {
                 fw.patch_trace_write(trace.as_mut().unwrap(), should_patch_write);
             }
+        }
 
-            if !no_hash {
-                let trace_bytes = trace.as_ref().unwrap().trace_step.to_bytes();
-                program.hash = compute_step_hash(&mut hasher, &program.hash, &trace_bytes);
-                if let Some(fail) = fail_config.fail_hash {
-                    if fail == program.step {
-                        program.hash = compute_step_hash(&mut hasher, &program.hash, &trace_bytes);
-                    }
-                }
-            }
-        } else if !no_hash {
-            let trace_bytes = TraceRWStep::from_step(program.step).trace_step.to_bytes();
+        if !no_hash {
+            let trace_bytes = trace
+                .as_ref()
+                .unwrap_or(&TraceRWStep::from_step(program.step))
+                .trace_step
+                .to_bytes();
+
             program.hash = compute_step_hash(&mut hasher, &program.hash, &trace_bytes);
             if let Some(fail) = fail_config.fail_hash {
                 if fail == program.step {
