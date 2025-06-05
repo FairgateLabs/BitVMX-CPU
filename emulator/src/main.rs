@@ -9,7 +9,7 @@ use emulator::{
     },
     executor::{
         fetcher::execute_program,
-        utils::{FailConfiguration, FailExecute, FailReads, FailWrite},
+        utils::{FailConfiguration, FailExecute, FailOpcode, FailReads, FailWrite},
     },
     loader::program::{generate_rom_commitment, load_elf, Program},
     EmulatorError, ExecutionResult,
@@ -289,13 +289,17 @@ enum Commands {
         #[arg(long, value_names = &["step", "address_original", "value", "modified_address"], num_args = 4)]
         fail_write: Option<Vec<String>>,
 
-        /// Memory dump at given step
-        #[arg(short, long)]
-        dump_mem: Option<u64>,
-
         /// Fail while reading the pc at the given step
         #[arg(long)]
         fail_pc: Option<u64>,
+
+        /// Fail reading opcode at a given step
+        #[arg(long, value_names = &["step", "opcode"], num_args = 2)]
+        fail_opcode: Option<Vec<String>>,
+
+        /// Memory dump at given step
+        #[arg(short, long)]
+        dump_mem: Option<u64>,
     },
 }
 
@@ -345,6 +349,7 @@ fn main() -> Result<(), EmulatorError> {
             fail_read_1: fail_read_1_args,
             fail_read_2: fail_read_2_args,
             fail_write: fail_write_args,
+            fail_opcode: fail_opcode_args,
             dump_mem,
             fail_pc,
         }) => {
@@ -403,6 +408,7 @@ fn main() -> Result<(), EmulatorError> {
             };
 
             let fail_write = fail_write_args.as_ref().map(FailWrite::new);
+            let fail_opcode = fail_opcode_args.as_ref().map(FailOpcode::new);
 
             let debugvar = *debug;
             let fail_config = FailConfiguration {
@@ -411,6 +417,7 @@ fn main() -> Result<(), EmulatorError> {
                 fail_reads,
                 fail_write,
                 fail_pc: *fail_pc,
+                fail_opcode
             };
             let result = execute_program(
                 &mut program,

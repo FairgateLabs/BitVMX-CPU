@@ -713,6 +713,13 @@ pub fn multiply_by_8(stack: &mut StackTracker) {
     }
 }
 
+pub fn multiply_by_16(stack: &mut StackTracker) {
+    for _ in 0..4 {
+        stack.op_dup();
+        stack.op_add();
+    }
+}
+
 pub fn mask_value(
     stack: &mut StackTracker,
     value: StackVariable,
@@ -1443,6 +1450,19 @@ pub fn address_not_in_sections(
         stack.op_booland();
     }
 }
+
+pub fn nibbles_to_number(stack: &mut StackTracker, nibbles: Vec<StackVariable>) -> StackVariable {
+    let mut result = stack.number(0);
+
+    for nibble in nibbles.iter() {
+        multiply_by_16(stack);
+        stack.move_var(*nibble);
+        result = stack.op_add();
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -1802,5 +1822,18 @@ mod tests {
         assert!(test_address_not_in_sections_aux(END_1 - 2, sections));
         assert!(test_address_not_in_sections_aux(START_2 - 1, sections));
         assert!(test_address_not_in_sections_aux(END_2 - 2, sections));
+    }
+
+    #[test]
+    fn test_nibbles_to_number() {
+        let mut stack = StackTracker::new();
+
+        let expected = stack.number(0x1234_5678);
+        let n = stack.number_u32(0x1234_5678);
+        let nibbles = stack.explode(n);
+        let result = nibbles_to_number(&mut stack, nibbles);
+        stack.equals(expected, true, result, true);
+        stack.op_true();
+        assert!(stack.run().success);
     }
 }
