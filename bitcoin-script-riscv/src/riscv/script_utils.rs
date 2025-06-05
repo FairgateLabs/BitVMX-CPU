@@ -1404,20 +1404,18 @@ pub fn witness_equals(
     memory_witness: &StackVariable,
     expected_access_type: MemoryAccessType,
 ) {
-    let memory_witness_copy = stack.copy_var(*memory_witness);
+    let (sub_n, shift) = match witness_shift {
+        0 | 2 => (1, witness_shift),
+        4 => (0, 0),
+        _ => unreachable!("witness_shift must be 0, 2, or 4"),
+    };
 
-    let to_shift = stack.number(witness_shift);
-    let shifted = shift_number(stack, to_shift, memory_witness_copy, true, false);
-
-    stack.move_var_sub_n(shifted, 1);
-    stack.number(0b11);
+    stack.copy_var_sub_n(*memory_witness, sub_n);
+    stack.number(0b11 << shift);
     stack_tables.logic_op(stack, &LogicOperation::And);
 
-    stack.number(expected_access_type as u32);
+    stack.number((expected_access_type as u32) << shift);
     stack.op_equal();
-    
-    stack.move_var(shifted);
-    stack.drop(shifted);
 }
 
 pub fn address_not_in_sections(
