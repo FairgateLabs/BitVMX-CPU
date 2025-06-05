@@ -1616,7 +1616,6 @@ mod tests {
             stack.number(i);
             nib_to_bin(&mut stack);
             stack.from_altstack_joined(4, &format!("bin({})", i));
-            stack.debug();
         }
     }
 
@@ -1732,7 +1731,7 @@ mod tests {
         assert!(stack.run().success);
     }
 
-    fn test_witness_equals_aux_2(
+    fn test_witness_equals_aux(
         memory_witness: &MemoryWitness,
         witness_shift: u32,
         expected_access_type: MemoryAccessType,
@@ -1756,26 +1755,19 @@ mod tests {
         assert!(stack.run().success);
     }
 
-    fn test_witness_equals_aux(memory_access_type: MemoryAccessType) {
-        let memory_witness = &MemoryWitness::new(
-            memory_access_type,
-            memory_access_type,
-            memory_access_type,
-        );
-
-        test_witness_equals_aux_2(memory_witness, 4, memory_access_type);
-        test_witness_equals_aux_2(memory_witness, 2, memory_access_type);
-        test_witness_equals_aux_2(memory_witness, 0, memory_access_type);
-    }
-
     #[test]
     fn test_witness_equals() {
-        test_witness_equals_aux(MemoryAccessType::Memory);
-        test_witness_equals_aux(MemoryAccessType::Register);
-        test_witness_equals_aux(MemoryAccessType::Unused);
+        let memory_witness = &MemoryWitness::new(
+            MemoryAccessType::Memory,
+            MemoryAccessType::Register,
+            MemoryAccessType::Unused,
+        );
+        test_witness_equals_aux(memory_witness, 4, MemoryAccessType::Memory);
+        test_witness_equals_aux(memory_witness, 2, MemoryAccessType::Register);
+        test_witness_equals_aux(memory_witness, 0, MemoryAccessType::Unused);
     }
 
-    fn test_address_not_in_sections_aux(address: u32, sections: &Vec<(u32, u32)>) -> bool {
+    fn test_address_not_in_sections_aux(address: u32, sections: &SectionDefinition) -> bool {
         let mut stack = StackTracker::new();
 
         let address = stack.number_u32(address);
@@ -1799,14 +1791,14 @@ mod tests {
 
         assert!(!test_address_not_in_sections_aux(START_1, sections));
         assert!(!test_address_not_in_sections_aux(0x0000_0f00, sections));
-        assert!(!test_address_not_in_sections_aux(END_1-3, sections));
+        assert!(!test_address_not_in_sections_aux(END_1 - 3, sections));
         assert!(!test_address_not_in_sections_aux(START_2, sections));
         assert!(!test_address_not_in_sections_aux(0x000f_0f00, sections));
-        assert!(!test_address_not_in_sections_aux(END_2-3, sections));
+        assert!(!test_address_not_in_sections_aux(END_2 - 3, sections));
 
-        assert!(test_address_not_in_sections_aux(START_1-1, sections));
-        assert!(test_address_not_in_sections_aux(END_1-2, sections));
-        assert!(test_address_not_in_sections_aux(START_2-1, sections));
-        assert!(test_address_not_in_sections_aux(END_2-2, sections));
+        assert!(test_address_not_in_sections_aux(START_1 - 1, sections));
+        assert!(test_address_not_in_sections_aux(END_1 - 2, sections));
+        assert!(test_address_not_in_sections_aux(START_2 - 1, sections));
+        assert!(test_address_not_in_sections_aux(END_2 - 2, sections));
     }
 }
