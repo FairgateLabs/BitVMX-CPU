@@ -552,8 +552,9 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Result<Program, EmulatorErr
 
         let is_code = phdr.sh_flags as u32 & SHF_EXECINSTR == SHF_EXECINSTR;
         let is_write = phdr.sh_flags as u32 & SHF_WRITE == SHF_WRITE;
+        assert!(!(is_code && is_write), "We don't allow writable code sections");
 
-        program.add_section(Section::new_with_data(&name, data, start, size, is_code, is_write && !is_code, initialized));
+        program.add_section(Section::new_with_data(&name, data, start, size, is_code, is_write, initialized));
     });
 
     program.merge_sections();
