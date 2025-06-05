@@ -269,7 +269,8 @@ pub fn verifier_choose_challenge(
     );
 
     // check trace_hash
-    if !validate_step_hash(&step_hash, &trace.trace_step, &next_hash) && force == ForceChallenge::No
+    if (!validate_step_hash(&step_hash, &trace.trace_step, &next_hash)
+        && force == ForceChallenge::No)
         || force == ForceChallenge::TraceHash
         || force == ForceChallenge::TraceHashZero
     {
@@ -321,8 +322,8 @@ pub fn verifier_choose_challenge(
 
     let is_valid_pc = program.address_in_sections(trace.read_pc.pc.get_address(), &code_sections);
 
-    if !(is_valid_read_1 && is_valid_read_2 && is_valid_write && is_valid_pc)
-        && force == ForceChallenge::No
+    if (!(is_valid_read_1 && is_valid_read_2 && is_valid_write && is_valid_pc)
+        && force == ForceChallenge::No)
         || force == ForceChallenge::AddressesSections
     {
         return Ok(ChallengeType::AddressesSections(
@@ -339,10 +340,10 @@ pub fn verifier_choose_challenge(
     }
 
     // check entrypoint
-    if trace.read_pc.pc.get_address() != my_trace.read_pc.pc.get_address()
-        && force == ForceChallenge::No
-        || trace.read_pc.pc.get_micro() != my_trace.read_pc.pc.get_micro()
-            && force == ForceChallenge::No
+    if (trace.read_pc.pc.get_address() != my_trace.read_pc.pc.get_address()
+        && force == ForceChallenge::No)
+        || (trace.read_pc.pc.get_micro() != my_trace.read_pc.pc.get_micro()
+            && force == ForceChallenge::No)
         || force == ForceChallenge::EntryPoint
         || force == ForceChallenge::ProgramCounter
     {
@@ -380,7 +381,7 @@ pub fn verifier_choose_challenge(
         let section = program.find_section(conflict_address)?;
         //TODO: Check if the address is in the input section rom ram or registers
         let value = program.read_mem(conflict_address)?;
-        if section.name == program_def.input_section_name && force == ForceChallenge::No
+        if (section.name == program_def.input_section_name && force == ForceChallenge::No)
             || force == ForceChallenge::InputData
         {
             info!("Veifier choose to challenge invalid INPUT DATA");
