@@ -3,12 +3,12 @@ use bitcoin_script_stack::stack::{StackTracker, StackVariable};
 use bitvmx_cpu_definitions::{
     challenge::ChallengeType,
     constants::LAST_STEP_INIT,
-    memory::MemoryAccessType,
+    memory::{MemoryAccessType, SectionDefinition},
     trace::{generate_initial_step_hash, hashvec_to_string},
 };
 
 use crate::riscv::{
-    memory_alignment::is_aligned,
+    memory_alignment::{is_aligned, load_modulo_4_table},
     operations::sub,
     script_utils::{
         address_not_in_sections, is_equal_to, is_lower_than, nibbles_to_number, shift_number,
@@ -271,12 +271,13 @@ pub fn trace_hash_zero_challenge(stack: &mut StackTracker) {
 fn is_invalid_read(
     stack: &mut StackTracker,
     stack_tables: &StackTables,
+    modulo_table: &StackVariable,
     read: StackVariable,
     memory_witness: &StackVariable,
     witness_shift: u32,
-    read_write_sections: &Vec<(u32, u32)>,
-    read_only_sections: &Vec<(u32, u32)>,
-    register_sections: &Vec<(u32, u32)>,
+    read_write_sections: &SectionDefinition,
+    read_only_sections: &SectionDefinition,
+    register_sections: &SectionDefinition,
 ) {
     witness_equals(
         stack,
@@ -300,7 +301,7 @@ fn is_invalid_read(
     address_not_in_sections(stack, &read, register_sections);
     stack.op_booland();
 
-    is_aligned(stack, read, true);
+    is_aligned(stack, read, true, modulo_table);
     stack.op_not();
 
     stack.op_boolor();
@@ -310,10 +311,11 @@ fn is_invalid_read(
 fn is_invalid_write(
     stack: &mut StackTracker,
     stack_tables: &StackTables,
+    modulo_table: &StackVariable,
     write: StackVariable,
     memory_witness: &StackVariable,
-    read_write_sections: &Vec<(u32, u32)>,
-    register_sections: &Vec<(u32, u32)>,
+    read_write_sections: &SectionDefinition,
+    register_sections: &SectionDefinition,
 ) {
     witness_equals(
         stack,
@@ -335,7 +337,7 @@ fn is_invalid_write(
     address_not_in_sections(stack, &write, register_sections);
     stack.op_booland();
 
-    is_aligned(stack, write, true);
+    is_aligned(stack, write, true, modulo_table);
     stack.op_not();
 
     stack.op_boolor();
@@ -344,12 +346,13 @@ fn is_invalid_write(
 
 fn is_invalid_pc(
     stack: &mut StackTracker,
+    modulo_table: &StackVariable,
     pc_address: StackVariable,
-    code_sections: &Vec<(u32, u32)>,
+    code_sections: &SectionDefinition,
 ) {
     address_not_in_sections(stack, &pc_address, code_sections);
 
-    is_aligned(stack, pc_address, true);
+    is_aligned(stack, pc_address, true, modulo_table);
     stack.op_not();
 
     stack.op_boolor();
@@ -357,10 +360,10 @@ fn is_invalid_pc(
 
 pub fn addresses_sections_challenge(
     stack: &mut StackTracker,
-    read_write_sections: &Vec<(u32, u32)>,
-    read_only_sections: &Vec<(u32, u32)>,
-    register_sections: &Vec<(u32, u32)>,
-    code_sections: &Vec<(u32, u32)>,
+    read_write_sections: &SectionDefinition,
+    read_only_sections: &SectionDefinition,
+    register_sections: &SectionDefinition,
+    code_sections: &SectionDefinition,
 ) {
     stack.clear_definitions();
 
@@ -370,10 +373,12 @@ pub fn addresses_sections_challenge(
     let memory_witness = stack.define(2, "memory_witness");
     let pc_address = stack.define(8, "pc_address");
     let stack_tables = &StackTables::new(stack, false, false, 0, 0, LOGIC_MASK_AND);
+    let modulo_table = &load_modulo_4_table(stack);
 
     is_invalid_read(
         stack,
         stack_tables,
+        modulo_table,
         read_1_address,
         &memory_witness,
         4,
@@ -384,6 +389,7 @@ pub fn addresses_sections_challenge(
     is_invalid_read(
         stack,
         stack_tables,
+        modulo_table,
         read_2_address,
         &memory_witness,
         2,
@@ -394,13 +400,14 @@ pub fn addresses_sections_challenge(
     is_invalid_write(
         stack,
         stack_tables,
+        modulo_table,
         write_address,
         &memory_witness,
         read_write_sections,
         register_sections,
     );
 
-    is_invalid_pc(stack, pc_address, code_sections);
+    is_invalid_pc(stack, modulo_table, pc_address, code_sections);
 
     stack.op_boolor();
     stack.op_boolor();
@@ -408,6 +415,7 @@ pub fn addresses_sections_challenge(
 
     stack.op_verify();
 
+    stack.drop(*modulo_table);
     stack_tables.drop(stack);
     stack.drop(memory_witness);
 }
@@ -523,10 +531,10 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
 
             addresses_sections_challenge(
                 &mut stack,
-                read_write_sections,
-                read_only_sections,
-                register_sections,
-                code_sections,
+                read_write_sections.as_ref().unwrap(),
+                read_only_sections.as_ref().unwrap(),
+                register_sections.as_ref().unwrap(),
+                code_sections.as_ref().unwrap(),
             );
         }
         ChallengeType::Opcode(pc_read, chunk_base, opcodes_chunk) => {
@@ -880,10 +888,10 @@ mod tests {
         write: u32,
         memory_witness: MemoryWitness,
         pc: u32,
-        read_write_sections: &Vec<(u32, u32)>,
-        read_only_sections: &Vec<(u32, u32)>,
-        registers: &Vec<(u32, u32)>,
-        code_sections: &Vec<(u32, u32)>,
+        read_write_sections: &SectionDefinition,
+        read_only_sections: &SectionDefinition,
+        registers: &SectionDefinition,
+        code_sections: &SectionDefinition,
     ) -> bool {
         let mut stack = StackTracker::new();
 
@@ -907,10 +915,18 @@ mod tests {
 
     #[test]
     fn test_addresses_sections() {
-        let read_write_sections = &vec![(0x0000_00f0, 0x0000_0103)];
-        let read_only_sections = &vec![(0x0000_0f00, 0x0000_1003)];
-        let registers = &vec![(0x0000_f000, 0x0001_0003)];
-        let code_sections = &vec![(0x000f_0000, 0x0010_0003)];
+        let read_write_sections = &SectionDefinition {
+            ranges: vec![(0x0000_00f0, 0x0000_0103)],
+        };
+        let read_only_sections = &SectionDefinition {
+            ranges: vec![(0x0000_0f00, 0x0000_1003)],
+        };
+        let registers = &SectionDefinition {
+            ranges: vec![(0x0000_f000, 0x0001_0003)],
+        };
+        let code_sections = &SectionDefinition {
+            ranges: vec![(0x000f_0000, 0x0010_0003)],
+        };
 
         // can't challenge valid addresses (register section reads and write)
         let memory_witness = MemoryWitness::registers();

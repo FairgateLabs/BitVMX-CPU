@@ -13,23 +13,23 @@ pub fn load_modulo_4_table(stack: &mut StackTracker) -> StackVariable {
     stack.join_in_stack(16, None, Some("modulo_4_table"))
 }
 
-pub fn is_aligned(stack: &mut StackTracker, mem_address: StackVariable, consume: bool) -> StackVariable {
-    let table = load_modulo_4_table(stack);
-
+pub fn is_aligned(
+    stack: &mut StackTracker,
+    mem_address: StackVariable,
+    consume: bool,
+    modulo_table: &StackVariable,
+) -> StackVariable {
     stack.copy_var_sub_n(mem_address, 7);
-    stack.get_value_from_table(table, None);
-    
+    stack.get_value_from_table(*modulo_table, None);
+
     stack.number(0);
     let result = stack.op_equal();
-
-    stack.move_var(table);
-    stack.drop(table);
 
     if consume {
         stack.move_var(mem_address);
         stack.drop(mem_address);
     }
-    
+
     result
 }
 
@@ -224,7 +224,10 @@ mod tests {
     fn test_is_aligned_helper(address: u32) -> bool {
         let mut stack = StackTracker::new();
         let address = stack.number_u32(address);
-        is_aligned(&mut stack, address, true);
+        let table = load_modulo_4_table(&mut stack);
+        is_aligned(&mut stack, address, true, &table);
+        stack.move_var(table);
+        stack.drop(table);
         stack.run().success
     }
 
