@@ -3,7 +3,7 @@ use bitcoin_script_stack::stack::{StackTracker, StackVariable};
 pub use bitcoin_script::{define_pushable, script};
 define_pushable!();
 pub use bitcoin::ScriptBuf as Script;
-use bitvmx_cpu_definitions::memory::MemoryAccessType;
+use bitvmx_cpu_definitions::memory::{MemoryAccessType, SectionDefinition};
 
 use super::operations::{sort_nibbles, sub};
 
@@ -83,12 +83,12 @@ pub fn shift_number(
     }
 
     if !right {
-        for _ in 0..size*4 {
+        for _ in 0..size * 4 {
             stack.number(0);
         }
     }
 
-    for _ in 0..size*4 {
+    for _ in 0..size * 4 {
         stack.from_altstack();
         //reverse_4(&mut stack);
     }
@@ -97,15 +97,15 @@ pub fn shift_number(
         if msb {
             stack.op_dup();
             stack.op_dup();
-            for _ in 0..size*2-1 {
+            for _ in 0..size * 2 - 1 {
                 stack.op_2dup();
             }
         } else {
-            for _ in 0..size*4 {
+            for _ in 0..size * 4 {
                 stack.number(0);
             }
         }
-        stack.number(size*4);
+        stack.number(size * 4);
     }
 
     stack.move_var(to_shift);
@@ -133,7 +133,7 @@ pub fn shift_number(
     }
 
     stack.drop(to_shift);
-    for _ in 0..size*4 {
+    for _ in 0..size * 4 {
         stack.op_2drop();
     }
 
@@ -1421,17 +1421,17 @@ pub fn witness_equals(
 pub fn address_not_in_sections(
     stack: &mut StackTracker,
     address: &StackVariable,
-    sections: &Vec<(u32, u32)>,
+    sections: &SectionDefinition,
 ) {
-    for section in sections {
-        assert!(section.0 + 3 <= section.1);
-        let section_start = stack.number_u32(section.0);
+    for range in &sections.ranges {
+        assert!(range.0 + 3 <= range.1);
+        let section_start = stack.number_u32(range.0);
         let address_copy: StackVariable = stack.copy_var(*address);
 
         is_lower_than(stack, address_copy, section_start, true);
 
         // when we do a read on an address, we also read the 3 addresses after
-        let section_end = stack.number_u32(section.1 - 3);
+        let section_end = stack.number_u32(range.1 - 3);
         let address_copy = stack.copy_var(*address);
 
         is_lower_than(stack, section_end, address_copy, true);
@@ -1439,7 +1439,7 @@ pub fn address_not_in_sections(
         stack.op_boolor();
     }
 
-    for _ in 0..sections.len() - 1 {
+    for _ in 0..sections.ranges.len() - 1 {
         stack.op_booland();
     }
 }
@@ -1787,7 +1787,9 @@ mod tests {
         const END_1: u32 = 0x0000_f003;
         const END_2: u32 = 0x000f_f003;
 
-        let sections = &vec![(START_1, END_1), (START_2, END_2)];
+        let sections = &SectionDefinition {
+            ranges: vec![(START_1, END_1), (START_2, END_2)],
+        };
 
         assert!(!test_address_not_in_sections_aux(START_1, sections));
         assert!(!test_address_not_in_sections_aux(0x0000_0f00, sections));

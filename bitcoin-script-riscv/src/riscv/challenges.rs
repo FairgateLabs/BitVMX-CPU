@@ -3,12 +3,12 @@ use bitcoin_script_stack::stack::{StackTracker, StackVariable};
 use bitvmx_cpu_definitions::{
     challenge::ChallengeType,
     constants::LAST_STEP_INIT,
-    memory::MemoryAccessType,
+    memory::{MemoryAccessType, SectionDefinition},
     trace::{generate_initial_step_hash, hashvec_to_string},
 };
 
 use crate::riscv::{
-    memory_alignment::is_aligned,
+    memory_alignment::{is_aligned, load_modulo_4_table},
     script_utils::{address_not_in_sections, witness_equals, StackTables, LOGIC_MASK_AND},
 };
 
@@ -271,9 +271,9 @@ fn is_invalid_read(
     read: StackVariable,
     memory_witness: &StackVariable,
     witness_shift: u32,
-    read_write_sections: &Vec<(u32, u32)>,
-    read_only_sections: &Vec<(u32, u32)>,
-    register_sections: &Vec<(u32, u32)>,
+    read_write_sections: &SectionDefinition,
+    read_only_sections: &SectionDefinition,
+    register_sections: &SectionDefinition,
 ) {
     witness_equals(
         stack,
@@ -310,8 +310,8 @@ fn is_invalid_write(
     modulo_table: &StackVariable,
     write: StackVariable,
     memory_witness: &StackVariable,
-    read_write_sections: &Vec<(u32, u32)>,
-    register_sections: &Vec<(u32, u32)>,
+    read_write_sections: &SectionDefinition,
+    register_sections: &SectionDefinition,
 ) {
     witness_equals(
         stack,
@@ -344,7 +344,7 @@ fn is_invalid_pc(
     stack: &mut StackTracker,
     modulo_table: &StackVariable,
     pc_address: StackVariable,
-    code_sections: &Vec<(u32, u32)>,
+    code_sections: &SectionDefinition,
 ) {
     address_not_in_sections(stack, &pc_address, code_sections);
 
@@ -356,10 +356,10 @@ fn is_invalid_pc(
 
 pub fn addresses_sections_challenge(
     stack: &mut StackTracker,
-    read_write_sections: &Vec<(u32, u32)>,
-    read_only_sections: &Vec<(u32, u32)>,
-    register_sections: &Vec<(u32, u32)>,
-    code_sections: &Vec<(u32, u32)>,
+    read_write_sections: &SectionDefinition,
+    read_only_sections: &SectionDefinition,
+    register_sections: &SectionDefinition,
+    code_sections: &SectionDefinition,
 ) {
     stack.clear_definitions();
 
@@ -488,10 +488,10 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
 
             addresses_sections_challenge(
                 &mut stack,
-                read_write_sections,
-                read_only_sections,
-                register_sections,
-                code_sections,
+                read_write_sections.as_ref().unwrap(),
+                read_only_sections.as_ref().unwrap(),
+                register_sections.as_ref().unwrap(),
+                code_sections.as_ref().unwrap(),
             );
         }
         _ => {
@@ -840,10 +840,10 @@ mod tests {
         write: u32,
         memory_witness: MemoryWitness,
         pc: u32,
-        read_write_sections: &Vec<(u32, u32)>,
-        read_only_sections: &Vec<(u32, u32)>,
-        registers: &Vec<(u32, u32)>,
-        code_sections: &Vec<(u32, u32)>,
+        read_write_sections: &SectionDefinition,
+        read_only_sections: &SectionDefinition,
+        registers: &SectionDefinition,
+        code_sections: &SectionDefinition,
     ) -> bool {
         let mut stack = StackTracker::new();
 
@@ -867,10 +867,18 @@ mod tests {
 
     #[test]
     fn test_addresses_sections() {
-        let read_write_sections = &vec![(0x0000_00f0, 0x0000_0103)];
-        let read_only_sections = &vec![(0x0000_0f00, 0x0000_1003)];
-        let registers = &vec![(0x0000_f000, 0x0001_0003)];
-        let code_sections = &vec![(0x000f_0000, 0x0010_0003)];
+        let read_write_sections = &SectionDefinition {
+            ranges: vec![(0x0000_00f0, 0x0000_0103)],
+        };
+        let read_only_sections = &SectionDefinition {
+            ranges: vec![(0x0000_0f00, 0x0000_1003)],
+        };
+        let registers = &SectionDefinition {
+            ranges: vec![(0x0000_f000, 0x0001_0003)],
+        };
+        let code_sections = &SectionDefinition {
+            ranges: vec![(0x000f_0000, 0x0010_0003)],
+        };
 
         // can't challenge valid addresses (register section reads and write)
         let memory_witness = MemoryWitness::registers();

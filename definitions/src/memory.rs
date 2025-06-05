@@ -6,6 +6,11 @@ pub mod memory_access_type {
     pub const UNUSED: u8 = 2;
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct SectionDefinition {
+    pub ranges: Vec<(u32, u32)>
+}
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum MemoryAccessType {
     Register,

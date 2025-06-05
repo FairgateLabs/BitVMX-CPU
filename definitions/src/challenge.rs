@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    memory::MemoryWitness,
+    memory::{MemoryWitness, SectionDefinition},
     trace::{ProgramCounter, TraceRWStep, TraceRead, TraceReadPC, TraceStep, TraceWrite},
 };
 
@@ -19,10 +19,10 @@ pub enum ChallengeType {
         TraceWrite,
         MemoryWitness,
         ProgramCounter,
-        Vec<(u32, u32)>, // read write sections
-        Vec<(u32, u32)>, // read only sections
-        Vec<(u32, u32)>, // register sections
-        Vec<(u32, u32)>, // code sections
+        Option<SectionDefinition>, // read write sections
+        Option<SectionDefinition>, // read only sections
+        Option<SectionDefinition>, // register sections
+        Option<SectionDefinition>, // code sections
     ),
     No,
 }

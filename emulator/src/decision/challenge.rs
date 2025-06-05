@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use bitvmx_cpu_definitions::{
     challenge::ChallengeType,
     constants::LAST_STEP_INIT,
-    memory::MemoryAccessType,
     trace::{generate_initial_step_hash, hashvec_to_string, validate_step_hash, TraceRWStep},
 };
 
@@ -250,19 +249,13 @@ pub enum ForceCondition {
     No,
 }
 
-fn address_in_sections(address: u32, sections: &Vec<(u32, u32)>) -> bool {
-    sections
-        .iter()
-        .any(|&(start, end)| start <= address && address <= end - 3)
-        && address % 4 == 0
-}
-
 pub fn verifier_choose_challenge(
     program_definition_file: &str,
     checkpoint_path: &str,
     trace: TraceRWStep,
     force: ForceChallenge,
     fail_config: Option<FailConfiguration>,
+    return_script_parameters: bool,
 ) -> Result<ChallengeType, EmulatorError> {
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
     let program = program_def.load_program_from_checkpoint(checkpoint_path, 0)?;
@@ -310,39 +303,23 @@ pub fn verifier_choose_challenge(
 
     // TODO: limit exception
 
-    let read_write_sections = &program.get_read_write_sections();
-    let read_only_sections = &program.get_read_only_sections();
-    let register_sections = &program.get_register_sections();
-    let code_sections = &program.get_code_sections();
+    let read_write_sections = program.read_write_sections.clone();
+    let read_only_sections = program.read_only_sections.clone();
+    let register_sections = program.register_sections.clone();
+    let code_sections = program.code_sections.clone();
 
-    let is_valid_read_1 = match trace.mem_witness.read_1() {
-        MemoryAccessType::Unused => true,
-        MemoryAccessType::Register => address_in_sections(trace.read_1.address, register_sections),
-        MemoryAccessType::Memory => {
-            address_in_sections(trace.read_1.address, read_write_sections)
-                || address_in_sections(trace.read_1.address, read_only_sections)
-        }
-    };
+    let is_valid_read_1 =
+        program.is_valid_mem(trace.mem_witness.read_1(), trace.read_1.address, true);
+    let is_valid_read_2 =
+        program.is_valid_mem(trace.mem_witness.read_2(), trace.read_2.address, true);
 
-    let is_valid_read_2 = match trace.mem_witness.read_2() {
-        MemoryAccessType::Unused => true,
-        MemoryAccessType::Register => address_in_sections(trace.read_2.address, register_sections),
-        MemoryAccessType::Memory => {
-            address_in_sections(trace.read_2.address, read_write_sections)
-                || address_in_sections(trace.read_2.address, read_only_sections)
-        }
-    };
+    let is_valid_write = program.is_valid_mem(
+        trace.mem_witness.write(),
+        trace.trace_step.write_1.address,
+        false,
+    );
 
-    let is_valid_write = match trace.mem_witness.write() {
-        MemoryAccessType::Unused => true,
-        MemoryAccessType::Register => {
-            address_in_sections(trace.trace_step.write_1.address, register_sections)
-        }
-        MemoryAccessType::Memory => {
-            address_in_sections(trace.trace_step.write_1.address, read_write_sections)
-        }
-    };
-    let is_valid_pc = address_in_sections(trace.read_pc.pc.get_address(), code_sections);
+    let is_valid_pc = program.address_in_sections(trace.read_pc.pc.get_address(), &code_sections);
 
     if !(is_valid_read_1 && is_valid_read_2 && is_valid_write && is_valid_pc)
         && force == ForceChallenge::No
@@ -354,10 +331,10 @@ pub fn verifier_choose_challenge(
             trace.trace_step.write_1,
             trace.mem_witness,
             trace.read_pc.pc,
-            read_write_sections.clone(),
-            read_only_sections.clone(),
-            register_sections.clone(),
-            code_sections.clone(),
+            return_script_parameters.then_some(read_write_sections),
+            return_script_parameters.then_some(read_only_sections),
+            return_script_parameters.then_some(register_sections),
+            return_script_parameters.then_some(code_sections),
         ));
     }
 
@@ -485,7 +462,7 @@ pub fn verifier_choose_challenge(
 mod tests {
     use bitcoin_script_riscv::riscv::challenges::execute_challenge;
     use bitvmx_cpu_definitions::{
-        memory::MemoryWitness,
+        memory::{MemoryAccessType, MemoryWitness},
         trace::{ProgramCounter, TraceRead, TraceReadPC, TraceStep, TraceWrite},
     };
     use tracing::Level;
@@ -611,6 +588,7 @@ mod tests {
             final_trace,
             force,
             fail_config_verifier,
+            true,
         )
         .unwrap();
         let result = execute_challenge(&challenge);

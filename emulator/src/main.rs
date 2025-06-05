@@ -179,6 +179,10 @@ enum Commands {
         #[arg(short, long, default_value = "no")]
         force: ForceChallenge,
 
+        /// Return script parameters
+        #[arg(long)]
+        return_script_parameters: bool,
+
         /// Fail Configuration
         #[arg(short, long, value_name = "FailConfigVerifier")]
         fail_config_verifier: Option<FailConfiguration>,
@@ -575,6 +579,7 @@ fn main() -> Result<(), EmulatorError> {
             checkpoint_verifier_path,
             prover_final_trace,
             force,
+            return_script_parameters,
             fail_config_verifier,
             command_file,
         }) => {
@@ -586,6 +591,7 @@ fn main() -> Result<(), EmulatorError> {
                 prover_final_trace.clone(),
                 force.clone(),
                 fail_config_verifier.clone(),
+                *return_script_parameters,
             )?;
             info!("Verifier choose challenge: {:?}", result);
 
