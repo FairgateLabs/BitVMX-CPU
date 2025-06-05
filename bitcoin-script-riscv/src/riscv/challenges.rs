@@ -267,6 +267,7 @@ pub fn trace_hash_zero_challenge(stack: &mut StackTracker) {
 fn is_invalid_read(
     stack: &mut StackTracker,
     stack_tables: &StackTables,
+    modulo_table: &StackVariable,
     read: StackVariable,
     memory_witness: &StackVariable,
     witness_shift: u32,
@@ -296,7 +297,7 @@ fn is_invalid_read(
     address_not_in_sections(stack, &read, register_sections);
     stack.op_booland();
 
-    is_aligned(stack, read, true);
+    is_aligned(stack, read, true, modulo_table);
     stack.op_not();
 
     stack.op_boolor();
@@ -306,6 +307,7 @@ fn is_invalid_read(
 fn is_invalid_write(
     stack: &mut StackTracker,
     stack_tables: &StackTables,
+    modulo_table: &StackVariable,
     write: StackVariable,
     memory_witness: &StackVariable,
     read_write_sections: &Vec<(u32, u32)>,
@@ -331,7 +333,7 @@ fn is_invalid_write(
     address_not_in_sections(stack, &write, register_sections);
     stack.op_booland();
 
-    is_aligned(stack, write, true);
+    is_aligned(stack, write, true, modulo_table);
     stack.op_not();
 
     stack.op_boolor();
@@ -340,12 +342,13 @@ fn is_invalid_write(
 
 fn is_invalid_pc(
     stack: &mut StackTracker,
+    modulo_table: &StackVariable,
     pc_address: StackVariable,
     code_sections: &Vec<(u32, u32)>,
 ) {
     address_not_in_sections(stack, &pc_address, code_sections);
 
-    is_aligned(stack, pc_address, true);
+    is_aligned(stack, pc_address, true, modulo_table);
     stack.op_not();
 
     stack.op_boolor();
@@ -366,10 +369,12 @@ pub fn addresses_sections_challenge(
     let memory_witness = stack.define(2, "memory_witness");
     let pc_address = stack.define(8, "pc_address");
     let stack_tables = &StackTables::new(stack, false, false, 0, 0, LOGIC_MASK_AND);
+    let modulo_table = &load_modulo_4_table(stack);
 
     is_invalid_read(
         stack,
         stack_tables,
+        modulo_table,
         read_1_address,
         &memory_witness,
         4,
@@ -380,6 +385,7 @@ pub fn addresses_sections_challenge(
     is_invalid_read(
         stack,
         stack_tables,
+        modulo_table,
         read_2_address,
         &memory_witness,
         2,
@@ -390,13 +396,14 @@ pub fn addresses_sections_challenge(
     is_invalid_write(
         stack,
         stack_tables,
+        modulo_table,
         write_address,
         &memory_witness,
         read_write_sections,
         register_sections,
     );
 
-    is_invalid_pc(stack, pc_address, code_sections);
+    is_invalid_pc(stack, modulo_table, pc_address, code_sections);
 
     stack.op_boolor();
     stack.op_boolor();
@@ -404,6 +411,7 @@ pub fn addresses_sections_challenge(
 
     stack.op_verify();
 
+    stack.drop(*modulo_table);
     stack_tables.drop(stack);
     stack.drop(memory_witness);
 }
