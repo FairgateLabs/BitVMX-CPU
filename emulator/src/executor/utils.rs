@@ -103,18 +103,6 @@ pub struct FailReads {
     read_2: FailRead,
 }
 
-pub fn get_chunk_base_addr_and_start_index(
-    pc: u32,
-    section_start: u32,
-    chunk_size: u32,
-) -> (u32, usize) {
-    let instr_index_in_section = (pc - section_start) / 4;
-    let chunk_start_instr = instr_index_in_section - (instr_index_in_section % chunk_size);
-    let chunk_base_addr = section_start + (chunk_start_instr * 4);
-    let chunk_start_index = chunk_start_instr as usize;
-    (chunk_base_addr, chunk_start_index)
-}
-
 impl FailReads {
     pub fn new(
         fail_read_1_args: Option<&Vec<String>>,
@@ -472,53 +460,5 @@ mod utils_tests {
         fail_write.patch_mem(&mut program);
 
         assert_eq!(program.read_mem(4100).unwrap(), 0);
-    }
-
-    #[test]
-    fn test_chunk_base_addr_start_of_chunk() {
-        let pc = 0x1000; // start of first chunk
-        let section_start = 0x1000;
-        let chunk_size = 500;
-        let (base_addr, start_index) =
-            get_chunk_base_addr_and_start_index(pc, section_start, chunk_size);
-
-        assert_eq!(base_addr, 0x1000);
-        assert_eq!(start_index, 0);
-    }
-
-    #[test]
-    fn test_chunk_base_addr_middle_of_chunk() {
-        let pc = 0x1000 + 250 * 4; // middle of first chunk
-        let section_start = 0x1000;
-        let chunk_size = 500;
-        let (base_addr, start_index) =
-            get_chunk_base_addr_and_start_index(pc, section_start, chunk_size);
-
-        assert_eq!(base_addr, 0x1000);
-        assert_eq!(start_index, 0);
-    }
-
-    #[test]
-    fn test_chunk_base_addr_start_of_second_chunk() {
-        let pc = 0x1000 + 500 * 4; // start of second chunk
-        let section_start = 0x1000;
-        let chunk_size = 500;
-        let (base_addr, start_index) =
-            get_chunk_base_addr_and_start_index(pc, section_start, chunk_size);
-
-        assert_eq!(base_addr, 0x1000 + (500 * 4));
-        assert_eq!(start_index, 500);
-    }
-
-    #[test]
-    fn test_chunk_base_addr_middle_of_second_chunk() {
-        let pc = 0x1000 + 500 * 4 + 250 * 4; // middle of second chunk
-        let section_start = 0x1000;
-        let chunk_size = 500;
-        let (base_addr, start_index) =
-            get_chunk_base_addr_and_start_index(pc, section_start, chunk_size);
-
-        assert_eq!(base_addr, 0x1000 + (500 * 4));
-        assert_eq!(start_index, 500);
     }
 }

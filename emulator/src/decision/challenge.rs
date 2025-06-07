@@ -15,7 +15,7 @@ use crate::{
         execution_log::VerifierChallengeLog,
         nary_search::{choose_segment, ExecutionHashes},
     },
-    executor::utils::{get_chunk_base_addr_and_start_index, FailConfiguration},
+    executor::utils::FailConfiguration,
     loader::program_definition::ProgramDefinition,
     EmulatorError, ExecutionResult,
 };
@@ -371,14 +371,12 @@ pub fn verifier_choose_challenge(
         || force == ForceChallenge::Opcode
     {
         let pc = trace.read_pc.pc.get_address();
-        let section = program.find_section(pc).unwrap();
-        let section_start = section.start;
 
         const CHUNK_SIZE: u32 = 500;
 
-        let (chunk_base_addr, chunk_start) =
-            get_chunk_base_addr_and_start_index(pc, section_start, CHUNK_SIZE);
+        let (chunk_index, chunk_base_addr, chunk_start) = program.get_chunk_info(pc, CHUNK_SIZE);
 
+        let section = program.find_section(pc).unwrap();
         let chunk_end = (chunk_start + CHUNK_SIZE as usize).min(section.data.len());
 
         let opcodes_chunk: Vec<u32> = section.data[chunk_start..chunk_end]
@@ -388,8 +386,9 @@ pub fn verifier_choose_challenge(
 
         return Ok(ChallengeType::Opcode(
             trace.read_pc,
+            chunk_index,
             chunk_base_addr,
-            opcodes_chunk,
+            return_script_parameters.then_some(opcodes_chunk),
         ));
     }
 

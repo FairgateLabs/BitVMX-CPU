@@ -537,10 +537,10 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
                 code_sections.as_ref().unwrap(),
             );
         }
-        ChallengeType::Opcode(pc_read, chunk_base, opcodes_chunk) => {
+        ChallengeType::Opcode(pc_read, _, chunk_base, opcodes_chunk) => {
             stack.number_u32(pc_read.pc.get_address());
             stack.number_u32(pc_read.opcode);
-            opcode_challenge(&mut stack, *chunk_base, opcodes_chunk);
+            opcode_challenge(&mut stack, *chunk_base, opcodes_chunk.as_ref().unwrap());
         }
         _ => {
             return false;

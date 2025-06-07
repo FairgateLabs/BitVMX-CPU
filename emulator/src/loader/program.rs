@@ -71,8 +71,14 @@ impl Section {
             registers: false,
         }
     }
+
     pub fn range(&self) -> (u32, u32) {
         (self.start, self.start + self.size - 1)
+    }
+
+    pub fn contains(&self, address: u32) -> bool {
+        let (start, end) = self.range();
+        return address >= start && address <= end - 3;
     }
 
     pub fn is_merge_compatible(&self, other: &Self) -> bool {
@@ -447,6 +453,43 @@ impl Program {
             _ => unreachable!("unreachable"),
         }
     }
+
+    pub fn get_chunk_info(&self, address: u32, chunk_size: u32) -> (u32, u32, usize) {
+        let mut chunk_index = 0;
+    
+        for section in &self.sections {
+            if !section.is_code {
+                continue;
+            }
+    
+            if section.contains(address) {
+                let section_start = section.start;
+                let offset = address - section_start;
+                let instr_index = offset / 4;
+
+                chunk_index += instr_index / chunk_size;
+    
+                let chunk_start_instr = instr_index - (instr_index % chunk_size);
+                let chunk_base_addr = section_start + chunk_start_instr * 4;
+                let chunk_start_index = chunk_start_instr as usize;
+    
+                return (chunk_index, chunk_base_addr, chunk_start_index);
+            }
+    
+            let section_instrs = section.size / 4;
+            // only counts full chunks
+            let mut section_chunks = section_instrs / chunk_size;
+
+            // if section_instrs isn't a multiple of chunk_size that means that there is a non-full chunk we have to count
+            if section_instrs % chunk_size != 0 {
+                section_chunks += 1;
+            }
+
+            chunk_index += section_chunks;
+        }
+    
+        unreachable!("Non-executable address: 0x{:08X}", address);
+    }
 }
 
 pub fn vec_u8_to_vec_u32(input: &[u8], little: bool) -> Vec<u32> {
@@ -724,5 +767,50 @@ mod tests {
 
         // there are no new sections
         assert_eq!(program.sections.len(), 4);
+    }
+
+    #[test]
+    fn test_chunk_info() {
+        let mut program = Program::new(0, 0, 0);
+
+        // first section has 3 chunks, two full chunks of 500 instructions and half a chunk of 250 instructions
+        program.add_section(Section::new("code_1", 1000, 500 * 4 * 2 + 250 * 4, true, false, false));
+        program.add_section(Section::new("code_2", 10000, 500 * 4, true, false, false));
+
+        // start of first chunk
+        let (chunk_index, chunk_base_addr, chunk_start_index) = program.get_chunk_info(1000, 500); 
+        assert_eq!(chunk_index, 0);
+        assert_eq!(chunk_base_addr, 1000);
+        assert_eq!(chunk_start_index, 0);
+
+        // middle of first chunk
+        let (chunk_index, chunk_base_addr, chunk_start_index) = program.get_chunk_info(1000 + 250 * 4, 500); 
+        assert_eq!(chunk_index, 0);
+        assert_eq!(chunk_base_addr, 1000);
+        assert_eq!(chunk_start_index, 0);
+
+        // start of second chunk
+        let (chunk_index, chunk_base_addr, chunk_start_index) = program.get_chunk_info(1000 + 500 * 4, 500); 
+        assert_eq!(chunk_index, 1);
+        assert_eq!(chunk_base_addr, 1000 + 500*4);
+        assert_eq!(chunk_start_index, 500);
+
+        // middle of second chunk
+        let (chunk_index, chunk_base_addr, chunk_start_index) = program.get_chunk_info(1000 + 500*4 + 250 * 4, 500); 
+        assert_eq!(chunk_index, 1);
+        assert_eq!(chunk_base_addr, 1000 + 500*4);
+        assert_eq!(chunk_start_index, 500);
+
+        // start of first chunk of the second section
+        let (chunk_index, chunk_base_addr, chunk_start_index) = program.get_chunk_info(10000, 500); 
+        assert_eq!(chunk_index, 3);
+        assert_eq!(chunk_base_addr, 10000);
+        assert_eq!(chunk_start_index, 0);
+
+        // middle of first chunk of the second section
+        let (chunk_index, chunk_base_addr, chunk_start_index) = program.get_chunk_info(10000 + 250 * 4, 500); 
+        assert_eq!(chunk_index, 3);
+        assert_eq!(chunk_base_addr, 10000);
+        assert_eq!(chunk_start_index, 0);
     }
 }
