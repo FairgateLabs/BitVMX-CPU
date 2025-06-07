@@ -677,4 +677,52 @@ mod tests {
             Err(ExecutionResult::WriteToReadOnlySection)
         );
     }
+
+    #[test]
+    fn test_merge_sections() {
+        let mut program = Program::new(0, 0, 0);
+        program.add_section(Section::new("code_1", 0, 10, true, false, false));
+        program.add_section(Section::new("code_2", 10, 10, true, false, false));
+        program.add_section(Section::new("code_3", 30, 10, true, false, false));
+
+        program.add_section(Section::new("read_only", 40, 10, false, false, false));
+        program.add_section(Section::new("read_write", 50, 10, false, true, false));
+
+
+        program.merge_sections();
+        
+        // continuous code sections did merge
+        let merged_code = &program.sections[0];
+        assert_eq!(merged_code.start, 0);
+        assert_eq!(merged_code.size, 20);
+        assert!(merged_code.is_code);
+        assert!(!merged_code.is_write);
+        assert!(!merged_code.registers);
+        
+        // non continuous code section did not merge
+        let unmerged_code = &program.sections[1];
+        assert_eq!(unmerged_code.start, 30);
+        assert_eq!(unmerged_code.size, 10);
+        assert!(unmerged_code.is_code);
+        assert!(!unmerged_code.is_write);
+        assert!(!unmerged_code.registers);
+
+        // continuous but incompatible sections did not merge
+        let read_only = &program.sections[2];
+        assert_eq!(read_only.start, 40);
+        assert_eq!(read_only.size, 10);
+        assert!(!read_only.is_code);
+        assert!(!read_only.is_write);
+        assert!(!read_only.registers);
+
+        let read_write = &program.sections[3];
+        assert_eq!(read_write.start, 50);
+        assert_eq!(read_write.size, 10);
+        assert!(!read_write.is_code);
+        assert!(read_write.is_write);
+        assert!(!read_write.registers);
+
+        // there are no new sections
+        assert_eq!(program.sections.len(), 4);
+    }
 }
