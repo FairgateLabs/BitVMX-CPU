@@ -1406,22 +1406,15 @@ pub fn rem(
 
 pub fn witness_equals(
     stack: &mut StackTracker,
-    stack_tables: &StackTables,
-    witness_shift: u32,
+    lower_half_nibble_table: &StackVariable,
+    witness_nibble: u32,
     memory_witness: &StackVariable,
     expected_access_type: MemoryAccessType,
 ) {
-    let (sub_n, shift) = match witness_shift {
-        0 | 2 => (1, witness_shift),
-        4 => (0, 0),
-        _ => unreachable!("witness_shift must be 0, 2, or 4"),
-    };
+    stack.copy_var_sub_n(*memory_witness, witness_nibble);
+    stack.get_value_from_table(*lower_half_nibble_table, None);
 
-    stack.copy_var_sub_n(*memory_witness, sub_n);
-    stack.number(0b11 << shift);
-    stack_tables.logic_op(stack, &LogicOperation::And);
-
-    stack.number((expected_access_type as u32) << shift);
+    stack.number(expected_access_type as u32);
     stack.op_equal();
 }
 
@@ -1467,6 +1460,8 @@ pub fn nibbles_to_number(stack: &mut StackTracker, nibbles: Vec<StackVariable>) 
 mod tests {
 
     use bitvmx_cpu_definitions::memory::MemoryWitness;
+
+    use crate::riscv::memory_alignment::{load_lower_half_nibble_table, load_upper_half_nibble_table};
 
     use super::*;
 
@@ -1753,24 +1748,26 @@ mod tests {
 
     fn test_witness_equals_aux(
         memory_witness: &MemoryWitness,
-        witness_shift: u32,
+        witness_nibble: u32,
+        is_upper: bool,
         expected_access_type: MemoryAccessType,
     ) {
         let mut stack = StackTracker::new();
-        let stack_tables = &StackTables::new(&mut stack, false, false, 0, 0, LOGIC_MASK_AND);
+        let half_nibble_table = if is_upper {load_upper_half_nibble_table(&mut stack)} else {load_lower_half_nibble_table(&mut stack)};
 
         let memory_witness = stack.byte(memory_witness.byte());
 
         witness_equals(
             &mut stack,
-            stack_tables,
-            witness_shift,
+            &half_nibble_table,
+            witness_nibble,
             &memory_witness,
             expected_access_type,
         );
+
         stack.op_verify();
         stack.drop(memory_witness);
-        stack_tables.drop(&mut stack);
+        stack.drop(half_nibble_table);
         stack.op_true();
         assert!(stack.run().success);
     }
@@ -1782,9 +1779,9 @@ mod tests {
             MemoryAccessType::Register,
             MemoryAccessType::Unused,
         );
-        test_witness_equals_aux(memory_witness, 4, MemoryAccessType::Memory);
-        test_witness_equals_aux(memory_witness, 2, MemoryAccessType::Register);
-        test_witness_equals_aux(memory_witness, 0, MemoryAccessType::Unused);
+        test_witness_equals_aux(memory_witness, 0, false,  MemoryAccessType::Memory);
+        test_witness_equals_aux(memory_witness, 1, true, MemoryAccessType::Register);
+        test_witness_equals_aux(memory_witness, 1, false, MemoryAccessType::Unused);
     }
 
     fn test_address_not_in_sections_aux(address: u32, sections: &SectionDefinition) -> bool {

@@ -8,11 +8,11 @@ use bitvmx_cpu_definitions::{
 };
 
 use crate::riscv::{
-    memory_alignment::{is_aligned, load_modulo_4_table},
+    memory_alignment::{is_aligned, load_lower_half_nibble_table, load_upper_half_nibble_table},
     operations::sub,
     script_utils::{
         address_not_in_sections, is_equal_to, is_lower_than, nibbles_to_number, shift_number,
-        witness_equals, StackTables, WordTable, LOGIC_MASK_AND,
+        witness_equals, StackTables, WordTable,
     },
 };
 
@@ -270,19 +270,19 @@ pub fn trace_hash_zero_challenge(stack: &mut StackTracker) {
 
 fn is_invalid_read(
     stack: &mut StackTracker,
-    stack_tables: &StackTables,
-    modulo_table: &StackVariable,
+    half_nibble_table: &StackVariable,
+    lower_half_nibble_table: &StackVariable,
     read: StackVariable,
     memory_witness: &StackVariable,
-    witness_shift: u32,
+    witness_nibble: u32,
     read_write_sections: &SectionDefinition,
     read_only_sections: &SectionDefinition,
     register_sections: &SectionDefinition,
 ) {
     witness_equals(
         stack,
-        stack_tables,
-        witness_shift,
+        half_nibble_table,
+        witness_nibble,
         memory_witness,
         MemoryAccessType::Memory,
     );
@@ -293,15 +293,15 @@ fn is_invalid_read(
 
     witness_equals(
         stack,
-        stack_tables,
-        witness_shift,
+        half_nibble_table,
+        witness_nibble,
         memory_witness,
         MemoryAccessType::Register,
     );
     address_not_in_sections(stack, &read, register_sections);
     stack.op_booland();
 
-    is_aligned(stack, read, true, modulo_table);
+    is_aligned(stack, read, true, lower_half_nibble_table);
     stack.op_not();
 
     stack.op_boolor();
@@ -310,8 +310,7 @@ fn is_invalid_read(
 
 fn is_invalid_write(
     stack: &mut StackTracker,
-    stack_tables: &StackTables,
-    modulo_table: &StackVariable,
+    lower_half_nibble_table: &StackVariable,
     write: StackVariable,
     memory_witness: &StackVariable,
     read_write_sections: &SectionDefinition,
@@ -319,8 +318,8 @@ fn is_invalid_write(
 ) {
     witness_equals(
         stack,
-        stack_tables,
-        0,
+        lower_half_nibble_table,
+        1,
         memory_witness,
         MemoryAccessType::Memory,
     );
@@ -329,15 +328,15 @@ fn is_invalid_write(
 
     witness_equals(
         stack,
-        stack_tables,
-        0,
+        lower_half_nibble_table,
+        1,
         memory_witness,
         MemoryAccessType::Register,
     );
     address_not_in_sections(stack, &write, register_sections);
     stack.op_booland();
 
-    is_aligned(stack, write, true, modulo_table);
+    is_aligned(stack, write, true, lower_half_nibble_table);
     stack.op_not();
 
     stack.op_boolor();
@@ -346,13 +345,13 @@ fn is_invalid_write(
 
 fn is_invalid_pc(
     stack: &mut StackTracker,
-    modulo_table: &StackVariable,
+    lower_half_nibble_table: &StackVariable,
     pc_address: StackVariable,
     code_sections: &SectionDefinition,
 ) {
     address_not_in_sections(stack, &pc_address, code_sections);
 
-    is_aligned(stack, pc_address, true, modulo_table);
+    is_aligned(stack, pc_address, true, lower_half_nibble_table);
     stack.op_not();
 
     stack.op_boolor();
@@ -372,42 +371,41 @@ pub fn addresses_sections_challenge(
     let write_address = stack.define(8, "write_address");
     let memory_witness = stack.define(2, "memory_witness");
     let pc_address = stack.define(8, "pc_address");
-    let stack_tables = &StackTables::new(stack, false, false, 0, 0, LOGIC_MASK_AND);
-    let modulo_table = &load_modulo_4_table(stack);
+    let upper_half_nibble_table = &load_upper_half_nibble_table(stack);
+    let lower_half_nibble_table = &load_lower_half_nibble_table(stack);
 
     is_invalid_read(
         stack,
-        stack_tables,
-        modulo_table,
+        lower_half_nibble_table,
+        lower_half_nibble_table,
         read_1_address,
         &memory_witness,
-        4,
+        0,
         read_write_sections,
         read_only_sections,
         register_sections,
     );
     is_invalid_read(
         stack,
-        stack_tables,
-        modulo_table,
+        upper_half_nibble_table,
+        lower_half_nibble_table,
         read_2_address,
         &memory_witness,
-        2,
+        1,
         read_write_sections,
         read_only_sections,
         register_sections,
     );
     is_invalid_write(
         stack,
-        stack_tables,
-        modulo_table,
+        lower_half_nibble_table,
         write_address,
         &memory_witness,
         read_write_sections,
         register_sections,
     );
 
-    is_invalid_pc(stack, modulo_table, pc_address, code_sections);
+    is_invalid_pc(stack, lower_half_nibble_table, pc_address, code_sections);
 
     stack.op_boolor();
     stack.op_boolor();
@@ -415,8 +413,8 @@ pub fn addresses_sections_challenge(
 
     stack.op_verify();
 
-    stack.drop(*modulo_table);
-    stack_tables.drop(stack);
+    stack.drop(*lower_half_nibble_table);
+    stack.drop(*upper_half_nibble_table);
     stack.drop(memory_witness);
 }
 
