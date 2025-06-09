@@ -417,7 +417,7 @@ fn main() -> Result<(), EmulatorError> {
                 fail_reads,
                 fail_write,
                 fail_pc: *fail_pc,
-                fail_opcode
+                fail_opcode,
             };
             let result = execute_program(
                 &mut program,

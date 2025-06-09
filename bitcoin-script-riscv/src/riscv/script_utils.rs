@@ -1461,7 +1461,9 @@ mod tests {
 
     use bitvmx_cpu_definitions::memory::MemoryWitness;
 
-    use crate::riscv::memory_alignment::{load_lower_half_nibble_table, load_upper_half_nibble_table};
+    use crate::riscv::memory_alignment::{
+        load_lower_half_nibble_table, load_upper_half_nibble_table,
+    };
 
     use super::*;
 
@@ -1753,7 +1755,11 @@ mod tests {
         expected_access_type: MemoryAccessType,
     ) {
         let mut stack = StackTracker::new();
-        let half_nibble_table = if is_upper {load_upper_half_nibble_table(&mut stack)} else {load_lower_half_nibble_table(&mut stack)};
+        let half_nibble_table = if is_upper {
+            load_upper_half_nibble_table(&mut stack)
+        } else {
+            load_lower_half_nibble_table(&mut stack)
+        };
 
         let memory_witness = stack.byte(memory_witness.byte());
 
@@ -1779,7 +1785,7 @@ mod tests {
             MemoryAccessType::Register,
             MemoryAccessType::Unused,
         );
-        test_witness_equals_aux(memory_witness, 0, false,  MemoryAccessType::Memory);
+        test_witness_equals_aux(memory_witness, 0, false, MemoryAccessType::Memory);
         test_witness_equals_aux(memory_witness, 1, true, MemoryAccessType::Register);
         test_witness_equals_aux(memory_witness, 1, false, MemoryAccessType::Unused);
     }

@@ -8,7 +8,7 @@ pub mod memory_access_type {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct SectionDefinition {
-    pub ranges: Vec<(u32, u32)>
+    pub ranges: Vec<(u32, u32)>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]

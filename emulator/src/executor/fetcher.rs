@@ -250,14 +250,14 @@ pub fn execute_step(
     program: &mut Program,
     print_program_stdout: bool,
     debug: bool,
-    fail_config: FailConfiguration
+    fail_config: FailConfiguration,
 ) -> Result<TraceRWStep, ExecutionResult> {
     let pc = program.pc.clone();
     program.step += 1;
 
     let opcode = match fail_config.fail_opcode {
         Some(fo) if fo.step == program.step => fo.opcode,
-        _ => program.read_mem(pc.get_address())?
+        _ => program.read_mem(pc.get_address())?,
     };
 
     let instruction = riscv_decode::decode(opcode).unwrap();

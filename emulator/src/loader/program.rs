@@ -456,26 +456,26 @@ impl Program {
 
     pub fn get_chunk_info(&self, address: u32, chunk_size: u32) -> (u32, u32, usize) {
         let mut chunk_index = 0;
-    
+
         for section in &self.sections {
             if !section.is_code {
                 continue;
             }
-    
+
             if section.contains(address) {
                 let section_start = section.start;
                 let offset = address - section_start;
                 let instr_index = offset / 4;
 
                 chunk_index += instr_index / chunk_size;
-    
+
                 let chunk_start_instr = instr_index - (instr_index % chunk_size);
                 let chunk_base_addr = section_start + chunk_start_instr * 4;
                 let chunk_start_index = chunk_start_instr as usize;
-    
+
                 return (chunk_index, chunk_base_addr, chunk_start_index);
             }
-    
+
             let section_instrs = section.size / 4;
             // only counts full chunks
             let mut section_chunks = section_instrs / chunk_size;
@@ -487,7 +487,7 @@ impl Program {
 
             chunk_index += section_chunks;
         }
-    
+
         unreachable!("Non-executable address: 0x{:08X}", address);
     }
 }
@@ -731,9 +731,8 @@ mod tests {
         program.add_section(Section::new("read_only", 40, 10, false, false, false));
         program.add_section(Section::new("read_write", 50, 10, false, true, false));
 
-
         program.merge_sections();
-        
+
         // continuous code sections did merge
         let merged_code = &program.sections[0];
         assert_eq!(merged_code.start, 0);
@@ -741,7 +740,7 @@ mod tests {
         assert!(merged_code.is_code);
         assert!(!merged_code.is_write);
         assert!(!merged_code.registers);
-        
+
         // non continuous code section did not merge
         let unmerged_code = &program.sections[1];
         assert_eq!(unmerged_code.start, 30);
@@ -774,41 +773,52 @@ mod tests {
         let mut program = Program::new(0, 0, 0);
 
         // first section has 3 chunks, two full chunks of 500 instructions and half a chunk of 250 instructions
-        program.add_section(Section::new("code_1", 1000, 500 * 4 * 2 + 250 * 4, true, false, false));
+        program.add_section(Section::new(
+            "code_1",
+            1000,
+            500 * 4 * 2 + 250 * 4,
+            true,
+            false,
+            false,
+        ));
         program.add_section(Section::new("code_2", 10000, 500 * 4, true, false, false));
 
         // start of first chunk
-        let (chunk_index, chunk_base_addr, chunk_start_index) = program.get_chunk_info(1000, 500); 
+        let (chunk_index, chunk_base_addr, chunk_start_index) = program.get_chunk_info(1000, 500);
         assert_eq!(chunk_index, 0);
         assert_eq!(chunk_base_addr, 1000);
         assert_eq!(chunk_start_index, 0);
 
         // middle of first chunk
-        let (chunk_index, chunk_base_addr, chunk_start_index) = program.get_chunk_info(1000 + 250 * 4, 500); 
+        let (chunk_index, chunk_base_addr, chunk_start_index) =
+            program.get_chunk_info(1000 + 250 * 4, 500);
         assert_eq!(chunk_index, 0);
         assert_eq!(chunk_base_addr, 1000);
         assert_eq!(chunk_start_index, 0);
 
         // start of second chunk
-        let (chunk_index, chunk_base_addr, chunk_start_index) = program.get_chunk_info(1000 + 500 * 4, 500); 
+        let (chunk_index, chunk_base_addr, chunk_start_index) =
+            program.get_chunk_info(1000 + 500 * 4, 500);
         assert_eq!(chunk_index, 1);
-        assert_eq!(chunk_base_addr, 1000 + 500*4);
+        assert_eq!(chunk_base_addr, 1000 + 500 * 4);
         assert_eq!(chunk_start_index, 500);
 
         // middle of second chunk
-        let (chunk_index, chunk_base_addr, chunk_start_index) = program.get_chunk_info(1000 + 500*4 + 250 * 4, 500); 
+        let (chunk_index, chunk_base_addr, chunk_start_index) =
+            program.get_chunk_info(1000 + 500 * 4 + 250 * 4, 500);
         assert_eq!(chunk_index, 1);
-        assert_eq!(chunk_base_addr, 1000 + 500*4);
+        assert_eq!(chunk_base_addr, 1000 + 500 * 4);
         assert_eq!(chunk_start_index, 500);
 
         // start of first chunk of the second section
-        let (chunk_index, chunk_base_addr, chunk_start_index) = program.get_chunk_info(10000, 500); 
+        let (chunk_index, chunk_base_addr, chunk_start_index) = program.get_chunk_info(10000, 500);
         assert_eq!(chunk_index, 3);
         assert_eq!(chunk_base_addr, 10000);
         assert_eq!(chunk_start_index, 0);
 
         // middle of first chunk of the second section
-        let (chunk_index, chunk_base_addr, chunk_start_index) = program.get_chunk_info(10000 + 250 * 4, 500); 
+        let (chunk_index, chunk_base_addr, chunk_start_index) =
+            program.get_chunk_info(10000 + 250 * 4, 500);
         assert_eq!(chunk_index, 3);
         assert_eq!(chunk_base_addr, 10000);
         assert_eq!(chunk_start_index, 0);
