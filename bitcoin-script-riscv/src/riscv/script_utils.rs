@@ -3,6 +3,7 @@ use bitcoin_script_stack::stack::{StackTracker, StackVariable};
 pub use bitcoin_script::{define_pushable, script};
 define_pushable!();
 pub use bitcoin::ScriptBuf as Script;
+use bitvmx_cpu_definitions::memory::{MemoryAccessType, SectionDefinition};
 
 use super::operations::{sort_nibbles, sub};
 
@@ -74,20 +75,20 @@ pub fn shift_number(
     right: bool,
     msb: bool,
 ) -> StackVariable {
+    let size = stack.get_size(number);
     let number = reverse(stack, number);
     stack.explode(number);
-
-    for _ in 0..8 {
+    for _ in 0..size {
         nib_to_bin(stack);
     }
 
     if !right {
-        for _ in 0..32 {
+        for _ in 0..size * 4 {
             stack.number(0);
         }
     }
 
-    for _ in 0..32 {
+    for _ in 0..size * 4 {
         stack.from_altstack();
         //reverse_4(&mut stack);
     }
@@ -96,15 +97,15 @@ pub fn shift_number(
         if msb {
             stack.op_dup();
             stack.op_dup();
-            for _ in 0..15 {
+            for _ in 0..size * 2 - 1 {
                 stack.op_2dup();
             }
         } else {
-            for _ in 0..32 {
+            for _ in 0..size * 4 {
                 stack.number(0);
             }
         }
-        stack.number(32);
+        stack.number(size * 4);
     }
 
     stack.move_var(to_shift);
@@ -112,7 +113,7 @@ pub fn shift_number(
         to_shift = stack.op_sub();
     }
 
-    for i in 0..8 {
+    for i in 0..size {
         stack.number(0);
         for n in 0..4 {
             if n > 0 {
@@ -132,11 +133,11 @@ pub fn shift_number(
     }
 
     stack.drop(to_shift);
-    for _ in 0..32 {
+    for _ in 0..size * 4 {
         stack.op_2drop();
     }
 
-    let shifted = stack.from_altstack_joined(8, "shift_left");
+    let shifted = stack.from_altstack_joined(size, "shift_left");
     reverse(stack, shifted)
 }
 
@@ -705,8 +706,15 @@ pub fn is_lower_than(
     ret
 }
 
-pub fn mulitply_by_8(stack: &mut StackTracker) {
+pub fn multiply_by_8(stack: &mut StackTracker) {
     for _ in 0..3 {
+        stack.op_dup();
+        stack.op_add();
+    }
+}
+
+pub fn multiply_by_16(stack: &mut StackTracker) {
+    for _ in 0..4 {
         stack.op_dup();
         stack.op_add();
     }
@@ -761,7 +769,7 @@ impl WordTable {
     pub fn peek(&self, stack: &mut StackTracker) -> StackVariable {
         stack.number(1);
         stack.op_add();
-        mulitply_by_8(stack);
+        multiply_by_8(stack);
 
         for i in 0..8 {
             if i > 0 {
@@ -1396,8 +1404,66 @@ pub fn rem(
     )
 }
 
+pub fn witness_equals(
+    stack: &mut StackTracker,
+    lower_half_nibble_table: &StackVariable,
+    witness_nibble: u32,
+    memory_witness: &StackVariable,
+    expected_access_type: MemoryAccessType,
+) {
+    stack.copy_var_sub_n(*memory_witness, witness_nibble);
+    stack.get_value_from_table(*lower_half_nibble_table, None);
+
+    stack.number(expected_access_type as u32);
+    stack.op_equal();
+}
+
+pub fn address_not_in_sections(
+    stack: &mut StackTracker,
+    address: &StackVariable,
+    sections: &SectionDefinition,
+) {
+    for range in &sections.ranges {
+        assert!(range.0 + 3 <= range.1);
+        let section_start = stack.number_u32(range.0);
+        let address_copy: StackVariable = stack.copy_var(*address);
+
+        is_lower_than(stack, address_copy, section_start, true);
+
+        // when we do a read on an address, we also read the 3 addresses after
+        let section_end = stack.number_u32(range.1 - 3);
+        let address_copy = stack.copy_var(*address);
+
+        is_lower_than(stack, section_end, address_copy, true);
+
+        stack.op_boolor();
+    }
+
+    for _ in 0..sections.ranges.len() - 1 {
+        stack.op_booland();
+    }
+}
+
+pub fn nibbles_to_number(stack: &mut StackTracker, nibbles: Vec<StackVariable>) -> StackVariable {
+    let mut result = stack.number(0);
+
+    for nibble in nibbles.iter() {
+        multiply_by_16(stack);
+        stack.move_var(*nibble);
+        result = stack.op_add();
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
+
+    use bitvmx_cpu_definitions::memory::MemoryWitness;
+
+    use crate::riscv::memory_alignment::{
+        load_lower_half_nibble_table, load_upper_half_nibble_table,
+    };
 
     use super::*;
 
@@ -1567,7 +1633,6 @@ mod tests {
             stack.number(i);
             nib_to_bin(&mut stack);
             stack.from_altstack_joined(4, &format!("bin({})", i));
-            stack.debug();
         }
     }
 
@@ -1679,6 +1744,98 @@ mod tests {
         let res = if_less(&mut stack, 5, 1, 0);
         let expected = stack.number(0);
         stack.equals(expected, true, res, true);
+        stack.op_true();
+        assert!(stack.run().success);
+    }
+
+    fn test_witness_equals_aux(
+        memory_witness: &MemoryWitness,
+        witness_nibble: u32,
+        is_upper: bool,
+        expected_access_type: MemoryAccessType,
+    ) {
+        let mut stack = StackTracker::new();
+        let half_nibble_table = if is_upper {
+            load_upper_half_nibble_table(&mut stack)
+        } else {
+            load_lower_half_nibble_table(&mut stack)
+        };
+
+        let memory_witness = stack.byte(memory_witness.byte());
+
+        witness_equals(
+            &mut stack,
+            &half_nibble_table,
+            witness_nibble,
+            &memory_witness,
+            expected_access_type,
+        );
+
+        stack.op_verify();
+        stack.drop(memory_witness);
+        stack.drop(half_nibble_table);
+        stack.op_true();
+        assert!(stack.run().success);
+    }
+
+    #[test]
+    fn test_witness_equals() {
+        let memory_witness = &MemoryWitness::new(
+            MemoryAccessType::Memory,
+            MemoryAccessType::Register,
+            MemoryAccessType::Unused,
+        );
+        test_witness_equals_aux(memory_witness, 0, false, MemoryAccessType::Memory);
+        test_witness_equals_aux(memory_witness, 1, true, MemoryAccessType::Register);
+        test_witness_equals_aux(memory_witness, 1, false, MemoryAccessType::Unused);
+    }
+
+    fn test_address_not_in_sections_aux(address: u32, sections: &SectionDefinition) -> bool {
+        let mut stack = StackTracker::new();
+
+        let address = stack.number_u32(address);
+
+        address_not_in_sections(&mut stack, &address, sections);
+
+        stack.op_verify();
+        stack.drop(address);
+        stack.op_true();
+        stack.run().success
+    }
+
+    #[test]
+    fn test_address_not_in_sections() {
+        const START_1: u32 = 0x0000_00f0;
+        const START_2: u32 = 0x000f_00f0;
+        const END_1: u32 = 0x0000_f003;
+        const END_2: u32 = 0x000f_f003;
+
+        let sections = &SectionDefinition {
+            ranges: vec![(START_1, END_1), (START_2, END_2)],
+        };
+
+        assert!(!test_address_not_in_sections_aux(START_1, sections));
+        assert!(!test_address_not_in_sections_aux(0x0000_0f00, sections));
+        assert!(!test_address_not_in_sections_aux(END_1 - 3, sections));
+        assert!(!test_address_not_in_sections_aux(START_2, sections));
+        assert!(!test_address_not_in_sections_aux(0x000f_0f00, sections));
+        assert!(!test_address_not_in_sections_aux(END_2 - 3, sections));
+
+        assert!(test_address_not_in_sections_aux(START_1 - 1, sections));
+        assert!(test_address_not_in_sections_aux(END_1 - 2, sections));
+        assert!(test_address_not_in_sections_aux(START_2 - 1, sections));
+        assert!(test_address_not_in_sections_aux(END_2 - 2, sections));
+    }
+
+    #[test]
+    fn test_nibbles_to_number() {
+        let mut stack = StackTracker::new();
+
+        let expected = stack.number(0x1234_5678);
+        let n = stack.number_u32(0x1234_5678);
+        let nibbles = stack.explode(n);
+        let result = nibbles_to_number(&mut stack, nibbles);
+        stack.equals(expected, true, result, true);
         stack.op_true();
         assert!(stack.run().success);
     }

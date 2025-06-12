@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use bitvmx_cpu_definitions::trace::ProgramCounter;
+use bitvmx_cpu_definitions::{memory::SectionDefinition, trace::ProgramCounter};
 use emulator::loader::program::{Program, Registers, Section};
 use rand::Rng;
 use riscv_decode::types::{BType, IType, JType, RType, SType, ShiftType, UType};
@@ -54,6 +54,10 @@ pub fn get_new_program() -> Program {
         step: 0,
         hash: [0; 20],
         halt: false,
+        read_write_sections: SectionDefinition::default(),
+        read_only_sections: SectionDefinition::default(),
+        register_sections: SectionDefinition::default(),
+        code_sections: SectionDefinition::default(),
     }
 }
 
@@ -65,6 +69,7 @@ pub fn get_new_section() -> Section {
         start: 0x4000_0000,
         size: 20 * 4,
         is_code: false,
+        is_write: true,
         initialized: true,
         registers: false,
     }
