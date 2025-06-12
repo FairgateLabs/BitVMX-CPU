@@ -13,6 +13,40 @@ pub fn load_modulo_4_table(stack: &mut StackTracker) -> StackVariable {
     stack.join_in_stack(16, None, Some("modulo_4_table"))
 }
 
+pub fn load_lower_half_nibble_table(stack: &mut StackTracker) -> StackVariable {
+    for i in (0..16).rev() {
+        stack.number(i & 0b11);
+    }
+    stack.join_in_stack(16, None, Some("lower_half_nibble_table"))
+}
+
+pub fn load_upper_half_nibble_table(stack: &mut StackTracker) -> StackVariable {
+    for i in (0..16).rev() {
+        stack.number(i >> 2);
+    }
+    stack.join_in_stack(16, None, Some("upper_half_nibble_table"))
+}
+
+pub fn is_aligned(
+    stack: &mut StackTracker,
+    mem_address: StackVariable,
+    consume: bool,
+    lower_half_nibble_table: &StackVariable,
+) -> StackVariable {
+    stack.copy_var_sub_n(mem_address, 7);
+    stack.get_value_from_table(*lower_half_nibble_table, None);
+
+    stack.number(0);
+    let result = stack.op_equal();
+
+    if consume {
+        stack.move_var(mem_address);
+        stack.drop(mem_address);
+    }
+
+    result
+}
+
 //get's the memory address to be read, and returns the aligned memory address and the alignment delta
 pub fn align_memory(
     stack: &mut StackTracker,
@@ -199,6 +233,25 @@ mod tests {
             stack.op_true();
             assert!(stack.run().success);
         }
+    }
+
+    fn test_is_aligned_helper(address: u32) -> bool {
+        let mut stack = StackTracker::new();
+        let address = stack.number_u32(address);
+        let table = load_lower_half_nibble_table(&mut stack);
+        is_aligned(&mut stack, address, true, &table);
+        stack.move_var(table);
+        stack.drop(table);
+        stack.run().success
+    }
+
+    #[test]
+    fn test_is_aligned() {
+        assert!(test_is_aligned_helper(0x0000_0000));
+        assert!(!test_is_aligned_helper(0x0000_0001));
+        assert!(!test_is_aligned_helper(0x0000_0002));
+        assert!(!test_is_aligned_helper(0x0000_0003));
+        assert!(test_is_aligned_helper(0x0000_0004));
     }
 
     #[test]
