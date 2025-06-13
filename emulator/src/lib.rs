@@ -30,6 +30,9 @@ pub enum EmulatorError {
 
     #[error("Error with emulator result {0}")]
     EmulatorResultError(#[from] EmulatorResultError),
+
+    #[error("Invalid force configuration {0}")]
+    InvalidForceConfiguration(String),
 }
 
 #[derive(Error, Debug, Clone, PartialEq, Serialize, Deserialize)]
