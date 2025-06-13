@@ -443,8 +443,6 @@ fn main() -> Result<(), EmulatorError> {
             fail_config_prover,
             command_file,
         }) => {
-            let mut file = create_or_open_file(command_file);
-
             let input_bytes = hex::decode(input).expect("Invalid hex string");
             let result = prover_execute(
                 pdf,
@@ -467,6 +465,7 @@ fn main() -> Result<(), EmulatorError> {
             }
             .to_value()?;
 
+            let mut file = create_or_open_file(command_file);
             file.write_all(result.to_string().as_bytes())
                 .expect("Failed to write JSON to file");
         }
@@ -480,8 +479,6 @@ fn main() -> Result<(), EmulatorError> {
             fail_config_verifier,
             command_file,
         }) => {
-            let mut file = create_or_open_file(command_file);
-
             let input_bytes = hex::decode(input).expect("Invalid hex string");
             let result = verifier_check_execution(
                 pdf,
@@ -496,6 +493,7 @@ fn main() -> Result<(), EmulatorError> {
 
             let result =
                 EmulatorResultType::VerifierCheckExecutionResult { step: result }.to_value()?;
+            let mut file = create_or_open_file(command_file);
             file.write_all(result.to_string().as_bytes())
                 .expect("Failed to write JSON to file");
         }
@@ -507,8 +505,6 @@ fn main() -> Result<(), EmulatorError> {
             fail_config_prover,
             command_file,
         }) => {
-            let mut file = create_or_open_file(command_file);
-
             let result = prover_get_hashes_for_round(
                 pdf,
                 checkpoint_prover_path,
@@ -523,6 +519,7 @@ fn main() -> Result<(), EmulatorError> {
                 round: *round_number,
             }
             .to_value()?;
+            let mut file = create_or_open_file(command_file);
             file.write_all(result.to_string().as_bytes())
                 .expect("Failed to write JSON to file");
         }
@@ -534,8 +531,6 @@ fn main() -> Result<(), EmulatorError> {
             fail_config_verifier,
             command_file,
         }) => {
-            let mut file = create_or_open_file(command_file);
-
             let result = verifier_choose_segment(
                 pdf,
                 checkpoint_verifier_path,
@@ -550,6 +545,7 @@ fn main() -> Result<(), EmulatorError> {
                 round: *round_number,
             }
             .to_value()?;
+            let mut file = create_or_open_file(command_file);
             file.write_all(result.to_string().as_bytes())
                 .expect("Failed to write JSON to file");
         }
@@ -560,8 +556,6 @@ fn main() -> Result<(), EmulatorError> {
             fail_config_prover,
             command_file,
         }) => {
-            let mut file = create_or_open_file(command_file);
-
             let result: TraceRWStep = prover_final_trace(
                 pdf,
                 checkpoint_prover_path,
@@ -574,6 +568,7 @@ fn main() -> Result<(), EmulatorError> {
                 final_trace: result.clone(),
             }
             .to_value()?;
+            let mut file = create_or_open_file(command_file);
             file.write_all(result.to_string().as_bytes())
                 .expect("Failed to write JSON to file");
         }
@@ -585,8 +580,6 @@ fn main() -> Result<(), EmulatorError> {
             fail_config_verifier,
             command_file,
         }) => {
-            let mut file = create_or_open_file(command_file);
-
             let result = verifier_choose_challenge(
                 pdf,
                 checkpoint_verifier_path,
@@ -601,6 +594,7 @@ fn main() -> Result<(), EmulatorError> {
                 challenge: result.clone(),
             }
             .to_value()?;
+            let mut file = create_or_open_file(command_file);
             file.write_all(result.to_string().as_bytes())
                 .expect("Failed to write JSON to file");
         }
