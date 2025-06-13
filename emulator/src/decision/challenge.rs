@@ -3,6 +3,8 @@ use bitvmx_cpu_definitions::{
     constants::LAST_STEP_INIT,
     trace::{generate_initial_step_hash, hashvec_to_string, validate_step_hash, TraceRWStep},
 };
+
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use strum_macros::{Display, EnumIter, EnumString};
@@ -240,7 +242,9 @@ pub enum ForceChallenge {
     TraceHashZero,
     EntryPoint,
     ProgramCounter,
+    Opcode,
     InputData,
+    AddressesSections,
     No,
 }
 
@@ -259,6 +263,7 @@ pub fn verifier_choose_challenge(
     trace: TraceRWStep,
     force: ForceChallenge,
     fail_config: Option<FailConfiguration>,
+    return_script_parameters: bool,
 ) -> Result<ChallengeType, EmulatorError> {
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
     let program = program_def.load_program_from_checkpoint(checkpoint_path, 0)?;
@@ -272,7 +277,8 @@ pub fn verifier_choose_challenge(
     );
 
     // check trace_hash
-    if !validate_step_hash(&step_hash, &trace.trace_step, &next_hash)
+    if (!validate_step_hash(&step_hash, &trace.trace_step, &next_hash)
+        && force == ForceChallenge::No)
         || force == ForceChallenge::TraceHash
         || force == ForceChallenge::TraceHashZero
     {
@@ -304,9 +310,48 @@ pub fn verifier_choose_challenge(
     info!("execution: {:?}", my_execution);
     let my_trace = my_execution[my_trace_idx].0.clone();
 
+    // TODO: limit exception
+
+    let read_write_sections = program.read_write_sections.clone();
+    let read_only_sections = program.read_only_sections.clone();
+    let register_sections = program.register_sections.clone();
+    let code_sections = program.code_sections.clone();
+
+    let is_valid_read_1 =
+        program.is_valid_mem(trace.mem_witness.read_1(), trace.read_1.address, true);
+    let is_valid_read_2 =
+        program.is_valid_mem(trace.mem_witness.read_2(), trace.read_2.address, true);
+
+    let is_valid_write = program.is_valid_mem(
+        trace.mem_witness.write(),
+        trace.trace_step.write_1.address,
+        false,
+    );
+
+    let is_valid_pc = program.address_in_sections(trace.read_pc.pc.get_address(), &code_sections);
+
+    if (!(is_valid_read_1 && is_valid_read_2 && is_valid_write && is_valid_pc)
+        && force == ForceChallenge::No)
+        || force == ForceChallenge::AddressesSections
+    {
+        return Ok(ChallengeType::AddressesSections(
+            trace.read_1,
+            trace.read_2,
+            trace.trace_step.write_1,
+            trace.mem_witness,
+            trace.read_pc.pc,
+            return_script_parameters.then_some(read_write_sections),
+            return_script_parameters.then_some(read_only_sections),
+            return_script_parameters.then_some(register_sections),
+            return_script_parameters.then_some(code_sections),
+        ));
+    }
+
     // check entrypoint
-    if trace.read_pc.pc.get_address() != my_trace.read_pc.pc.get_address()
-        || trace.read_pc.pc.get_micro() != my_trace.read_pc.pc.get_micro()
+    if (trace.read_pc.pc.get_address() != my_trace.read_pc.pc.get_address()
+        && force == ForceChallenge::No)
+        || (trace.read_pc.pc.get_micro() != my_trace.read_pc.pc.get_micro()
+            && force == ForceChallenge::No)
         || force == ForceChallenge::EntryPoint
         || force == ForceChallenge::ProgramCounter
     {
@@ -330,8 +375,30 @@ pub fn verifier_choose_challenge(
         }
     }
 
-    // TODO: limit exception
-    // TODO: segmentation fault
+    if trace.read_pc.opcode != my_trace.read_pc.opcode && force == ForceChallenge::No
+        || force == ForceChallenge::Opcode
+    {
+        let pc = trace.read_pc.pc.get_address();
+
+        const CHUNK_SIZE: u32 = 500;
+
+        let (chunk_index, chunk_base_addr, chunk_start) = program.get_chunk_info(pc, CHUNK_SIZE);
+
+        let section = program.find_section(pc).unwrap();
+        let chunk_end = (chunk_start + CHUNK_SIZE as usize).min(section.data.len());
+
+        let opcodes_chunk: Vec<u32> = section.data[chunk_start..chunk_end]
+            .iter()
+            .map(|opcode| u32::from_be(*opcode))
+            .collect();
+
+        return Ok(ChallengeType::Opcode(
+            trace.read_pc,
+            chunk_index,
+            chunk_base_addr,
+            return_script_parameters.then_some(opcodes_chunk),
+        ));
+    }
 
     // check const read value
     let conflict_read_1 =
@@ -347,8 +414,10 @@ pub fn verifier_choose_challenge(
         let section = program.find_section(conflict_address)?;
         //TODO: Check if the address is in the input section rom ram or registers
         let value = program.read_mem(conflict_address)?;
-        if section.name == program_def.input_section_name || force == ForceChallenge::InputData {
-            info!("Veifier choose to challenge invalid INPUT DATA");
+        if (section.name == program_def.input_section_name && force == ForceChallenge::No)
+            || force == ForceChallenge::InputData
+        {
+            info!("Verifier choose to challenge invalid INPUT DATA");
             return Ok(ChallengeType::InputData(
                 trace.read_1.clone(),
                 trace.read_2.clone(),
@@ -426,12 +495,19 @@ pub fn verifier_choose_challenge(
 #[cfg(test)]
 mod tests {
     use bitcoin_script_riscv::riscv::challenges::execute_challenge;
+    use bitvmx_cpu_definitions::{
+        memory::{MemoryAccessType, MemoryWitness},
+        trace::{ProgramCounter, TraceRead, TraceReadPC, TraceStep, TraceWrite},
+    };
     use tracing::Level;
 
     use crate::{
         constants::REGISTERS_BASE_ADDRESS,
         decision::challenge::*,
-        executor::{utils::FailReads, verifier::verify_script},
+        executor::{
+            utils::{FailExecute, FailOpcode, FailReads, FailWrite},
+            verifier::verify_script,
+        },
         loader::program_definition::ProgramDefinition,
     };
 
@@ -455,6 +531,7 @@ mod tests {
 
     fn test_challenge_aux(
         id: &str,
+        pdf: &str,
         input: u8,
         execute_err: bool,
         fail_config_prover: Option<FailConfiguration>,
@@ -463,7 +540,7 @@ mod tests {
         force_condition: ForceCondition,
         force: ForceChallenge,
     ) {
-        let pdf = "../docker-riscv32/riscv32/build/hello-world.yaml";
+        let pdf = &format!("../docker-riscv32/riscv32/build/{}", pdf);
         let input = vec![17, 17, 17, input];
         let program_def = ProgramDefinition::from_config(pdf).unwrap();
         let nary_def = program_def.nary_def();
@@ -545,6 +622,7 @@ mod tests {
             final_trace,
             force,
             fail_config_verifier,
+            true,
         )
         .unwrap();
         let result = execute_challenge(&challenge);
@@ -559,6 +637,7 @@ mod tests {
         //bad input: exepct execute step to fail
         test_challenge_aux(
             "1",
+            "hello-world.yaml",
             0,
             true,
             None,
@@ -570,6 +649,7 @@ mod tests {
         //good input: expect execute step to succeed
         test_challenge_aux(
             "2",
+            "hello-world.yaml",
             17,
             false,
             None,
@@ -587,6 +667,7 @@ mod tests {
         let fail_hash = Some(FailConfiguration::new_fail_hash(100));
         test_challenge_aux(
             "3",
+            "hello-world.yaml",
             17,
             false,
             fail_hash.clone(),
@@ -597,6 +678,7 @@ mod tests {
         );
         test_challenge_aux(
             "4",
+            "hello-world.yaml",
             17,
             false,
             None,
@@ -614,6 +696,7 @@ mod tests {
         let fail_hash = Some(FailConfiguration::new_fail_hash(1));
         test_challenge_aux(
             "5",
+            "hello-world.yaml",
             17,
             false,
             fail_hash.clone(),
@@ -624,6 +707,7 @@ mod tests {
         );
         test_challenge_aux(
             "6",
+            "hello-world.yaml",
             17,
             false,
             None,
@@ -640,6 +724,7 @@ mod tests {
         let fail_entrypoint = Some(FailConfiguration::new_fail_pc(0));
         test_challenge_aux(
             "7",
+            "hello-world.yaml",
             17,
             false,
             fail_entrypoint.clone(),
@@ -650,6 +735,7 @@ mod tests {
         );
         test_challenge_aux(
             "8",
+            "hello-world.yaml",
             17,
             false,
             None,
@@ -666,6 +752,7 @@ mod tests {
         let fail_pc = Some(FailConfiguration::new_fail_pc(1));
         test_challenge_aux(
             "9",
+            "hello-world.yaml",
             17,
             false,
             fail_pc.clone(),
@@ -676,6 +763,7 @@ mod tests {
         );
         test_challenge_aux(
             "10",
+            "hello-world.yaml",
             17,
             false,
             None,
@@ -699,30 +787,496 @@ mod tests {
         .iter()
         .map(|x| x.to_string())
         .collect::<Vec<String>>();
-        let fail_read_1 = Some(FailConfiguration::new_fail_reads(FailReads::new(
+        let fail_read_2 = Some(FailConfiguration::new_fail_reads(FailReads::new(
             None,
             Some(&fail_args),
-            //None,
         )));
         test_challenge_aux(
             "11",
+            "hello-world.yaml",
             0,
             false,
-            fail_read_1.clone(),
+            fail_read_2,
             None,
             true,
             ForceCondition::No,
             ForceChallenge::No,
         );
+
+        // if we use the same fail_read as before, the prover won't challenge
+        // because there is no hash difference, the previous fail_read reads
+        // the value 0x11111111 and that's what we are already reading
+        // because we pass 17 as input instead of 0
+        let fail_args = vec![
+            "1106",
+            "0xaa000000",
+            "0x11111100", // different input value
+            "0xaa000000",
+            "0xffffffffffffffff",
+        ]
+        .iter()
+        .map(|x| x.to_string())
+        .collect::<Vec<String>>();
+        let fail_read_2 = Some(FailConfiguration::new_fail_reads(FailReads::new(
+            None,
+            Some(&fail_args),
+        )));
+
         test_challenge_aux(
             "12",
+            "hello-world.yaml",
             17,
             false,
             None,
-            fail_read_1,
+            fail_read_2,
             false,
             ForceCondition::ValidInputStepAndHash,
             ForceChallenge::InputData,
+        );
+    }
+
+    #[test]
+    fn test_challenge_read_invalid() {
+        init_trace();
+
+        let fail_execute = FailExecute {
+            step: 9,
+            fake_trace: TraceRWStep::new(
+                9,
+                TraceRead::new(4026531900, 0, 8),
+                // reads from nullptr (address 0)
+                TraceRead::new(0, 0, 0xffffffffffffffff),
+                TraceReadPC::new(ProgramCounter::new(2147483672, 0), 501635),
+                TraceStep::new(
+                    TraceWrite::new(4026531900, 0),
+                    ProgramCounter::new(2147483676, 0),
+                ),
+                None,
+                MemoryWitness::new(
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Memory,
+                    MemoryAccessType::Register,
+                ),
+            ),
+        };
+
+        let fail_execute = Some(FailConfiguration::new_fail_execute(fail_execute));
+
+        test_challenge_aux(
+            "13",
+            "read_invalid.yaml",
+            0,
+            false,
+            fail_execute,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+        );
+
+        let fail_args = vec![
+            "1106",
+            "0xaa000000",
+            "0x11111100",
+            "0x00000000",
+            "0xffffffffffffffff",
+        ]
+        .iter()
+        .map(|x| x.to_string())
+        .collect::<Vec<String>>();
+        let fail_read_2 = Some(FailConfiguration::new_fail_reads(FailReads::new(
+            None,
+            Some(&fail_args),
+        )));
+
+        test_challenge_aux(
+            "14",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            fail_read_2,
+            false,
+            ForceCondition::No,
+            ForceChallenge::AddressesSections,
+        );
+    }
+
+    #[test]
+    fn test_challenge_read_reg() {
+        init_trace();
+
+        let fail_execute = FailExecute {
+            step: 10,
+            fake_trace: TraceRWStep::new(
+                10,
+                TraceRead::new(4026531900, 4026531840, 9),
+                // reads from register address but should be from memory
+                TraceRead::new(4026531840, 0, 0xffffffffffffffff),
+                TraceReadPC::new(ProgramCounter::new(2147483676, 0), 501635),
+                TraceStep::new(
+                    TraceWrite::new(4026531900, 0),
+                    ProgramCounter::new(2147483680, 0),
+                ),
+                None,
+                MemoryWitness::new(
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Memory,
+                    MemoryAccessType::Register,
+                ),
+            ),
+        };
+
+        let fail_execute = Some(FailConfiguration::new_fail_execute(fail_execute));
+
+        test_challenge_aux(
+            "15",
+            "read_reg.yaml",
+            0,
+            false,
+            fail_execute,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+        );
+
+        let fail_args = vec![
+            "1106",
+            "0xaa000000",
+            "0x11111100",
+            "0xf0000004",
+            "0xffffffffffffffff",
+        ]
+        .iter()
+        .map(|x| x.to_string())
+        .collect::<Vec<String>>();
+        let fail_read_2 = Some(FailConfiguration::new_fail_reads(FailReads::new(
+            None,
+            Some(&fail_args),
+        )));
+
+        test_challenge_aux(
+            "16",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            fail_read_2,
+            false,
+            ForceCondition::No,
+            ForceChallenge::AddressesSections,
+        );
+    }
+
+    #[test]
+    fn test_challenge_write_invalid() {
+        init_trace();
+
+        let fail_execute = FailExecute {
+            step: 10,
+            fake_trace: TraceRWStep::new(
+                10,
+                TraceRead::new(4026531900, 0, 8),
+                TraceRead::new(4026531896, 1234, 9),
+                TraceReadPC::new(ProgramCounter::new(2147483676, 0), 15179811),
+                // writes to nullptr (address 0)
+                TraceStep::new(TraceWrite::new(0, 1234), ProgramCounter::new(2147483680, 0)),
+                None,
+                MemoryWitness::new(
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Memory,
+                ),
+            ),
+        };
+
+        let fail_execute = Some(FailConfiguration::new_fail_execute(fail_execute));
+
+        test_challenge_aux(
+            "17",
+            "write_invalid.yaml",
+            0,
+            false,
+            fail_execute,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+        );
+
+        let fail_args = vec!["1106", "0xaa000000", "0x11111100", "0x00000000"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+        let fail_write = Some(FailConfiguration::new_fail_write(FailWrite::new(
+            &fail_args,
+        )));
+
+        test_challenge_aux(
+            "18",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            fail_write,
+            false,
+            ForceCondition::No,
+            ForceChallenge::AddressesSections,
+        );
+    }
+
+    #[test]
+    fn test_challenge_write_reg() {
+        init_trace();
+
+        let fail_execute = FailExecute {
+            step: 11,
+            fake_trace: TraceRWStep::new(
+                11,
+                TraceRead::new(4026531900, 4026531840, 9),
+                TraceRead::new(4026531896, 1234, 10),
+                TraceReadPC::new(ProgramCounter::new(2147483680, 0), 15179811),
+                TraceStep::new(
+                    // writes to register address but should be to memory
+                    TraceWrite::new(4026531840, 1234),
+                    ProgramCounter::new(2147483684, 0),
+                ),
+                None,
+                MemoryWitness::new(
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Memory,
+                ),
+            ),
+        };
+
+        let fail_execute = Some(FailConfiguration::new_fail_execute(fail_execute));
+
+        test_challenge_aux(
+            "19",
+            "write_reg.yaml",
+            0,
+            false,
+            fail_execute,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+        );
+        let fail_args = vec!["1106", "0xaa000000", "0x11111100", "0xf0000004"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+        let fail_write = Some(FailConfiguration::new_fail_write(FailWrite::new(
+            &fail_args,
+        )));
+
+        test_challenge_aux(
+            "20",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            fail_write,
+            false,
+            ForceCondition::No,
+            ForceChallenge::AddressesSections,
+        );
+    }
+
+    #[test]
+    fn test_challenge_write_protected() {
+        init_trace();
+
+        let fail_execute = FailExecute {
+            step: 11,
+            fake_trace: TraceRWStep::new(
+                11,
+                TraceRead::new(4026531900, 2147483648, 9),
+                TraceRead::new(4026531896, 1234, 10),
+                TraceReadPC::new(ProgramCounter::new(2147483680, 0), 15179811),
+                TraceStep::new(
+                    // writes to read only address
+                    TraceWrite::new(2147483648, 1234),
+                    ProgramCounter::new(2147483684, 0),
+                ),
+                None,
+                MemoryWitness::new(
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Memory,
+                ),
+            ),
+        };
+
+        let fail_execute = Some(FailConfiguration::new_fail_execute(fail_execute));
+
+        test_challenge_aux(
+            "21",
+            "write_protected.yaml",
+            17,
+            false,
+            fail_execute,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+        );
+
+        let fail_args = vec!["1106", "0xaa000000", "0x11111100", "0x80000000"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+        let fail_write = Some(FailConfiguration::new_fail_write(FailWrite::new(
+            &fail_args,
+        )));
+
+        test_challenge_aux(
+            "22",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            fail_write,
+            false,
+            ForceCondition::No,
+            ForceChallenge::AddressesSections,
+        );
+    }
+
+    #[test]
+    fn test_challenge_pc_invalid() {
+        init_trace();
+
+        let fail_execute = FailExecute {
+            step: 9,
+            fake_trace: TraceRWStep::new(
+                9,
+                TraceRead::new(4026531844, 2147483700, 2),
+                TraceRead::default(),
+                // ProgramCounter points to nullptr (address 0)
+                TraceReadPC::new(ProgramCounter::new(0, 0), 32871), // Jalr
+                TraceStep::new(TraceWrite::default(), ProgramCounter::new(2147483700, 0)),
+                None,
+                MemoryWitness::new(
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Unused,
+                    MemoryAccessType::Unused,
+                ),
+            ),
+        };
+
+        let fail_execute = Some(FailConfiguration::new_fail_execute(fail_execute));
+
+        test_challenge_aux(
+            "23",
+            "pc_invalid.yaml",
+            0,
+            false,
+            fail_execute.clone(),
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "24",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            fail_execute,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::AddressesSections,
+        );
+    }
+
+    #[test]
+    fn test_challenge_pc_reg() {
+        init_trace();
+
+        let fail_execute = FailExecute {
+            step: 9,
+            fake_trace: TraceRWStep::new(
+                9,
+                TraceRead::new(4026531844, 2147483700, 2),
+                TraceRead::default(),
+                // ProgramCounter points to register address
+                TraceReadPC::new(ProgramCounter::new(4026531840, 0), 32871),
+                TraceStep::new(TraceWrite::default(), ProgramCounter::new(2147483700, 0)),
+                None,
+                MemoryWitness::new(
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Unused,
+                    MemoryAccessType::Unused,
+                ),
+            ),
+        };
+
+        let fail_execute = Some(FailConfiguration::new_fail_execute(fail_execute));
+
+        test_challenge_aux(
+            "25",
+            "pc_reg.yaml",
+            0,
+            false,
+            fail_execute.clone(),
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "26",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            fail_execute,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::AddressesSections,
+        );
+    }
+
+    #[test]
+    fn test_challenge_opcode() {
+        init_trace();
+
+        let fail_args = vec!["2", "0x100073"] // Ebreak (NOP)
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+        let fail_opcode = Some(FailConfiguration::new_fail_opcode(FailOpcode::new(
+            &fail_args,
+        )));
+
+        test_challenge_aux(
+            "27",
+            "hello-world.yaml",
+            17,
+            false,
+            fail_opcode.clone(),
+            None,
+            true,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "28",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            fail_opcode,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::Opcode,
         );
     }
 }

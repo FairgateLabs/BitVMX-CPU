@@ -9,7 +9,7 @@ use emulator::{
     },
     executor::{
         fetcher::execute_program,
-        utils::{FailConfiguration, FailReads},
+        utils::{FailConfiguration, FailExecute, FailOpcode, FailReads, FailWrite},
     },
     loader::program::{generate_rom_commitment, load_elf, Program},
     EmulatorError, ExecutionResult,
@@ -266,8 +266,8 @@ enum Commands {
         fail_hash: Option<u64>,
 
         /// Fail producing the write value for a specific step
-        #[arg(long)]
-        fail_execute: Option<u64>,
+        #[arg(long, value_names = &["step", "fake_trace"], num_args = 2)]
+        fail_execute: Option<Vec<String>>,
 
         /// List of specific trace step to print
         #[arg(long, value_name = "TraceList")]
@@ -281,13 +281,21 @@ enum Commands {
         #[arg(long, value_names = &["step", "address_original", "value", "modified_address", "modified_last_step"], num_args = 5)]
         fail_read_2: Option<Vec<String>>,
 
-        /// Memory dump at given step
-        #[arg(short, long)]
-        dump_mem: Option<u64>,
+        /// Fail write at a given step
+        #[arg(long, value_names = &["step", "address_original", "value", "modified_address"], num_args = 4)]
+        fail_write: Option<Vec<String>>,
 
         /// Fail while reading the pc at the given step
         #[arg(long)]
         fail_pc: Option<u64>,
+
+        /// Fail reading opcode at a given step
+        #[arg(long, value_names = &["step", "opcode"], num_args = 2)]
+        fail_opcode: Option<Vec<String>>,
+
+        /// Memory dump at given step
+        #[arg(short, long)]
+        dump_mem: Option<u64>,
     },
 }
 
@@ -332,10 +340,12 @@ fn main() -> Result<(), EmulatorError> {
             sections,
             checkpoint_path,
             fail_hash,
-            fail_execute,
+            fail_execute: fail_execute_args,
             list,
             fail_read_1: fail_read_1_args,
             fail_read_2: fail_read_2_args,
+            fail_write: fail_write_args,
+            fail_opcode: fail_opcode_args,
             dump_mem,
             fail_pc,
         }) => {
@@ -382,6 +392,8 @@ fn main() -> Result<(), EmulatorError> {
                 None => None,
             };
 
+            let fail_execute = fail_execute_args.as_ref().map(FailExecute::new);
+
             let fail_reads = if fail_read_1_args.is_some() || fail_read_2_args.is_some() {
                 Some(FailReads::new(
                     fail_read_1_args.as_ref(),
@@ -391,12 +403,17 @@ fn main() -> Result<(), EmulatorError> {
                 None
             };
 
+            let fail_write = fail_write_args.as_ref().map(FailWrite::new);
+            let fail_opcode = fail_opcode_args.as_ref().map(FailOpcode::new);
+
             let debugvar = *debug;
             let fail_config = FailConfiguration {
                 fail_hash: *fail_hash,
-                fail_execute: *fail_execute,
+                fail_execute,
                 fail_reads,
+                fail_write,
                 fail_pc: *fail_pc,
+                fail_opcode,
             };
             let result = execute_program(
                 &mut program,
@@ -426,8 +443,6 @@ fn main() -> Result<(), EmulatorError> {
             fail_config_prover,
             command_file,
         }) => {
-            let mut file = create_or_open_file(command_file);
-
             let input_bytes = hex::decode(input).expect("Invalid hex string");
             let result = prover_execute(
                 pdf,
@@ -450,6 +465,7 @@ fn main() -> Result<(), EmulatorError> {
             }
             .to_value()?;
 
+            let mut file = create_or_open_file(command_file);
             file.write_all(result.to_string().as_bytes())
                 .expect("Failed to write JSON to file");
         }
@@ -463,8 +479,6 @@ fn main() -> Result<(), EmulatorError> {
             fail_config_verifier,
             command_file,
         }) => {
-            let mut file = create_or_open_file(command_file);
-
             let input_bytes = hex::decode(input).expect("Invalid hex string");
             let result = verifier_check_execution(
                 pdf,
@@ -479,6 +493,7 @@ fn main() -> Result<(), EmulatorError> {
 
             let result =
                 EmulatorResultType::VerifierCheckExecutionResult { step: result }.to_value()?;
+            let mut file = create_or_open_file(command_file);
             file.write_all(result.to_string().as_bytes())
                 .expect("Failed to write JSON to file");
         }
@@ -490,8 +505,6 @@ fn main() -> Result<(), EmulatorError> {
             fail_config_prover,
             command_file,
         }) => {
-            let mut file = create_or_open_file(command_file);
-
             let result = prover_get_hashes_for_round(
                 pdf,
                 checkpoint_prover_path,
@@ -506,6 +519,7 @@ fn main() -> Result<(), EmulatorError> {
                 round: *round_number,
             }
             .to_value()?;
+            let mut file = create_or_open_file(command_file);
             file.write_all(result.to_string().as_bytes())
                 .expect("Failed to write JSON to file");
         }
@@ -517,8 +531,6 @@ fn main() -> Result<(), EmulatorError> {
             fail_config_verifier,
             command_file,
         }) => {
-            let mut file = create_or_open_file(command_file);
-
             let result = verifier_choose_segment(
                 pdf,
                 checkpoint_verifier_path,
@@ -533,6 +545,7 @@ fn main() -> Result<(), EmulatorError> {
                 round: *round_number,
             }
             .to_value()?;
+            let mut file = create_or_open_file(command_file);
             file.write_all(result.to_string().as_bytes())
                 .expect("Failed to write JSON to file");
         }
@@ -543,8 +556,6 @@ fn main() -> Result<(), EmulatorError> {
             fail_config_prover,
             command_file,
         }) => {
-            let mut file = create_or_open_file(command_file);
-
             let result: TraceRWStep = prover_final_trace(
                 pdf,
                 checkpoint_prover_path,
@@ -557,6 +568,7 @@ fn main() -> Result<(), EmulatorError> {
                 final_trace: result.clone(),
             }
             .to_value()?;
+            let mut file = create_or_open_file(command_file);
             file.write_all(result.to_string().as_bytes())
                 .expect("Failed to write JSON to file");
         }
@@ -568,14 +580,13 @@ fn main() -> Result<(), EmulatorError> {
             fail_config_verifier,
             command_file,
         }) => {
-            let mut file = create_or_open_file(command_file);
-
             let result = verifier_choose_challenge(
                 pdf,
                 checkpoint_verifier_path,
                 prover_final_trace.clone(),
                 force.clone(),
                 fail_config_verifier.clone(),
+                false,
             )?;
             info!("Verifier choose challenge: {:?}", result);
 
@@ -583,6 +594,7 @@ fn main() -> Result<(), EmulatorError> {
                 challenge: result.clone(),
             }
             .to_value()?;
+            let mut file = create_or_open_file(command_file);
             file.write_all(result.to_string().as_bytes())
                 .expect("Failed to write JSON to file");
         }

@@ -87,7 +87,19 @@ pub fn execute_program(
             }
         }
 
-        let mut trace = execute_step(program, print_program_stdout, debug);
+        let mut trace = match &fail_config.fail_execute {
+            Some(fe) if fe.step - 1 == program.step => {
+                program.step += 1;
+                program.pc.next_address();
+                Ok(fe.fake_trace.clone())
+            }
+            _ => execute_step(program, print_program_stdout, debug, fail_config.clone()),
+        };
+
+        let mut should_patch_write = false;
+        if let Some(fw) = &fail_config.fail_write {
+            should_patch_write = fw.patch_mem(program);
+        }
 
         if trace.is_err() {
             if debug {
@@ -121,20 +133,22 @@ pub fn execute_program(
                 fr.patch_trace_reads(trace.as_mut().unwrap(), should_patch); // patches trace reads only at the right step
             }
 
-            if let Some(fail) = fail_config.fail_execute {
-                if fail == program.step {
-                    let value = &mut trace.as_mut().unwrap().trace_step.write_1.value;
-                    *value = value.wrapping_add(1);
-                }
+            if let Some(fw) = &fail_config.fail_write {
+                fw.patch_trace_write(trace.as_mut().unwrap(), should_patch_write);
             }
+        }
 
-            if !no_hash {
-                let trace_bytes = trace.as_ref().unwrap().trace_step.to_bytes();
-                program.hash = compute_step_hash(&mut hasher, &program.hash, &trace_bytes);
-                if let Some(fail) = fail_config.fail_hash {
-                    if fail == program.step {
-                        program.hash = compute_step_hash(&mut hasher, &program.hash, &trace_bytes);
-                    }
+        if !no_hash {
+            let trace_bytes = trace
+                .as_ref()
+                .unwrap_or(&TraceRWStep::from_step(program.step))
+                .trace_step
+                .to_bytes();
+
+            program.hash = compute_step_hash(&mut hasher, &program.hash, &trace_bytes);
+            if let Some(fail) = fail_config.fail_hash {
+                if fail == program.step {
+                    program.hash = compute_step_hash(&mut hasher, &program.hash, &trace_bytes);
                 }
             }
         }
@@ -150,7 +164,10 @@ pub fn execute_program(
             if trace_set.is_none() || trace_set.as_ref().unwrap().contains(&program.step) {
                 let hash_hex = hash_to_string(&program.hash);
                 traces.push((
-                    trace.as_ref().unwrap_or(&TraceRWStep::default()).clone(),
+                    trace
+                        .as_ref()
+                        .unwrap_or(&TraceRWStep::from_step(program.step))
+                        .clone(),
                     hash_hex.clone(),
                 ));
                 if debug {
@@ -233,11 +250,16 @@ pub fn execute_step(
     program: &mut Program,
     print_program_stdout: bool,
     debug: bool,
+    fail_config: FailConfiguration,
 ) -> Result<TraceRWStep, ExecutionResult> {
     let pc = program.pc.clone();
     program.step += 1;
 
-    let opcode = program.read_mem(pc.get_address())?;
+    let opcode = match fail_config.fail_opcode {
+        Some(fo) if fo.step == program.step => fo.opcode,
+        _ => program.read_mem(pc.get_address())?,
+    };
+
     let instruction = riscv_decode::decode(opcode).unwrap();
 
     if debug && program.step % 100000000 < 10000 {
@@ -410,7 +432,7 @@ pub fn op_jal(
 
     let (write_1, mem_witness) = if dest_register == REGISTER_ZERO as u32 {
         //used by direct jumps without return address
-        (TraceWrite::default(), MemoryWitness::no_write())
+        (TraceWrite::default(), MemoryWitness::default())
     } else {
         //state modification
         program

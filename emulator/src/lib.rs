@@ -52,8 +52,8 @@ pub enum ExecutionResult {
     #[error("Not implemented {0} {1}")]
     InstructionNotImplemented(u32, String),
 
-    #[error("Can't write into the code section")]
-    WriteToCodeSection,
+    #[error("Can't write into read-only section")]
+    WriteToReadOnlySection,
 
     #[error("Failed to verify the bitcoin script {0}")]
     BitcoinScriptVerification(#[from] ScriptValidation),

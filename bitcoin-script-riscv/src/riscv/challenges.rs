@@ -1,9 +1,19 @@
 use bitcoin_script_functions::hash::blake3;
-use bitcoin_script_stack::stack::StackTracker;
+use bitcoin_script_stack::stack::{StackTracker, StackVariable};
 use bitvmx_cpu_definitions::{
     challenge::ChallengeType,
     constants::LAST_STEP_INIT,
+    memory::{MemoryAccessType, SectionDefinition},
     trace::{generate_initial_step_hash, hashvec_to_string},
+};
+
+use crate::riscv::{
+    memory_alignment::{is_aligned, load_lower_half_nibble_table, load_upper_half_nibble_table},
+    operations::sub,
+    script_utils::{
+        address_not_in_sections, is_equal_to, is_lower_than, nibbles_to_number, shift_number,
+        witness_equals, StackTables, WordTable,
+    },
 };
 
 // TODO: Value commited in WOTS_PROVER_LAST_STEP should not be greater than the MAX_STEP_CONSTANT_VALUE
@@ -258,6 +268,195 @@ pub fn trace_hash_zero_challenge(stack: &mut StackTracker) {
     stack.not_equal(result, true, hash, true);
 }
 
+fn is_invalid_read(
+    stack: &mut StackTracker,
+    half_nibble_table: &StackVariable,
+    lower_half_nibble_table: &StackVariable,
+    read: StackVariable,
+    memory_witness: &StackVariable,
+    witness_nibble: u32,
+    read_write_sections: &SectionDefinition,
+    read_only_sections: &SectionDefinition,
+    register_sections: &SectionDefinition,
+) {
+    witness_equals(
+        stack,
+        half_nibble_table,
+        witness_nibble,
+        memory_witness,
+        MemoryAccessType::Memory,
+    );
+    address_not_in_sections(stack, &read, read_write_sections);
+    address_not_in_sections(stack, &read, read_only_sections);
+    stack.op_booland();
+    stack.op_booland();
+
+    witness_equals(
+        stack,
+        half_nibble_table,
+        witness_nibble,
+        memory_witness,
+        MemoryAccessType::Register,
+    );
+    address_not_in_sections(stack, &read, register_sections);
+    stack.op_booland();
+
+    is_aligned(stack, read, true, lower_half_nibble_table);
+    stack.op_not();
+
+    stack.op_boolor();
+    stack.op_boolor();
+}
+
+fn is_invalid_write(
+    stack: &mut StackTracker,
+    lower_half_nibble_table: &StackVariable,
+    write: StackVariable,
+    memory_witness: &StackVariable,
+    read_write_sections: &SectionDefinition,
+    register_sections: &SectionDefinition,
+) {
+    witness_equals(
+        stack,
+        lower_half_nibble_table,
+        1,
+        memory_witness,
+        MemoryAccessType::Memory,
+    );
+    address_not_in_sections(stack, &write, read_write_sections);
+    stack.op_booland();
+
+    witness_equals(
+        stack,
+        lower_half_nibble_table,
+        1,
+        memory_witness,
+        MemoryAccessType::Register,
+    );
+    address_not_in_sections(stack, &write, register_sections);
+    stack.op_booland();
+
+    is_aligned(stack, write, true, lower_half_nibble_table);
+    stack.op_not();
+
+    stack.op_boolor();
+    stack.op_boolor();
+}
+
+fn is_invalid_pc(
+    stack: &mut StackTracker,
+    lower_half_nibble_table: &StackVariable,
+    pc_address: StackVariable,
+    code_sections: &SectionDefinition,
+) {
+    address_not_in_sections(stack, &pc_address, code_sections);
+
+    is_aligned(stack, pc_address, true, lower_half_nibble_table);
+    stack.op_not();
+
+    stack.op_boolor();
+}
+
+pub fn addresses_sections_challenge(
+    stack: &mut StackTracker,
+    read_write_sections: &SectionDefinition,
+    read_only_sections: &SectionDefinition,
+    register_sections: &SectionDefinition,
+    code_sections: &SectionDefinition,
+) {
+    stack.clear_definitions();
+
+    let read_1_address = stack.define(8, "read_1_address");
+    let read_2_address = stack.define(8, "read_2_address");
+    let write_address = stack.define(8, "write_address");
+    let memory_witness = stack.define(2, "memory_witness");
+    let pc_address = stack.define(8, "pc_address");
+    let upper_half_nibble_table = &load_upper_half_nibble_table(stack);
+    let lower_half_nibble_table = &load_lower_half_nibble_table(stack);
+
+    is_invalid_read(
+        stack,
+        lower_half_nibble_table,
+        lower_half_nibble_table,
+        read_1_address,
+        &memory_witness,
+        0,
+        read_write_sections,
+        read_only_sections,
+        register_sections,
+    );
+    is_invalid_read(
+        stack,
+        upper_half_nibble_table,
+        lower_half_nibble_table,
+        read_2_address,
+        &memory_witness,
+        1,
+        read_write_sections,
+        read_only_sections,
+        register_sections,
+    );
+    is_invalid_write(
+        stack,
+        lower_half_nibble_table,
+        write_address,
+        &memory_witness,
+        read_write_sections,
+        register_sections,
+    );
+
+    is_invalid_pc(stack, lower_half_nibble_table, pc_address, code_sections);
+
+    stack.op_boolor();
+    stack.op_boolor();
+    stack.op_boolor();
+
+    stack.op_verify();
+
+    stack.drop(*lower_half_nibble_table);
+    stack.drop(*upper_half_nibble_table);
+    stack.drop(memory_witness);
+}
+
+pub fn opcode_challenge(stack: &mut StackTracker, chunk_base: u32, opcodes_chunk: &Vec<u32>) {
+    stack.clear_definitions();
+
+    let pc = stack.define(8, "prover_pc");
+    let opcode = stack.define(8, "prover_opcode");
+    let tables = StackTables::new(stack, true, false, 0, 0, 0);
+
+    let start = stack.number_u32(chunk_base);
+    let end = stack.number_u32(chunk_base + 4 * opcodes_chunk.len() as u32);
+
+    let start_copy = stack.copy_var(start);
+    let pc_copy = stack.copy_var(pc);
+    is_equal_to(stack, &start_copy, &pc_copy);
+    is_lower_than(stack, start_copy, pc_copy, true);
+    stack.op_boolor();
+
+    let pc_copy = stack.copy_var(pc);
+    is_lower_than(stack, pc_copy, end, true);
+    stack.op_booland();
+
+    stack.op_verify();
+
+    let opcodes_table = WordTable::new(stack, opcodes_chunk.clone());
+
+    let to_shift = stack.number(2);
+    let opcode_offset = sub(stack, &tables, pc, start);
+    let opcode_index = shift_number(stack, to_shift, opcode_offset, true, false);
+
+    let index_nibbles = stack.explode(opcode_index);
+    nibbles_to_number(stack, index_nibbles);
+
+    let real_opcode = opcodes_table.peek(stack);
+
+    stack.equality(real_opcode, true, opcode, true, false, true);
+
+    opcodes_table.drop(stack);
+    tables.drop(stack);
+}
+
 //TODO: memory section challenge
 //TODO: program crash challenge - this might be more about finding the right place to challenge that a challenge itself
 
@@ -269,7 +468,7 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             stack.number_u32(trace_step.get_write().address);
             stack.number_u32(trace_step.get_write().value);
             stack.number_u32(trace_step.get_pc().get_address());
-            stack.byte(trace_step.get_pc().get_micro() as u8);
+            stack.byte(trace_step.get_pc().get_micro());
             stack.hexstr_as_nibbles(hash);
             trace_hash_challenge(&mut stack);
         }
@@ -277,13 +476,13 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             stack.number_u32(trace_step.get_write().address);
             stack.number_u32(trace_step.get_write().value);
             stack.number_u32(trace_step.get_pc().get_address());
-            stack.byte(trace_step.get_pc().get_micro() as u8);
+            stack.byte(trace_step.get_pc().get_micro());
             stack.hexstr_as_nibbles(hash);
             trace_hash_zero_challenge(&mut stack);
         }
         ChallengeType::EntryPoint(read_pc, step, real_entry_point) => {
             stack.number_u32(read_pc.pc.get_address());
-            stack.byte(read_pc.pc.get_micro() as u8);
+            stack.byte(read_pc.pc.get_micro());
             stack.number_u64(*step);
             entry_point_challenge(&mut stack, *real_entry_point);
         }
@@ -292,10 +491,10 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             stack.number_u32(pre_step.get_write().address);
             stack.number_u32(pre_step.get_write().value);
             stack.number_u32(pre_step.get_pc().get_address());
-            stack.byte(pre_step.get_pc().get_micro() as u8);
+            stack.byte(pre_step.get_pc().get_micro());
 
             stack.number_u32(prover_pc_read.pc.get_address());
-            stack.byte(prover_pc_read.pc.get_micro() as u8);
+            stack.byte(prover_pc_read.pc.get_micro());
 
             stack.hexstr_as_nibbles(&prover_step_hash);
 
@@ -311,6 +510,36 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             stack.number_u64(read_2.last_step);
             input_challenge(&mut stack, *address);
         }
+        ChallengeType::AddressesSections(
+            read_1,
+            read_2,
+            write,
+            memory_witness,
+            pc,
+            read_write_sections,
+            read_only_sections,
+            register_sections,
+            code_sections,
+        ) => {
+            stack.number_u32(read_1.address);
+            stack.number_u32(read_2.address);
+            stack.number_u32(write.address);
+            stack.byte(memory_witness.byte());
+            stack.number_u32(pc.get_address());
+
+            addresses_sections_challenge(
+                &mut stack,
+                read_write_sections.as_ref().unwrap(),
+                read_only_sections.as_ref().unwrap(),
+                register_sections.as_ref().unwrap(),
+                code_sections.as_ref().unwrap(),
+            );
+        }
+        ChallengeType::Opcode(pc_read, _, chunk_base, opcodes_chunk) => {
+            stack.number_u32(pc_read.pc.get_address());
+            stack.number_u32(pc_read.opcode);
+            opcode_challenge(&mut stack, *chunk_base, opcodes_chunk.as_ref().unwrap());
+        }
         _ => {
             return false;
         }
@@ -322,7 +551,7 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
 #[cfg(test)]
 mod tests {
 
-    use bitvmx_cpu_definitions::trace::TraceRead;
+    use bitvmx_cpu_definitions::{memory::MemoryWitness, trace::TraceRead};
 
     use super::*;
 
@@ -649,5 +878,385 @@ mod tests {
         let read_1 = TraceRead::new(0x0000_0005, 0x1234_0000, LAST_STEP_INIT);
         let read_2 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
         assert!(test_input_aux(&read_1, &read_2, 0x0000_0002, 0x1234_0000));
+    }
+
+    fn test_addresses_sections_aux(
+        read_1: u32,
+        read_2: u32,
+        write: u32,
+        memory_witness: MemoryWitness,
+        pc: u32,
+        read_write_sections: &SectionDefinition,
+        read_only_sections: &SectionDefinition,
+        registers: &SectionDefinition,
+        code_sections: &SectionDefinition,
+    ) -> bool {
+        let mut stack = StackTracker::new();
+
+        stack.number_u32(read_1);
+        stack.number_u32(read_2);
+        stack.number_u32(write);
+        stack.byte(memory_witness.byte());
+        stack.number_u32(pc);
+
+        addresses_sections_challenge(
+            &mut stack,
+            read_write_sections,
+            read_only_sections,
+            registers,
+            code_sections,
+        );
+
+        stack.op_true();
+        stack.run().success
+    }
+
+    #[test]
+    fn test_addresses_sections() {
+        let read_write_sections = &SectionDefinition {
+            ranges: vec![(0x0000_00f0, 0x0000_0103)],
+        };
+        let read_only_sections = &SectionDefinition {
+            ranges: vec![(0x0000_0f00, 0x0000_1003)],
+        };
+        let registers = &SectionDefinition {
+            ranges: vec![(0x0000_f000, 0x0001_0003)],
+        };
+        let code_sections = &SectionDefinition {
+            ranges: vec![(0x000f_0000, 0x0010_0003)],
+        };
+
+        // can't challenge valid addresses (register section reads and write)
+        let memory_witness = MemoryWitness::registers();
+        assert!(!test_addresses_sections_aux(
+            0x0000_f000,
+            0x0000_f000,
+            0x0000_f000,
+            memory_witness,
+            0x000f_0000,
+            read_write_sections,
+            read_only_sections,
+            registers,
+            code_sections
+        ));
+
+        // can't challenge valid addresses (read_write section reads and write)
+        let memory_witness = MemoryWitness::new(
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+        );
+        assert!(!test_addresses_sections_aux(
+            0x0000_00f0,
+            0x0000_00f0,
+            0x0000_00f0,
+            memory_witness,
+            0x000f_0000,
+            read_write_sections,
+            read_only_sections,
+            registers,
+            code_sections
+        ));
+
+        // can't challenge valid addresses (read_only section reads and read_write write)
+        let memory_witness = MemoryWitness::new(
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+        );
+        assert!(!test_addresses_sections_aux(
+            0x0000_0f00,
+            0x0000_0f00,
+            0x0000_00f0,
+            memory_witness,
+            0x000f_0000,
+            read_write_sections,
+            read_only_sections,
+            registers,
+            code_sections
+        ));
+
+        // can't challenge valid addresses (unused reads and write)
+        let memory_witness = MemoryWitness::default();
+        assert!(!test_addresses_sections_aux(
+            0,
+            0,
+            0,
+            memory_witness,
+            0x000f_0000,
+            read_write_sections,
+            read_only_sections,
+            registers,
+            code_sections
+        ));
+
+        // can challenge invalid read_1 to unmaped address
+        let memory_witness = MemoryWitness::new(
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+        );
+        assert!(test_addresses_sections_aux(
+            0xDEAD_DEAD,
+            0x0000_0f00,
+            0x0000_00f0,
+            memory_witness,
+            0x000f_0000,
+            read_write_sections,
+            read_only_sections,
+            registers,
+            code_sections
+        ));
+
+        // can challenge unaligned read_1
+        let memory_witness = MemoryWitness::new(
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+        );
+        assert!(test_addresses_sections_aux(
+            0x0000_0f01,
+            0x0000_0f00,
+            0x0000_00f0,
+            memory_witness,
+            0x000f_0000,
+            read_write_sections,
+            read_only_sections,
+            registers,
+            code_sections
+        ));
+
+        // can challenge read_1 with wrong witness (register witness but address is not in registers)
+        let memory_witness = MemoryWitness::new(
+            MemoryAccessType::Register, // says it's a register read
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+        );
+        assert!(test_addresses_sections_aux(
+            0x0000_0f00, // not in registers
+            0x0000_0f00,
+            0x0000_00f0,
+            memory_witness,
+            0x000f_0000,
+            read_write_sections,
+            read_only_sections,
+            registers,
+            code_sections
+        ));
+
+        // can challenge invalid read_2 to unmaped address
+        let memory_witness = MemoryWitness::new(
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+        );
+        assert!(test_addresses_sections_aux(
+            0x0000_0f00,
+            0xDEAD_DEAD,
+            0x0000_00f0,
+            memory_witness,
+            0x000f_0000,
+            read_write_sections,
+            read_only_sections,
+            registers,
+            code_sections
+        ));
+
+        // can challenge unaligned read_2
+        let memory_witness = MemoryWitness::new(
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+        );
+        assert!(test_addresses_sections_aux(
+            0x0000_0f00,
+            0x0000_0f02,
+            0x0000_00f0,
+            memory_witness,
+            0x000f_0000,
+            read_write_sections,
+            read_only_sections,
+            registers,
+            code_sections
+        ));
+
+        // can challenge read_2 with wrong witness (register witness but address is not in registers)
+        let memory_witness = MemoryWitness::new(
+            MemoryAccessType::Memory,
+            MemoryAccessType::Register, // says it's a register read
+            MemoryAccessType::Memory,
+        );
+        assert!(test_addresses_sections_aux(
+            0x0000_0f00,
+            0x0000_0f00, // not in registers
+            0x0000_00f0,
+            memory_witness,
+            0x000f_0000,
+            read_write_sections,
+            read_only_sections,
+            registers,
+            code_sections
+        ));
+
+        // can challenge invalid write to read_only address
+        let memory_witness = MemoryWitness::new(
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+        );
+        assert!(test_addresses_sections_aux(
+            0x0000_0f00,
+            0x0000_00f0,
+            0x0000_0f00,
+            memory_witness,
+            0x000f_0000,
+            read_write_sections,
+            read_only_sections,
+            registers,
+            code_sections
+        ));
+
+        // can challenge invalid write to unmaped address
+        let memory_witness = MemoryWitness::new(
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+        );
+        assert!(test_addresses_sections_aux(
+            0x0000_0f00,
+            0x0000_00f0,
+            0xDEAD_DEAD,
+            memory_witness,
+            0x000f_0000,
+            read_write_sections,
+            read_only_sections,
+            registers,
+            code_sections
+        ));
+
+        // can challenge unaligned write
+        let memory_witness = MemoryWitness::new(
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+        );
+        assert!(test_addresses_sections_aux(
+            0x0000_0f00,
+            0x0000_0f00,
+            0x0000_00f3,
+            memory_witness,
+            0x000f_0000,
+            read_write_sections,
+            read_only_sections,
+            registers,
+            code_sections
+        ));
+
+        // can challenge write with wrong witness (register witness but address not in registers)
+        let memory_witness = MemoryWitness::new(
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+            MemoryAccessType::Register, // says it's a register write
+        );
+        assert!(test_addresses_sections_aux(
+            0x0000_0f00,
+            0x0000_0f00,
+            0x0000_00f0, // not in registers
+            memory_witness,
+            0x000f_0000,
+            read_write_sections,
+            read_only_sections,
+            registers,
+            code_sections
+        ));
+
+        // can challenge invalid pc in register address
+        let memory_witness = MemoryWitness::registers();
+        assert!(test_addresses_sections_aux(
+            0x0000_f000,
+            0x0000_f000,
+            0x0000_f000,
+            memory_witness,
+            0x0000_f000,
+            read_write_sections,
+            read_only_sections,
+            registers,
+            code_sections
+        ));
+
+        // can challenge invalid pc in unmaped address
+        let memory_witness = MemoryWitness::registers();
+        assert!(test_addresses_sections_aux(
+            0x0000_f000,
+            0x0000_f000,
+            0x0000_f000,
+            memory_witness,
+            0xDEAD_C0DE,
+            read_write_sections,
+            read_only_sections,
+            registers,
+            code_sections
+        ));
+
+        // can challenge unaligned pc
+        let memory_witness = MemoryWitness::registers();
+        assert!(test_addresses_sections_aux(
+            0x0000_f000,
+            0x0000_f000,
+            0x0000_f000,
+            memory_witness,
+            0x0000_f002,
+            read_write_sections,
+            read_only_sections,
+            registers,
+            code_sections
+        ));
+
+        // can challenge multiple errors
+        let memory_witness = MemoryWitness::new(
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+            MemoryAccessType::Register,
+        );
+        assert!(test_addresses_sections_aux(
+            0xDEAD_DEAD, // unmaped
+            0x0000_f000, // register but witness says memory
+            0x0000_00f0, // read only
+            memory_witness,
+            0x000f_0002, // unaligned
+            read_write_sections,
+            read_only_sections,
+            registers,
+            code_sections
+        ));
+    }
+
+    fn test_opcode_aux(pc: u32, opcode: u32, chunk_base: u32, opcodes_chunk: &Vec<u32>) -> bool {
+        let mut stack = StackTracker::new();
+
+        stack.number_u32(pc);
+        stack.number_u32(opcode);
+
+        opcode_challenge(&mut stack, chunk_base, opcodes_chunk);
+
+        stack.op_true();
+        let r = stack.run();
+
+        r.success
+    }
+
+    #[test]
+    fn test_opcode() {
+        let opcodes = &vec![1234, 5678];
+        // can't challenge correct opcode
+        assert!(!test_opcode_aux(0xab00_0000, 1234, 0xab00_0000, opcodes));
+        assert!(!test_opcode_aux(0xab00_0004, 5678, 0xab00_0000, opcodes));
+
+        // can't challenge address outside chunk
+        assert!(!test_opcode_aux(0xab00_0008, 8888, 0xab00_0000, opcodes));
+
+        // can challenge invalid opcodes
+        assert!(test_opcode_aux(0xab00_0000, 8888, 0xab00_0000, opcodes));
+        assert!(test_opcode_aux(0xab00_0004, 8888, 0xab00_0000, opcodes));
     }
 }
