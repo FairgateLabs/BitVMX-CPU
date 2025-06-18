@@ -1,6 +1,6 @@
 use bitvmx_cpu_definitions::{
     challenge::ChallengeType,
-    constants::LAST_STEP_INIT,
+    constants::{CODE_CHUNK_SIZE, LAST_STEP_INIT},
     trace::{generate_initial_step_hash, hashvec_to_string, validate_step_hash, TraceRWStep},
 };
 
@@ -379,12 +379,10 @@ pub fn verifier_choose_challenge(
     {
         let pc = trace.read_pc.pc.get_address();
 
-        const CHUNK_SIZE: u32 = 500;
-
-        let (chunk_index, chunk_base_addr, chunk_start) = program.get_chunk_info(pc, CHUNK_SIZE);
+        let (chunk_index, chunk_base_addr, chunk_start) = program.get_chunk_info(pc, CODE_CHUNK_SIZE);
 
         let section = program.find_section(pc).unwrap();
-        let chunk_end = (chunk_start + CHUNK_SIZE as usize).min(section.data.len());
+        let chunk_end = (chunk_start + CODE_CHUNK_SIZE as usize).min(section.data.len());
 
         let opcodes_chunk: Vec<u32> = section.data[chunk_start..chunk_end]
             .iter()
