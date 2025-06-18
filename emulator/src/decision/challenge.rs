@@ -4,7 +4,6 @@ use bitvmx_cpu_definitions::{
     trace::{generate_initial_step_hash, hashvec_to_string, validate_step_hash, TraceRWStep},
 };
 
-use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use strum_macros::{Display, EnumIter, EnumString};
