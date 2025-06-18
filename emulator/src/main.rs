@@ -76,7 +76,7 @@ enum Commands {
         claim_last_hash: String,
 
         /// Force
-        #[arg(short, long, default_value = "no")]
+        #[arg(short, long)]
         force: ForceCondition,
 
         /// Fail Configuration

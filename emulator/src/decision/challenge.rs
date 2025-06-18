@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use bitvmx_cpu_definitions::{
     challenge::ChallengeType,
     constants::LAST_STEP_INIT,
@@ -8,6 +6,8 @@ use bitvmx_cpu_definitions::{
 
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use strum_macros::{Display, EnumIter, EnumString};
 use tracing::{error, info, warn};
 
 use crate::{
@@ -116,9 +116,10 @@ pub fn verifier_check_execution(
         }
     }
 
-    if !should_challenge {
-        return Ok(None);
-    }
+    // if !should_challenge {
+    //     // TODO: Should be removed after here, not creating challenge_log.
+    //     return Ok(None);
+    // }
 
     warn!("There is a discrepancy between the prover and verifier execution");
     warn!("This execution will be challenged");
@@ -139,6 +140,11 @@ pub fn verifier_check_execution(
         step_to_challenge,
     );
     challenge_log.save(checkpoint_path)?;
+
+    if !should_challenge {
+        // TODO: Remove
+        return Ok(None);
+    }
 
     Ok(Some(step_to_challenge))
 }
@@ -229,7 +235,8 @@ pub fn get_hashes(
     (claim_hash, claim_next_hash)
 }
 
-#[derive(Debug, Clone, PartialEq, ValueEnum)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, EnumString, Display, EnumIter)]
+#[strum(serialize_all = "snake_case")]
 pub enum ForceChallenge {
     TraceHash,
     TraceHashZero,
@@ -241,7 +248,8 @@ pub enum ForceChallenge {
     No,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ValueEnum)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, EnumString, Display, EnumIter)]
+#[strum(serialize_all = "snake_case")]
 pub enum ForceCondition {
     ValidInputStepAndHash,
     ValidInputWrongStepOrHash,
