@@ -359,7 +359,7 @@ pub fn verifier_choose_challenge(
             return Ok(ChallengeType::EntryPoint(
                 trace.read_pc,
                 trace.step_number,
-                program.pc.get_address(), //this parameter is only used for the test
+                return_script_parameters.then_some(program.pc.get_address()), //this parameter is only used for the test
             ));
         } else {
             info!("Veifier choose to challenge PROGRAM_COUNTER");
@@ -394,7 +394,7 @@ pub fn verifier_choose_challenge(
         return Ok(ChallengeType::Opcode(
             trace.read_pc,
             chunk_index,
-            chunk_base_addr,
+            return_script_parameters.then_some(chunk_base_addr),
             return_script_parameters.then_some(opcodes_chunk),
         ));
     }
