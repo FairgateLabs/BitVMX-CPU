@@ -463,8 +463,15 @@ impl Program {
             }
 
             for (index, chunk) in section.data.chunks(chunk_size as usize).enumerate() {
-                chunks.push((section.start + index as u32 * chunk_size, chunk.to_vec()));
-            };
+                chunks.push((
+                    section.start + index as u32 * chunk_size,
+                    chunk
+                        .to_vec()
+                        .iter()
+                        .map(|opcode| u32::from_be(*opcode))
+                        .collect(),
+                ));
+            }
         }
 
         chunks
