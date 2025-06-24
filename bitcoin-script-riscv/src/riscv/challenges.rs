@@ -510,6 +510,15 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             stack.number_u64(read_2.last_step);
             input_challenge(&mut stack, *address);
         }
+        ChallengeType::RomData(read_1, read_2 ,address, input_for_address ) => {
+            stack.number_u32(read_1.address);
+            stack.number_u32(read_1.value);
+            stack.number_u64(read_1.last_step);
+            stack.number_u32(read_2.address);
+            stack.number_u32(read_2.value);
+            stack.number_u64(read_2.last_step);
+            rom_challenge(&mut stack, *address, *input_for_address);
+        }
         ChallengeType::AddressesSections(
             read_1,
             read_2,

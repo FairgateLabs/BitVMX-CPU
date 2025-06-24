@@ -14,6 +14,7 @@ pub enum ChallengeType {
     ProgramCounter(String, TraceStep, String, TraceReadPC),
     Opcode(TraceReadPC, u32, Option<u32>, Option<Vec<u32>>), // (PROVER_PC, PROVER_OPCODE), CHUNK_INDEX, CHUNK_BASE_ADDRESS, OPCODES_CHUNK
     InputData(TraceRead, TraceRead, u32, u32),
+    RomData(TraceRead, TraceRead, u32, u32),
     AddressesSections(
         TraceRead,
         TraceRead,

@@ -243,6 +243,7 @@ pub enum ForceChallenge {
     ProgramCounter,
     Opcode,
     InputData,
+    RomData,
     AddressesSections,
     No,
 }
@@ -333,6 +334,8 @@ pub fn verifier_choose_challenge(
         && force == ForceChallenge::No)
         || force == ForceChallenge::AddressesSections
     {
+        info!("Verifier choose to challenge invalid ADDRESS SECTION");
+
         return Ok(ChallengeType::AddressesSections(
             trace.read_1,
             trace.read_2,
@@ -377,6 +380,8 @@ pub fn verifier_choose_challenge(
     if trace.read_pc.opcode != my_trace.read_pc.opcode && force == ForceChallenge::No
         || force == ForceChallenge::Opcode
     {
+        info!("Verifier choose to challenge invalid OPCODE");
+
         let pc = trace.read_pc.pc.get_address();
 
         let (chunk_index, chunk_base_addr, chunk_start) = program.get_chunk_info(pc, CODE_CHUNK_SIZE);
@@ -416,6 +421,15 @@ pub fn verifier_choose_challenge(
         {
             info!("Verifier choose to challenge invalid INPUT DATA");
             return Ok(ChallengeType::InputData(
+                trace.read_1.clone(),
+                trace.read_2.clone(),
+                conflict_address,
+                value,
+            ));
+        } else if (!section.is_write && force == ForceChallenge::No) || force == ForceChallenge::RomData {
+            info!("Verifier choose to challenge invalid ROM DATA");
+            
+            return Ok(ChallengeType::RomData(
                 trace.read_1.clone(),
                 trace.read_2.clone(),
                 conflict_address,
@@ -1274,6 +1288,53 @@ mod tests {
             false,
             ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::Opcode,
+        );
+    }
+
+    #[test]
+    fn test_challenge_rom() {
+        init_trace();
+        let fail_execute = FailExecute {
+            step: 32,
+            fake_trace: TraceRWStep::new(
+                32,
+                TraceRead::new(4026531900, 2952790016, 31),
+                TraceRead::new(2952790016, 0, LAST_STEP_INIT), // read a different value from ROM
+                TraceReadPC::new(ProgramCounter::new(2147483708, 0), 509699),
+                TraceStep::new(TraceWrite::new(4026531896, 0), ProgramCounter::new(2147483712, 0)),
+                None,
+                MemoryWitness::new(
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Memory,
+                    MemoryAccessType::Register,
+                ),
+            ),
+        };
+
+        let fail_execute = Some(FailConfiguration::new_fail_execute(fail_execute));
+
+        test_challenge_aux(
+            "29",
+            "hello-world.yaml",
+            17,
+            false,
+            fail_execute.clone(),
+            None,
+            true,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "30",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            fail_execute,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::RomData,
         );
     }
 }
