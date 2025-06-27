@@ -484,7 +484,7 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             stack.number_u32(read_pc.pc.get_address());
             stack.byte(read_pc.pc.get_micro());
             stack.number_u64(*step);
-            entry_point_challenge(&mut stack, *real_entry_point);
+            entry_point_challenge(&mut stack, real_entry_point.unwrap());
         }
         ChallengeType::ProgramCounter(pre_pre_hash, pre_step, prover_step_hash, prover_pc_read) => {
             stack.hexstr_as_nibbles(pre_pre_hash);
@@ -509,6 +509,15 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             stack.number_u32(read_2.value);
             stack.number_u64(read_2.last_step);
             input_challenge(&mut stack, *address);
+        }
+        ChallengeType::RomData(read_1, read_2 ,address, input_for_address ) => {
+            stack.number_u32(read_1.address);
+            stack.number_u32(read_1.value);
+            stack.number_u64(read_1.last_step);
+            stack.number_u32(read_2.address);
+            stack.number_u32(read_2.value);
+            stack.number_u64(read_2.last_step);
+            rom_challenge(&mut stack, *address, *input_for_address);
         }
         ChallengeType::AddressesSections(
             read_1,
@@ -538,7 +547,7 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
         ChallengeType::Opcode(pc_read, _, chunk_base, opcodes_chunk) => {
             stack.number_u32(pc_read.pc.get_address());
             stack.number_u32(pc_read.opcode);
-            opcode_challenge(&mut stack, *chunk_base, opcodes_chunk.as_ref().unwrap());
+            opcode_challenge(&mut stack, chunk_base.unwrap(), opcodes_chunk.as_ref().unwrap());
         }
         _ => {
             return false;

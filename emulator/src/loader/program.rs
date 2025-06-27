@@ -454,6 +454,53 @@ impl Program {
         }
     }
 
+    pub fn get_chunks(&self, chunk_size: u32) -> Vec<(u32, Vec<u32>)> {
+        let mut chunks = Vec::new();
+
+        for section in &self.sections {
+            if !section.is_code {
+                continue;
+            }
+
+            for (index, chunk) in section.data.chunks(chunk_size as usize).enumerate() {
+                chunks.push((
+                    section.start + index as u32 * chunk_size,
+                    chunk
+                        .to_vec()
+                        .iter()
+                        .map(|opcode| u32::from_be(*opcode))
+                        .collect(),
+                ));
+            }
+        }
+
+        chunks
+    }
+
+    // Avoids calling get_chunks().len() to prevent unnecessary Vec allocations and cloning
+    pub fn get_chunk_count(&self, chunk_size: u32) -> u32 {
+        let mut chunk_count = 0;
+
+        for section in &self.sections {
+            if !section.is_code {
+                continue;
+            }
+
+            let section_instrs = section.size / 4;
+            // only counts full chunks
+            let mut section_chunks = section_instrs / chunk_size;
+
+            // if section_instrs isn't a multiple of chunk_size that means that there is a non-full chunk we have to count
+            if section_instrs % chunk_size != 0 {
+                section_chunks += 1;
+            }
+
+            chunk_count += section_chunks;
+        }
+
+        chunk_count
+    }
+
     pub fn get_chunk_info(&self, address: u32, chunk_size: u32) -> (u32, u32, usize) {
         let mut chunk_index = 0;
 
