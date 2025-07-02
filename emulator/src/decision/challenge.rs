@@ -1,6 +1,7 @@
 use bitvmx_cpu_definitions::{
     challenge::ChallengeType,
-    constants::{CODE_CHUNK_SIZE, LAST_STEP_INIT},
+    constants::{CHUNK_SIZE, LAST_STEP_INIT},
+    memory::{Chunk, SectionDefinition},
     trace::{generate_initial_step_hash, hashvec_to_string, validate_step_hash, TraceRWStep},
 };
 
@@ -108,10 +109,10 @@ pub fn verifier_check_execution(
             warn!("Do not challenge (as the challenge is not waranteed to be successful)");
             warn!("Report this case to be evaluated by the security team");
             should_challenge = force_condition == ForceCondition::ValidInputWrongStepOrHash
-                || force_condition == ForceCondition::Allways;
+                || force_condition == ForceCondition::Always;
         } else {
             should_challenge = force_condition == ForceCondition::ValidInputStepAndHash
-                || force_condition == ForceCondition::Allways;
+                || force_condition == ForceCondition::Always;
         }
     }
 
@@ -243,7 +244,8 @@ pub enum ForceChallenge {
     ProgramCounter,
     Opcode,
     InputData,
-    RomData,
+    InitializedData,
+    UninitializedData,
     AddressesSections,
     No,
 }
@@ -253,8 +255,15 @@ pub enum ForceChallenge {
 pub enum ForceCondition {
     ValidInputStepAndHash,
     ValidInputWrongStepOrHash,
-    Allways,
+    Always,
     No,
+}
+
+fn find_chunk_index(chunks: &[Chunk], address: u32) -> Option<usize> {
+    chunks.iter().position(|Chunk { base_addr, data }| {
+        let chunk_size = data.len();
+        *base_addr <= address && address < *base_addr + chunk_size as u32 * 4
+    })
 }
 
 pub fn verifier_choose_challenge(
@@ -283,11 +292,11 @@ pub fn verifier_choose_challenge(
         || force == ForceChallenge::TraceHashZero
     {
         if trace.step_number == 1 {
-            info!("Veifier choose to challenge TRACE_HASH_ZERO");
+            info!("Verifier choose to challenge TRACE_HASH_ZERO");
             return Ok(ChallengeType::TraceHashZero(trace.trace_step, next_hash));
         }
 
-        info!("Veifier choose to challenge TRACE_HASH");
+        info!("Verifier choose to challenge TRACE_HASH");
         return Ok(ChallengeType::TraceHash(
             step_hash,
             trace.trace_step,
@@ -334,8 +343,7 @@ pub fn verifier_choose_challenge(
         && force == ForceChallenge::No)
         || force == ForceChallenge::AddressesSections
     {
-        info!("Verifier choose to challenge invalid ADDRESS SECTION");
-
+        info!("Verifier choose to challenge invalid ADDRESS_SECTION");
         return Ok(ChallengeType::AddressesSections(
             trace.read_1,
             trace.read_2,
@@ -358,16 +366,17 @@ pub fn verifier_choose_challenge(
         || force == ForceChallenge::ProgramCounter
     {
         if trace.step_number == 1 {
-            info!("Veifier choose to challenge ENTRYPOINT");
+            info!("Verifier choose to challenge ENTRYPOINT");
             return Ok(ChallengeType::EntryPoint(
                 trace.read_pc,
                 trace.step_number,
                 return_script_parameters.then_some(program.pc.get_address()), //this parameter is only used for the test
             ));
         } else {
-            info!("Veifier choose to challenge PROGRAM_COUNTER");
+            info!("Verifier choose to challenge PROGRAM_COUNTER");
             let pre_pre_hash = my_execution[0].1.clone();
             let pre_step = my_execution[1].0.clone();
+
             return Ok(ChallengeType::ProgramCounter(
                 pre_pre_hash,
                 pre_step.trace_step,
@@ -381,60 +390,94 @@ pub fn verifier_choose_challenge(
         || force == ForceChallenge::Opcode
     {
         info!("Verifier choose to challenge invalid OPCODE");
-
         let pc = trace.read_pc.pc.get_address();
-
-        let (chunk_index, chunk_base_addr, chunk_start) = program.get_chunk_info(pc, CODE_CHUNK_SIZE);
-
-        let section = program.find_section(pc).unwrap();
-        let chunk_end = (chunk_start + CODE_CHUNK_SIZE as usize).min(section.data.len());
-
-        let opcodes_chunk: Vec<u32> = section.data[chunk_start..chunk_end]
-            .iter()
-            .map(|opcode| u32::from_be(*opcode))
-            .collect();
+        let code_chunks = program.get_code_chunks(CHUNK_SIZE);
+        let chunk_index = find_chunk_index(&code_chunks, pc).unwrap();
 
         return Ok(ChallengeType::Opcode(
             trace.read_pc,
-            chunk_index,
-            return_script_parameters.then_some(chunk_base_addr),
-            return_script_parameters.then_some(opcodes_chunk),
+            chunk_index as u32,
+            return_script_parameters.then_some(code_chunks[chunk_index].clone()),
         ));
     }
 
     // check const read value
-    let conflict_read_1 =
-        trace.read_1.value != my_trace.read_1.value && trace.read_1.last_step == LAST_STEP_INIT;
-    let conflict_read_2 =
-        trace.read_2.value != my_trace.read_2.value && trace.read_2.last_step == LAST_STEP_INIT;
-    if conflict_read_1 || conflict_read_2 {
-        let conflict_address = if conflict_read_1 {
-            trace.read_1.address
+    let conflict_read_1 = trace.read_1.value != my_trace.read_1.value;
+    let conflict_read_2 = trace.read_2.value != my_trace.read_2.value;
+
+    if (conflict_read_1 || conflict_read_2 && force == ForceChallenge::No)
+        || force == ForceChallenge::InputData
+        || force == ForceChallenge::InitializedData
+        || force == ForceChallenge::UninitializedData
+    {
+        let (conflict_trace, read_selector) = if conflict_read_1 {
+            (trace.read_1.clone(), 1)
         } else {
-            trace.read_2.address
+            (trace.read_2.clone(), 2)
         };
+
+        let conflict_address = conflict_trace.address;
         let section = program.find_section(conflict_address)?;
-        //TODO: Check if the address is in the input section rom ram or registers
-        let value = program.read_mem(conflict_address)?;
-        if (section.name == program_def.input_section_name && force == ForceChallenge::No)
+
+        if (conflict_trace.last_step == LAST_STEP_INIT && force == ForceChallenge::No)
             || force == ForceChallenge::InputData
+            || force == ForceChallenge::InitializedData
+            || force == ForceChallenge::UninitializedData
         {
-            info!("Verifier choose to challenge invalid INPUT DATA");
-            return Ok(ChallengeType::InputData(
-                trace.read_1.clone(),
-                trace.read_2.clone(),
-                conflict_address,
-                value,
-            ));
-        } else if (!section.is_write && force == ForceChallenge::No) || force == ForceChallenge::RomData {
-            info!("Verifier choose to challenge invalid ROM DATA");
-            
-            return Ok(ChallengeType::RomData(
-                trace.read_1.clone(),
-                trace.read_2.clone(),
-                conflict_address,
-                value,
-            ));
+            let input_size = program_def
+                .inputs
+                .iter()
+                .fold(0, |acc, input| acc + input.size);
+
+            if (section.name == program_def.input_section_name
+                && conflict_address < section.start + input_size as u32
+                && force == ForceChallenge::No)
+                || force == ForceChallenge::InputData
+            {
+                info!("Verifier choose to challenge invalid INPUT DATA");
+                let value = program.read_mem(conflict_address).or_else(|_| {
+                    Ok::<u32, ExecutionResult>(
+                        program
+                            .registers
+                            .get(program.registers.get_original_idx(conflict_address)),
+                    )
+                })?;
+
+                return Ok(ChallengeType::InputData(
+                    trace.read_1,
+                    trace.read_2,
+                    conflict_address,
+                    value,
+                ));
+            } else if (section.initialized && force == ForceChallenge::No)
+                || force == ForceChallenge::InitializedData
+            {
+                info!("Verifier choose to challenge invalid INITIALIZED DATA");
+                let initialized_chunks = program.get_initialized_chunks(CHUNK_SIZE);
+                let chunk_index = find_chunk_index(&initialized_chunks, conflict_address).unwrap();
+
+                return Ok(ChallengeType::InitializedData(
+                    trace.read_1,
+                    trace.read_2,
+                    read_selector,
+                    chunk_index as u32,
+                    return_script_parameters.then_some(initialized_chunks[chunk_index].clone()),
+                ));
+            } else if (!section.initialized && force == ForceChallenge::No)
+                || force == ForceChallenge::UninitializedData
+            {
+                info!("Verifier choose to challenge invalid UNINITIALIZED DATA");
+                let uninitilized_ranges = program.get_uninitialized_ranges(program_def);
+
+                return Ok(ChallengeType::UninitializedData(
+                    trace.read_1,
+                    trace.read_2,
+                    read_selector,
+                    return_script_parameters.then_some(SectionDefinition {
+                        ranges: uninitilized_ranges,
+                    }),
+                ));
+            }
         }
     }
 
@@ -629,7 +672,7 @@ mod tests {
 
         let challenge = verifier_choose_challenge(
             pdf,
-            &chk_verifier_path,
+            chk_verifier_path,
             final_trace,
             force,
             fail_config_verifier,
@@ -791,7 +834,7 @@ mod tests {
         let fail_args = vec![
             "1106",
             "0xaa000000",
-            "0x11111111",
+            "0x11111100",
             "0xaa000000",
             "0xffffffffffffffff",
         ]
@@ -805,33 +848,14 @@ mod tests {
         test_challenge_aux(
             "11",
             "hello-world.yaml",
-            0,
+            17,
             false,
-            fail_read_2,
+            fail_read_2.clone(),
             None,
             true,
-            ForceCondition::No,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::No,
         );
-
-        // if we use the same fail_read as before, the prover won't challenge
-        // because there is no hash difference, the previous fail_read reads
-        // the value 0x11111111 and that's what we are already reading
-        // because we pass 17 as input instead of 0
-        let fail_args = vec![
-            "1106",
-            "0xaa000000",
-            "0x11111100", // different input value
-            "0xaa000000",
-            "0xffffffffffffffff",
-        ]
-        .iter()
-        .map(|x| x.to_string())
-        .collect::<Vec<String>>();
-        let fail_read_2 = Some(FailConfiguration::new_fail_reads(FailReads::new(
-            None,
-            Some(&fail_args),
-        )));
 
         test_challenge_aux(
             "12",
@@ -841,7 +865,7 @@ mod tests {
             None,
             fail_read_2,
             false,
-            ForceCondition::ValidInputStepAndHash,
+            ForceCondition::No,
             ForceChallenge::InputData,
         );
     }
@@ -1200,7 +1224,7 @@ mod tests {
             None,
             fail_execute,
             false,
-            ForceCondition::ValidInputWrongStepOrHash,
+            ForceCondition::No,
             ForceChallenge::AddressesSections,
         );
     }
@@ -1249,7 +1273,7 @@ mod tests {
             None,
             fail_execute,
             false,
-            ForceCondition::ValidInputWrongStepOrHash,
+            ForceCondition::No,
             ForceChallenge::AddressesSections,
         );
     }
@@ -1292,7 +1316,7 @@ mod tests {
     }
 
     #[test]
-    fn test_challenge_rom() {
+    fn test_challenge_initialized() {
         init_trace();
         let fail_execute = FailExecute {
             step: 32,
@@ -1301,7 +1325,10 @@ mod tests {
                 TraceRead::new(4026531900, 2952790016, 31),
                 TraceRead::new(2952790016, 0, LAST_STEP_INIT), // read a different value from ROM
                 TraceReadPC::new(ProgramCounter::new(2147483708, 0), 509699),
-                TraceStep::new(TraceWrite::new(4026531896, 0), ProgramCounter::new(2147483712, 0)),
+                TraceStep::new(
+                    TraceWrite::new(4026531896, 0),
+                    ProgramCounter::new(2147483712, 0),
+                ),
                 None,
                 MemoryWitness::new(
                     MemoryAccessType::Register,
@@ -1334,7 +1361,51 @@ mod tests {
             fail_execute,
             false,
             ForceCondition::ValidInputWrongStepOrHash,
-            ForceChallenge::RomData,
+            ForceChallenge::InitializedData,
+        );
+    }
+
+    #[test]
+    fn test_challenge_uninitialized() {
+        init_trace();
+
+        let fail_args = vec![
+            "9",
+            "0xa0001004",
+            "0x11111100",
+            "0xa0001004",
+            "0xffffffffffffffff",
+        ]
+        .iter()
+        .map(|x| x.to_string())
+        .collect::<Vec<String>>();
+        let fail_read_2 = Some(FailConfiguration::new_fail_reads(FailReads::new(
+            None,
+            Some(&fail_args),
+        )));
+
+        test_challenge_aux(
+            "31",
+            "hello-world-uninitialized.yaml",
+            0,
+            false,
+            fail_read_2.clone(),
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "32",
+            "hello-world-uninitialized.yaml",
+            17,
+            false,
+            None,
+            fail_read_2,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::UninitializedData,
         );
     }
 }

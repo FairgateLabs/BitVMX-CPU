@@ -38,7 +38,7 @@ pub fn execute_program(
     let mut traces = Vec::new();
 
     if !input.is_empty() {
-        if let Some(section) = program.find_section_by_name(input_section_name) {
+        if let Some(section) = program.find_section_by_name_mut(input_section_name) {
             let input_as_u32 = vec_u8_to_vec_u32(&input, little_endian);
             for (i, byte) in input_as_u32.iter().enumerate() {
                 section.data[i] = *byte;
