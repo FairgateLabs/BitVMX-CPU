@@ -52,6 +52,9 @@ pub enum ExecutionResult {
     #[error("Not implemented {0} {1}")]
     InstructionNotImplemented(u32, String),
 
+    #[error("Can't read from non-code section")]
+    ReadFromNonCodeSection,
+
     #[error("Can't write into read-only section")]
     WriteToReadOnlySection,
 

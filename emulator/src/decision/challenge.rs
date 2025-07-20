@@ -636,6 +636,7 @@ mod tests {
             true,
         )
         .unwrap();
+        info!("Challenge: {:?}", challenge);
         let result = execute_challenge(&challenge);
         assert_eq!(result, challenge_ok);
 
@@ -1335,6 +1336,25 @@ mod tests {
             false,
             ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::RomData,
+        );
+    }
+
+    #[test]
+    fn test_challenge_pc_read_from_non_code() {
+        init_trace();
+
+        let fail_mem_protection = FailConfiguration::new_fail_memory_protection();
+
+        test_challenge_aux(
+            "audit_01",
+            "audit_01.yaml",
+            0,
+            false,
+            Some(fail_mem_protection),
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
         );
     }
 }
