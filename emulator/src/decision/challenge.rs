@@ -640,7 +640,7 @@ mod tests {
         constants::REGISTERS_BASE_ADDRESS,
         decision::challenge::*,
         executor::{
-            utils::{FailExecute, FailOpcode, FailReads, FailWrite},
+            utils::{FailExecute, FailOpcode, FailReads, FailTraceWrite, FailWrite},
             verifier::verify_script,
         },
         loader::program_definition::ProgramDefinition,
@@ -670,10 +670,13 @@ mod tests {
         input: u8,
         execute_err: bool,
         fail_config_prover: Option<FailConfiguration>,
+        fail_config_prover_read_challenge: Option<FailConfiguration>,
         fail_config_verifier: Option<FailConfiguration>,
+        fail_config_verifier_read_challenge: Option<FailConfiguration>,
         challenge_ok: bool,
         force_condition: ForceCondition,
         force: ForceChallenge,
+        force_read_challenge: ForceChallenge,
     ) {
         let pdf = &format!("../docker-riscv32/riscv32/build/{}", pdf);
         let input = vec![17, 17, 17, input];
@@ -768,10 +771,58 @@ mod tests {
             true,
         )
         .unwrap();
-        let result = execute_challenge(&challenge);
-        assert_eq!(result, challenge_ok);
 
+        let challenge = match &challenge {
+            ChallengeType::ReadValueNArySearch(bits) => {
+                let mut v_decision = *bits;
+                for round in 2..nary_def.total_rounds() + 1 {
+                    let hashes = prover_get_hashes_for_round(
+                        pdf,
+                        chk_prover_path,
+                        round,
+                        v_decision,
+                        fail_config_prover_read_challenge.clone(),
+                        NArySearchType::ReadValueChallenge,
+                    )
+                    .unwrap();
+                    info!("{:?}", &hashes);
+
+                    v_decision = verifier_choose_segment(
+                        pdf,
+                        chk_verifier_path,
+                        round,
+                        hashes,
+                        fail_config_verifier_read_challenge.clone(),
+                        NArySearchType::ReadValueChallenge,
+                    )
+                    .unwrap();
+                    info!("{:?}", v_decision);
+                }
+
+                let final_trace = prover_final_trace(
+                    pdf,
+                    chk_prover_path,
+                    v_decision + 1,
+                    fail_config_prover_read_challenge,
+                    NArySearchType::ReadValueChallenge,
+                )
+                .unwrap();
+                info!("Prover final trace: {:?}", final_trace.to_csv());
+
+                verifier_choose_challenge_read_challenge(
+                    pdf,
+                    chk_verifier_path,
+                    final_trace,
+                    force_read_challenge,
+                )
+                .unwrap()
+            }
+            _ => challenge,
+        };
+
+        let result = execute_challenge(&challenge);
         info!("Challenge: {:?} result: {}", challenge, result);
+        assert_eq!(result, challenge_ok);
     }
 
     #[test]
@@ -785,8 +836,11 @@ mod tests {
             true,
             None,
             None,
+            None,
+            None,
             false,
             ForceCondition::No,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
         //good input: expect execute step to succeed
@@ -797,8 +851,11 @@ mod tests {
             false,
             None,
             None,
+            None,
+            None,
             false,
             ForceCondition::ValidInputStepAndHash,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
     }
@@ -815,8 +872,11 @@ mod tests {
             false,
             fail_hash.clone(),
             None,
+            None,
+            None,
             true,
             ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
         test_challenge_aux(
@@ -825,10 +885,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_hash,
+            None,
             false,
             ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::TraceHash,
+            ForceChallenge::No,
         );
     }
 
@@ -844,8 +907,11 @@ mod tests {
             false,
             fail_hash.clone(),
             None,
+            None,
+            None,
             true,
             ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
         test_challenge_aux(
@@ -854,10 +920,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_hash,
+            None,
             false,
             ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::TraceHashZero,
+            ForceChallenge::No,
         );
     }
 
@@ -872,8 +941,11 @@ mod tests {
             false,
             fail_entrypoint.clone(),
             None,
+            None,
+            None,
             true,
             ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
         test_challenge_aux(
@@ -882,10 +954,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_entrypoint,
+            None,
             false,
             ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::EntryPoint,
+            ForceChallenge::No,
         );
     }
 
@@ -900,8 +975,11 @@ mod tests {
             false,
             fail_pc.clone(),
             None,
+            None,
+            None,
             true,
             ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
         test_challenge_aux(
@@ -910,10 +988,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_pc,
+            None,
             false,
             ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::ProgramCounter,
+            ForceChallenge::No,
         );
     }
 
@@ -941,8 +1022,11 @@ mod tests {
             false,
             fail_read_2.clone(),
             None,
+            None,
+            None,
             true,
             ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
 
@@ -952,10 +1036,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_read_2,
+            None,
             false,
             ForceCondition::No,
             ForceChallenge::InputData,
+            ForceChallenge::No,
         );
     }
 
@@ -993,8 +1080,11 @@ mod tests {
             false,
             fail_execute,
             None,
+            None,
+            None,
             true,
             ForceCondition::No,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
 
@@ -1019,10 +1109,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_read_2,
+            None,
             false,
             ForceCondition::No,
             ForceChallenge::AddressesSections,
+            ForceChallenge::No,
         );
     }
 
@@ -1060,8 +1153,11 @@ mod tests {
             false,
             fail_execute,
             None,
+            None,
+            None,
             true,
             ForceCondition::No,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
 
@@ -1086,10 +1182,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_read_2,
+            None,
             false,
             ForceCondition::No,
             ForceChallenge::AddressesSections,
+            ForceChallenge::No,
         );
     }
 
@@ -1124,8 +1223,11 @@ mod tests {
             false,
             fail_execute,
             None,
+            None,
+            None,
             true,
             ForceCondition::No,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
 
@@ -1143,10 +1245,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_write,
+            None,
             false,
             ForceCondition::No,
             ForceChallenge::AddressesSections,
+            ForceChallenge::No,
         );
     }
 
@@ -1184,8 +1289,11 @@ mod tests {
             false,
             fail_execute,
             None,
+            None,
+            None,
             true,
             ForceCondition::No,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
         let fail_args = vec!["1106", "0xaa000000", "0x11111100", "0xf0000004"]
@@ -1202,10 +1310,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_write,
+            None,
             false,
             ForceCondition::No,
             ForceChallenge::AddressesSections,
+            ForceChallenge::No,
         );
     }
 
@@ -1243,8 +1354,11 @@ mod tests {
             false,
             fail_execute,
             None,
+            None,
+            None,
             true,
             ForceCondition::No,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
 
@@ -1262,10 +1376,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_write,
+            None,
             false,
             ForceCondition::No,
             ForceChallenge::AddressesSections,
+            ForceChallenge::No,
         );
     }
 
@@ -1300,8 +1417,11 @@ mod tests {
             false,
             fail_execute.clone(),
             None,
+            None,
+            None,
             true,
             ForceCondition::No,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
 
@@ -1311,10 +1431,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_execute,
+            None,
             false,
             ForceCondition::No,
             ForceChallenge::AddressesSections,
+            ForceChallenge::No,
         );
     }
 
@@ -1349,8 +1472,11 @@ mod tests {
             false,
             fail_execute.clone(),
             None,
+            None,
+            None,
             true,
             ForceCondition::No,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
 
@@ -1360,10 +1486,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_execute,
+            None,
             false,
             ForceCondition::No,
             ForceChallenge::AddressesSections,
+            ForceChallenge::No,
         );
     }
 
@@ -1386,8 +1515,11 @@ mod tests {
             false,
             fail_opcode.clone(),
             None,
+            None,
+            None,
             true,
             ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
 
@@ -1397,10 +1529,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_opcode,
+            None,
             false,
             ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::Opcode,
+            ForceChallenge::No,
         );
     }
 
@@ -1436,8 +1571,11 @@ mod tests {
             false,
             fail_execute.clone(),
             None,
+            None,
+            None,
             true,
             ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
 
@@ -1447,10 +1585,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_execute,
+            None,
             false,
             ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::InitializedData,
+            ForceChallenge::No,
         );
     }
 
@@ -1480,8 +1621,11 @@ mod tests {
             false,
             fail_read_2.clone(),
             None,
+            None,
+            None,
             true,
             ForceCondition::No,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
 
@@ -1491,10 +1635,207 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_read_2,
+            None,
             false,
             ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::UninitializedData,
+            ForceChallenge::No,
+        );
+    }
+
+    #[test]
+    fn test_challenge_modified_value_lies_write_step_trace() {
+        init_trace();
+        let fail_read_args = vec!["1106", "0xaa000000", "0x11111100", "0xaa000000", "200"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+
+        let fail_read_2 = Some(FailConfiguration::new_fail_reads(FailReads::new(
+            None,
+            Some(&fail_read_args),
+        )));
+
+        let fail_trace_write_args = vec!["200", "0xaa000000", "0x11111100"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+
+        let fail_trace_write = Some(FailConfiguration::new_fail_trace_write(
+            FailTraceWrite::new(&fail_trace_write_args),
+        ));
+
+        test_challenge_aux(
+            "33",
+            "hello-world.yaml",
+            17,
+            false,
+            fail_read_2.clone(),
+            fail_trace_write.clone(),
+            None,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "34",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            None,
+            fail_read_2,
+            fail_trace_write,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::ReadValueNArySearch,
+            ForceChallenge::TraceHash,
+        );
+    }
+
+    #[test]
+    fn test_challenge_modified_value_lies_all_hashes_from_write_step() {
+        init_trace();
+        let fail_read_args = vec!["1106", "0xaa000000", "0x11111100", "0xaa000000", "200"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+
+        let fail_read_2 = Some(FailConfiguration::new_fail_reads(FailReads::new(
+            None,
+            Some(&fail_read_args),
+        )));
+
+        let fail_write_args = vec!["200", "0xaa000000", "0x11111100", "0xaa000000"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+        let fail_write = Some(FailConfiguration::new_fail_write(FailWrite::new(
+            &fail_write_args,
+        )));
+
+        test_challenge_aux(
+            "35",
+            "hello-world.yaml",
+            17,
+            false,
+            fail_read_2.clone(),
+            fail_write.clone(),
+            None,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "36",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            None,
+            fail_read_2,
+            fail_write,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::ReadValueNArySearch,
+            ForceChallenge::TraceHash,
+        );
+    }
+    #[test]
+    fn test_challenge_modified_value_lies_hashes_until_step() {
+        init_trace();
+        let fail_read_args = vec!["1106", "0xaa000000", "0x11111100", "0xaa000000", "200"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+
+        let fail_read_2 = Some(FailConfiguration::new_fail_reads(FailReads::new(
+            None,
+            Some(&fail_read_args),
+        )));
+
+        let fail_hash_until = Some(FailConfiguration::new_fail_hash_until(233));
+
+        test_challenge_aux(
+            "37",
+            "hello-world.yaml",
+            17,
+            false,
+            fail_read_2.clone(),
+            fail_hash_until.clone(),
+            None,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "38",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            None,
+            fail_read_2,
+            fail_hash_until,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::ReadValueNArySearch,
+            ForceChallenge::TraceHash,
+        );
+    }
+
+    #[test]
+    fn test_challenge_modified_value_doesnt_lie() {
+        init_trace();
+        let fail_read_args = vec!["1106", "0xaa000000", "0x11111100", "0xaa000000", "200"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+
+        let fail_read_2 = Some(FailConfiguration::new_fail_reads(FailReads::new(
+            None,
+            Some(&fail_read_args),
+        )));
+
+        test_challenge_aux(
+            "39",
+            "hello-world.yaml",
+            17,
+            false,
+            fail_read_2.clone(),
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "40",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            None,
+            fail_read_2,
+            None,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::ReadValueNArySearch,
+            ForceChallenge::ReadValue,
         );
     }
 }

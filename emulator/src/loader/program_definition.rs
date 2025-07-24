@@ -1,4 +1,4 @@
-use bitvmx_cpu_definitions::trace::TraceRWStep;
+use bitvmx_cpu_definitions::trace::{hash_to_string, TraceRWStep};
 use config::Config;
 use serde::Deserialize;
 
@@ -158,7 +158,7 @@ impl ProgramDefinition {
         steps.insert(0, base); //asks base step as it should be always obtainable
 
         let (_result, trace) =
-            self.execute_helper(checkpoint_path, vec![], Some(steps), fail_config)?;
+            self.execute_helper(checkpoint_path, vec![], Some(steps), fail_config.clone())?;
         // at least the base step should be present
         if trace.len() == 0 {
             return Err(EmulatorError::CantObtainTrace);
@@ -167,7 +167,23 @@ impl ProgramDefinition {
         // if there are actual steps skip the first one
         let skip = if trace.len() > 1 { 1 } else { 0 };
 
-        let mut ret: Vec<String> = trace.iter().skip(skip).map(|t| t.1.clone()).collect();
+        let fail_config = &fail_config.unwrap_or_default();
+
+        let mut ret: Vec<String> = trace.iter().skip(skip).map(|t| {
+            let mut hash = t.1.clone();
+
+            if let Some(step) = fail_config.fail_hash_until {
+                if t.0.step_number < step {
+                    let mut decoded = hex::decode(hash).unwrap();
+                    decoded[0] = decoded[0].wrapping_add(1);
+
+                    let new_hash: [u8; 20] = decoded.try_into().unwrap();
+                    hash = hash_to_string(&new_hash);
+                }
+            }
+
+            hash
+        }).collect();
         let obtained_hashes = ret.len();
 
         assert!(obtained_hashes <= required_hashes);
