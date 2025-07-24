@@ -297,7 +297,7 @@ impl Program {
         self.sections.insert(pos, section);
     }
 
-    fn find_section_idx(&self, address: u32) -> Result<usize, ExecutionResult> {
+    pub fn find_section_idx(&self, address: u32) -> Result<usize, ExecutionResult> {
         // Binary search to find the appropriate section
         self.sections
             .binary_search_by(|section| {
