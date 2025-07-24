@@ -402,24 +402,30 @@ pub fn verifier_choose_challenge(
     }
 
     // check const read value
-    let conflict_read_1 = trace.read_1.value != my_trace.read_1.value;
-    let conflict_read_2 = trace.read_2.value != my_trace.read_2.value;
+    let is_read_1_conflict = trace.read_1.value != my_trace.read_1.value;
+    let is_read_2_conflict = trace.read_2.value != my_trace.read_2.value;
 
-    if (conflict_read_1 || conflict_read_2 && force == ForceChallenge::No)
+    if ((is_read_1_conflict || is_read_2_conflict) && force == ForceChallenge::No)
         || force == ForceChallenge::InputData
         || force == ForceChallenge::InitializedData
         || force == ForceChallenge::UninitializedData
     {
-        let (conflict_trace, read_selector) = if conflict_read_1 {
-            (trace.read_1.clone(), 1)
+        let (conflict_read, my_conflict_read, read_selector) = if is_read_1_conflict {
+            (trace.read_1.clone(), my_trace.read_1.clone(), 1)
         } else {
-            (trace.read_2.clone(), 2)
+            (trace.read_2.clone(), my_trace.read_2.clone(), 2)
         };
+
+        let conflict_address = conflict_read.address;
+        let conflict_last_step = conflict_read.last_step;
+        let my_conflict_last_step = my_conflict_read.last_step;
 
         let section_idx = program.find_section_idx(conflict_address)?;
         let section = program.sections.get(section_idx).unwrap();
 
-        if (conflict_trace.last_step == LAST_STEP_INIT && force == ForceChallenge::No)
+        if (conflict_last_step == LAST_STEP_INIT
+            && my_conflict_last_step == LAST_STEP_INIT
+            && force == ForceChallenge::No)
             || force == ForceChallenge::InputData
             || force == ForceChallenge::InitializedData
             || force == ForceChallenge::UninitializedData
