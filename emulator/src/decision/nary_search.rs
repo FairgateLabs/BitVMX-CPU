@@ -219,7 +219,10 @@ pub fn choose_segment(
     //println!("Mismatch step: {}", mismatch_step);
     let (lower_limit_bits, choice) = if selected_step < mismatch_step {
         if nary_type == NArySearchType::ConflictStep {
-            (nary_defs.step_bits_for_round(round, selected_step), selected_step)
+            (
+                nary_defs.step_bits_for_round(round, selected_step),
+                selected_step,
+            )
         } else {
             (selection as u32, mismatch_step + 1)
         }
@@ -227,7 +230,10 @@ pub fn choose_segment(
         if nary_type == NArySearchType::ConflictStep {
             (selection as u32 - 1, mismatch_step)
         } else {
-            (nary_defs.step_bits_for_round(round, selected_step), selected_step)
+            (
+                nary_defs.step_bits_for_round(round, selected_step),
+                selected_step,
+            )
         }
     };
 

@@ -169,21 +169,25 @@ impl ProgramDefinition {
 
         let fail_config = &fail_config.unwrap_or_default();
 
-        let mut ret: Vec<String> = trace.iter().skip(skip).map(|t| {
-            let mut hash = t.1.clone();
+        let mut ret: Vec<String> = trace
+            .iter()
+            .skip(skip)
+            .map(|t| {
+                let mut hash = t.1.clone();
 
-            if let Some(step) = fail_config.fail_hash_until {
-                if t.0.step_number < step {
-                    let mut decoded = hex::decode(hash).unwrap();
-                    decoded[0] = decoded[0].wrapping_add(1);
+                if let Some(step) = fail_config.fail_hash_until {
+                    if t.0.step_number < step {
+                        let mut decoded = hex::decode(hash).unwrap();
+                        decoded[0] = decoded[0].wrapping_add(1);
 
-                    let new_hash: [u8; 20] = decoded.try_into().unwrap();
-                    hash = hash_to_string(&new_hash);
+                        let new_hash: [u8; 20] = decoded.try_into().unwrap();
+                        hash = hash_to_string(&new_hash);
+                    }
                 }
-            }
 
-            hash
-        }).collect();
+                hash
+            })
+            .collect();
         let obtained_hashes = ret.len();
 
         assert!(obtained_hashes <= required_hashes);

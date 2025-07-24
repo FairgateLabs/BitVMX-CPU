@@ -41,8 +41,15 @@ fn test_nary_search_trace_aux(input: u8, expect_err: bool, checkpoint_path: &str
         let claim_hashes = ExecutionHashes::from_hexstr(&reply_hashes);
         let my_hashes = ExecutionHashes::from_hexstr(&reply_hashes);
 
-        let (bits, new_base, new_selected) =
-            choose_segment(&defs, base, selected, round, &claim_hashes, &my_hashes, NArySearchType::ConflictStep);
+        let (bits, new_base, new_selected) = choose_segment(
+            &defs,
+            base,
+            selected,
+            round,
+            &claim_hashes,
+            &my_hashes,
+            NArySearchType::ConflictStep,
+        );
         base = new_base;
         selected = new_selected;
 

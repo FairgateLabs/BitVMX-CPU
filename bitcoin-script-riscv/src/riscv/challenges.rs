@@ -498,7 +498,7 @@ pub fn read_value_challenge(stack: &mut StackTracker) {
     stack.equality(read_step, false, init, true, true, false);
     is_lower_than(stack, read_step, write_step, true);
     stack.op_boolor();
-    
+
     stack.equality(write_addr, true, read_addr, true, true, false);
     stack.op_booland();
 
@@ -1531,7 +1531,7 @@ mod tests {
         stack.number_u32(write.address);
         stack.number_u32(write.value);
         stack.number_u64(write_step);
-        
+
         read_value_challenge(stack);
 
         stack.op_true();
