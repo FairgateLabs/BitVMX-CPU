@@ -392,11 +392,24 @@ pub fn opcode_challenge(stack: &mut StackTracker, chunk: &Chunk) {
 }
 
 pub fn initialized_challenge(stack: &mut StackTracker, chunk: &Chunk) {
-    get_chosen_read(stack);
+    stack.clear_definitions();
 
-    let read_addr = stack.define(8, "prover_read_addr");
-    let read_value = stack.define(8, "prover_read_value");
-    let read_step = stack.define(16, "prover_read_step");
+    let read_addr_1 = stack.define(8, "prover_read_addr_1");
+    let read_value_1 = stack.define(8, "prover_read_value_1");
+    let read_step_1 = stack.define(16, "prover_read_step_1");
+
+    let read_addr_2 = stack.define(8, "prover_read_addr_2");
+    let read_value_2 = stack.define(8, "prover_read_value_2");
+    let read_step_2 = stack.define(16, "prover_read_step_2");
+
+    let read_selector = stack.define(2, "read_selector");
+
+    let [read_addr, read_value, read_step] = get_selected_vars(
+        stack,
+        [read_addr_1, read_value_1, read_step_1],
+        [read_addr_2, read_value_2, read_step_2],
+        read_selector,
+    );
 
     address_in_range(stack, &chunk.range(), &read_addr);
     stack.op_verify();
@@ -414,11 +427,24 @@ pub fn uninitialized_challenge(
     stack: &mut StackTracker,
     uninitialized_sections: &SectionDefinition,
 ) {
-    get_chosen_read(stack);
+    stack.clear_definitions();
 
-    let read_addr = stack.define(8, "prover_read_addr");
-    let read_value = stack.define(8, "prover_read_value");
-    let read_step = stack.define(16, "prover_read_step");
+    let read_addr_1 = stack.define(8, "prover_read_addr_1");
+    let read_value_1 = stack.define(8, "prover_read_value_1");
+    let read_step_1 = stack.define(16, "prover_read_step_1");
+
+    let read_addr_2 = stack.define(8, "prover_read_addr_2");
+    let read_value_2 = stack.define(8, "prover_read_value_2");
+    let read_step_2 = stack.define(16, "prover_read_step_2");
+
+    let read_selector = stack.define(2, "read_selector");
+
+    let [read_addr, read_value, read_step] = get_selected_vars(
+        stack,
+        [read_addr_1, read_value_1, read_step_1],
+        [read_addr_2, read_value_2, read_step_2],
+        read_selector,
+    );
 
     address_in_sections(stack, &read_addr, uninitialized_sections);
     stack.op_verify();

@@ -1442,39 +1442,48 @@ pub fn verify_wrong_chunk_value(
     chunk_table.drop(stack);
 }
 
-pub fn get_chosen_read(stack: &mut StackTracker) {
-    stack.clear_definitions();
+pub fn get_selected_vars<const N: usize>(
+    stack: &mut StackTracker,
+    vars_1: [StackVariable; N],
+    vars_2: [StackVariable; N],
+    var_selector: StackVariable,
+) -> [StackVariable; N] {
+    assert_eq!(vars_1.len(), vars_2.len());
+    let consumes = vars_1.len() as u32 * 2;
 
-    let read_1_addr = stack.define(8, "prover_read_1_addr");
-    let read_1_value = stack.define(8, "prover_read_1_value");
-    let read_1_step = stack.define(16, "prover_read_1_step");
+    let output: Vec<_> = vars_1
+        .iter()
+        .enumerate()
+        .map(|(i, var)| (stack.get_size(*var), format!("var_{}", i)))
+        .collect();
 
-    let read_2_addr = stack.define(8, "prover_read_2_addr");
-    let read_2_value = stack.define(8, "prover_read_2_value");
-    let read_2_step = stack.define(16, "prover_read_2_step");
+    // we need the variables to be on top of the stack, or we will break variables that are higher when merging the branches
+    for (var_1, var_2) in vars_1.iter().zip(vars_2.iter()) {
+        assert_eq!(stack.get_size(*var_1), stack.get_size(*var_2));
+        stack.move_var(*var_1);
+        stack.move_var(*var_2);
+    }
 
-    let read_selector = stack.define(2, "read_selector");
     let one = stack.byte(1);
+    stack.equality(var_selector, true, one, true, true, false);
 
-    stack.equality(read_selector, true, one, true, true, false);
+    let (mut chose_var_1, mut chose_var_2) = stack.open_if();
 
-    let (mut challenge_read_1, mut challenge_read_2) = stack.open_if();
+    for (var_1, var_2) in vars_1.into_iter().zip(vars_2.into_iter()) {
+        chose_var_1.move_var(var_2);
+        chose_var_1.drop(var_2);
+        chose_var_1.move_var(var_1);
 
-    challenge_read_1.drop(read_2_step);
-    challenge_read_1.drop(read_2_value);
-    challenge_read_1.drop(read_2_addr);
+        chose_var_2.move_var(var_1);
+        chose_var_2.drop(var_1);
+        chose_var_2.move_var(var_2);
+    }
 
-    challenge_read_2.move_var(read_1_addr);
-    challenge_read_2.drop(read_1_addr);
-
-    challenge_read_2.move_var(read_1_value);
-    challenge_read_2.drop(read_1_value);
-
-    challenge_read_2.move_var(read_1_step);
-    challenge_read_2.drop(read_1_step);
-
-    stack.end_if(challenge_read_1, challenge_read_2, 3, vec![], 0);
-    stack.clear_definitions();
+    stack
+        .end_if(chose_var_1, chose_var_2, consumes, output, 0)
+        .try_into()
+        .ok()
+        .expect("Vec length does not match expected array size")
 }
 
 pub fn address_in_range(stack: &mut StackTracker, range: &(u32, u32), address: &StackVariable) {
@@ -1904,51 +1913,44 @@ mod tests {
         assert!(stack.run().success);
     }
 
-    fn test_get_chosen_read_aux(read_selector: u8) {
+    fn test_get_selected_vars_aux(var_selector: u8) {
         let mut stack = StackTracker::new();
 
-        stack.number_u32(0x1111_1111);
-        stack.number_u32(0x2222_2222);
-        stack.number_u64(0x3333_3333_3333_3333);
+        let previous_var = stack.number_u32(0x3333_3333);
 
-        stack.number_u32(0x4444_4444);
-        stack.number_u32(0x5555_5555);
-        stack.number_u64(0x6666_6666_6666_6666);
+        let var_1 = stack.number_u32(0x1111_1111);
+        let var_2 = stack.number_u32(0x2222_2222);
+        let selector = stack.byte(var_selector);
 
-        stack.byte(read_selector);
+        let next_var = stack.number_u32(0x4444_4444);
 
-        get_chosen_read(&mut stack);
+        let [chosen_var] = get_selected_vars(&mut stack, [var_1], [var_2], selector);
 
-        let address = stack.define(8, "address");
-        let value = stack.define(8, "value");
-        let step = stack.define(16, "step");
-
-        let expected_address;
-        let expected_value;
-        let expected_step;
-
-        if read_selector == 1 {
-            expected_address = stack.number_u32(0x1111_1111);
-            expected_value = stack.number_u32(0x2222_2222);
-            expected_step = stack.number_u64(0x3333_3333_3333_3333);
+        // we should get the selected variable
+        let expected_var = if var_selector == 1 {
+            0x1111_1111
         } else {
-            expected_address = stack.number_u32(0x4444_4444);
-            expected_value = stack.number_u32(0x5555_5555);
-            expected_step = stack.number_u64(0x6666_6666_6666_6666);
+            0x2222_2222
         };
+        let expected_var = stack.number_u32(expected_var);
+        stack.equality(chosen_var, true, expected_var, true, true, true);
 
-        stack.equality(address, true, expected_address, true, true, true);
-        stack.equality(value, true, expected_value, true, true, true);
-        stack.equality(step, true, expected_step, true, true, true);
+        // previous variable should remain unchanged
+        let expected_var = stack.number_u32(0x3333_3333);
+        stack.equality(previous_var, true, expected_var, true, true, true);
+
+        // next variable should also remain unchanged
+        let expected_var = stack.number_u32(0x4444_4444);
+        stack.equality(next_var, true, expected_var, true, true, true);
 
         stack.op_true();
         assert!(stack.run().success);
     }
 
     #[test]
-    fn test_get_chosen_read() {
-        test_get_chosen_read_aux(1);
-        test_get_chosen_read_aux(2);
+    fn test_get_selected_vars() {
+        test_get_selected_vars_aux(1);
+        test_get_selected_vars_aux(2);
     }
 
     fn test_verify_wrong_chunk_value_aux(address: u32, value: u32, chunk: &Chunk) -> bool {
