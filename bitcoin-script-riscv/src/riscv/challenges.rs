@@ -10,8 +10,8 @@ use bitvmx_cpu_definitions::{
 use crate::riscv::{
     memory_alignment::{is_aligned, load_lower_half_nibble_table, load_upper_half_nibble_table},
     script_utils::{
-        address_in_range, address_in_sections, address_not_in_sections, get_chosen_read,
-        verify_wrong_chunk_value, witness_equals, StackTables,
+        address_in_range, address_in_sections, address_not_in_sections, get_selected_vars,
+        is_lower_than, verify_wrong_chunk_value, witness_equals, StackTables,
     },
 };
 
@@ -458,6 +458,55 @@ pub fn uninitialized_challenge(
     stack.drop(read_addr);
 }
 
+pub fn read_value_challenge(stack: &mut StackTracker) {
+    stack.clear_definitions();
+
+    let read_addr_1 = stack.define(8, "prover_read_addr_1");
+    let read_value_1 = stack.define(8, "prover_read_value_1");
+    let read_step_1 = stack.define(16, "prover_read_step_1");
+
+    let read_addr_2 = stack.define(8, "prover_read_addr_2");
+    let read_value_2 = stack.define(8, "prover_read_value_2");
+    let read_step_2 = stack.define(16, "prover_read_step_2");
+
+    let read_selector = stack.define(2, "read_selector");
+
+    let write_addr = stack.define(8, "write_addr");
+    let write_value = stack.define(8, "write_value");
+    let write_step = stack.define(16, "write_step");
+
+    let [read_addr, read_value, read_step] = get_selected_vars(
+        stack,
+        [read_addr_1, read_value_1, read_step_1],
+        [read_addr_2, read_value_2, read_step_2],
+        read_selector,
+    );
+
+    stack.rename(read_step, "read_Step");
+
+    // if read_step == write_step -> write_addr != read_addr || write_value != read_value
+    stack.equality(read_step, false, write_step, false, true, false);
+
+    stack.equality(write_addr, false, read_addr, false, false, false);
+    stack.equality(write_value, true, read_value, true, false, false);
+    stack.op_boolor();
+    stack.op_booland();
+
+    let init = stack.number_u64(LAST_STEP_INIT);
+
+    // if read_step == INIT || read_step < write_step -> write_addr == read_addr
+    stack.equality(read_step, false, init, true, true, false);
+    is_lower_than(stack, read_step, write_step, true);
+    stack.op_boolor();
+    
+    stack.equality(write_addr, true, read_addr, true, true, false);
+    stack.op_booland();
+
+    stack.op_boolor();
+
+    stack.op_verify();
+}
+
 //TODO: memory section challenge
 //TODO: program crash challenge - this might be more about finding the right place to challenge that a challenge itself
 
@@ -569,6 +618,28 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
                 code_sections.as_ref().unwrap(),
             );
         }
+        ChallengeType::ReadValue {
+            read_1,
+            read_2,
+            read_selector,
+            trace,
+        } => {
+            stack.number_u32(read_1.address);
+            stack.number_u32(read_1.value);
+            stack.number_u64(read_1.last_step);
+
+            stack.number_u32(read_2.address);
+            stack.number_u32(read_2.value);
+            stack.number_u64(read_2.last_step);
+
+            stack.byte(*read_selector);
+
+            stack.number_u32(trace.trace_step.write_1.address);
+            stack.number_u32(trace.trace_step.write_1.value);
+            stack.number_u64(trace.step_number);
+
+            read_value_challenge(&mut stack);
+        }
         _ => {
             return false;
         }
@@ -580,7 +651,10 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
 #[cfg(test)]
 mod tests {
 
-    use bitvmx_cpu_definitions::{memory::MemoryWitness, trace::TraceRead};
+    use bitvmx_cpu_definitions::{
+        memory::MemoryWitness,
+        trace::{TraceRead, TraceWrite},
+    };
 
     use super::*;
 
@@ -1277,37 +1351,37 @@ mod tests {
             data: vec![0x1111_1111, 0x2222_2222, 0x3333_3333, 0x4444_4444],
         };
 
-        //can't challenge not init state
+        // can't challenge not init state
         let read_1 = TraceRead::new(0x1000_0000, 0x1234_5678, 1);
         let read_2 = TraceRead::new(0x1000_0004, 0x1234_5678, 2);
         assert!(!test_initialized_aux(&read_1, &read_2, 1, chunk));
         assert!(!test_initialized_aux(&read_1, &read_2, 2, chunk));
 
-        //can't challenge if value is right
+        // can't challenge if value is right
         let read_1 = TraceRead::new(0x1000_0000, 0x1111_1111, LAST_STEP_INIT);
         let read_2 = TraceRead::new(0x1000_0004, 0x2222_2222, LAST_STEP_INIT);
         assert!(!test_initialized_aux(&read_1, &read_2, 1, chunk));
         assert!(!test_initialized_aux(&read_1, &read_2, 2, chunk));
 
-        //can't challenge if address is outside chunk
+        // can't challenge if address is outside chunk
         let read_1 = TraceRead::new(0x0000_0004, 0x1234_5678, LAST_STEP_INIT);
         let read_2 = TraceRead::new(0x0000_0008, 0x1234_5678, LAST_STEP_INIT);
         assert!(!test_initialized_aux(&read_1, &read_2, 1, chunk));
         assert!(!test_initialized_aux(&read_1, &read_2, 2, chunk));
 
-        //challenge is valid if the address is the same but the value differs in both
+        // challenge is valid if the address is the same but the value differs in both
         let read_1 = TraceRead::new(0x1000_0000, 0x1234_5678, LAST_STEP_INIT);
         let read_2 = TraceRead::new(0x1000_0004, 0x1234_5678, LAST_STEP_INIT);
         assert!(test_initialized_aux(&read_1, &read_2, 1, chunk));
         assert!(test_initialized_aux(&read_1, &read_2, 2, chunk));
 
-        //challenge is valid if the address is the same but the value differs in read_1 and uses correct selector
+        // challenge is valid if the address is the same but the value differs in read_1 and uses correct selector
         let read_1 = TraceRead::new(0x1000_0000, 0x1234_5678, LAST_STEP_INIT);
         let read_2 = TraceRead::new(0x1000_0004, 0x2222_2222, LAST_STEP_INIT);
         assert!(test_initialized_aux(&read_1, &read_2, 1, chunk));
         assert!(!test_initialized_aux(&read_1, &read_2, 2, chunk));
 
-        //challenge is valid if the address is the same but the value differs in read_2 and uses correct selector
+        // challenge is valid if the address is the same but the value differs in read_2 and uses correct selector
         let read_1 = TraceRead::new(0x1000_0000, 0x1111_1111, LAST_STEP_INIT);
         let read_2 = TraceRead::new(0x1000_0004, 0x1234_5678, LAST_STEP_INIT);
         assert!(!test_initialized_aux(&read_1, &read_2, 1, chunk));
@@ -1344,7 +1418,7 @@ mod tests {
             ranges: vec![(0x1000_0000, 0x2000_0000), (0xA000_0000, 0xB000_0000)],
         };
 
-        //can't challenge not init state
+        // can't challenge not init state
         let read_1 = TraceRead::new(0x1000_0000, 0x1234_5678, 1);
         let read_2 = TraceRead::new(0xA000_0000, 0x1234_5678, 2);
         assert!(!test_uninitialized_aux(
@@ -1360,7 +1434,7 @@ mod tests {
             uninitialized_sections
         ));
 
-        //can't challenge if value is right
+        // can't challenge if value is right
         let read_1 = TraceRead::new(0x1000_0000, 0, LAST_STEP_INIT);
         let read_2 = TraceRead::new(0xA000_0000, 0, LAST_STEP_INIT);
         assert!(!test_uninitialized_aux(
@@ -1376,7 +1450,7 @@ mod tests {
             uninitialized_sections
         ));
 
-        //can't challenge if address is outside uninitialized sections
+        // can't challenge if address is outside uninitialized sections
         let read_1 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
         let read_2 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
         assert!(!test_uninitialized_aux(
@@ -1392,7 +1466,7 @@ mod tests {
             uninitialized_sections
         ));
 
-        //challenge is valid if the address is the same but the value differs in both
+        // challenge is valid if the address is the same but the value differs in both
         let read_1 = TraceRead::new(0x1000_0000, 0x1234_5678, LAST_STEP_INIT);
         let read_2 = TraceRead::new(0xA000_0000, 0x1234_5678, LAST_STEP_INIT);
         assert!(test_uninitialized_aux(
@@ -1408,7 +1482,7 @@ mod tests {
             uninitialized_sections
         ));
 
-        //challenge is valid if the address is the same but the value differs in read_1 and uses correct selector
+        // challenge is valid if the address is the same but the value differs in read_1 and uses correct selector
         let read_1 = TraceRead::new(0x1000_0000, 0x1234_5678, LAST_STEP_INIT);
         let read_2 = TraceRead::new(0xA000_0000, 0, LAST_STEP_INIT);
         assert!(test_uninitialized_aux(
@@ -1424,7 +1498,7 @@ mod tests {
             uninitialized_sections
         ));
 
-        //challenge is valid if the address is the same but the value differs in read_2 and uses correct selector
+        // challenge is valid if the address is the same but the value differs in read_2 and uses correct selector
         let read_1 = TraceRead::new(0x1000_0000, 0, LAST_STEP_INIT);
         let read_2 = TraceRead::new(0xA000_0000, 0x1234_5678, LAST_STEP_INIT);
         assert!(!test_uninitialized_aux(
@@ -1439,5 +1513,66 @@ mod tests {
             2,
             uninitialized_sections
         ));
+    }
+
+    fn test_read_value_aux(read: TraceRead, write: TraceWrite, write_step: u64) -> bool {
+        let stack = &mut StackTracker::new();
+
+        stack.number_u32(read.address);
+        stack.number_u32(read.value);
+        stack.number_u64(read.last_step);
+
+        stack.number_u32(read.address);
+        stack.number_u32(read.value);
+        stack.number_u64(read.last_step);
+
+        stack.byte(1);
+
+        stack.number_u32(write.address);
+        stack.number_u32(write.value);
+        stack.number_u64(write_step);
+        
+        read_value_challenge(stack);
+
+        stack.op_true();
+        stack.run().success
+    }
+    #[test]
+    fn test_read_value() {
+        // can't challenge if read is correct
+        let read = TraceRead::new(0x1000_0000, 0, 100);
+        let step = 100;
+        let write = TraceWrite::new(0x1000_0000, 0);
+        assert!(!test_read_value_aux(read, write, step));
+
+        // can't challenge if write is older
+        let read = TraceRead::new(0x1000_0000, 0, 100);
+        let step = 50;
+        let write = TraceWrite::new(0x1000_0000, 100);
+        assert!(!test_read_value_aux(read, write, step));
+
+        // can't challenge if write is newer but for different address
+        let read = TraceRead::new(0x1000_0000, 0, 100);
+        let step = 200;
+        let write = TraceWrite::new(0x2000_0000, 100);
+        assert!(!test_read_value_aux(read, write, step));
+
+        // challenge is valid if write is newer for the same address
+        let read = TraceRead::new(0x1000_0000, 0, 100);
+        let write_step = 200;
+        let write = TraceWrite::new(0x1000_0000, 100);
+        assert!(test_read_value_aux(read, write, write_step));
+
+        // challenge is valid if write is at the same step but for different address
+        let read = TraceRead::new(0x1000_0000, 0, 100);
+        let write_step = 100;
+        let write = TraceWrite::new(0x2000_0000, 100);
+        assert!(test_read_value_aux(read, write, write_step));
+
+        // challenge is valid if write is at the same step for different address but different value
+        let read = TraceRead::new(0x1000_0000, 0, 100);
+        let write_step = 100;
+        let write = TraceWrite::new(0x1000_0000, 100);
+        assert!(test_read_value_aux(read, write, write_step));
     }
 }
