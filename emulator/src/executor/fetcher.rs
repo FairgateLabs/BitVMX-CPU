@@ -38,7 +38,7 @@ pub fn execute_program(
     let mut traces = Vec::new();
 
     if !input.is_empty() {
-        if let Some(section) = program.find_section_by_name(input_section_name) {
+        if let Some(section) = program.find_section_by_name_mut(input_section_name) {
             let input_as_u32 = vec_u8_to_vec_u32(&input, little_endian);
             for (i, byte) in input_as_u32.iter().enumerate() {
                 section.data[i] = *byte;
@@ -149,6 +149,14 @@ pub fn execute_program(
             if let Some(fail) = fail_config.fail_hash {
                 if fail == program.step {
                     program.hash = compute_step_hash(&mut hasher, &program.hash, &trace_bytes);
+                }
+            }
+        }
+
+        if let Some(fail_trace_write) = &fail_config.fail_trace_write {
+            if fail_trace_write.step == program.step {
+                if let Ok(trace) = trace.as_mut() {
+                    trace.trace_step.write_1 = fail_trace_write.trace_write.clone()
                 }
             }
         }

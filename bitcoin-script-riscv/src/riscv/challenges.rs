@@ -3,16 +3,15 @@ use bitcoin_script_stack::stack::{StackTracker, StackVariable};
 use bitvmx_cpu_definitions::{
     challenge::ChallengeType,
     constants::LAST_STEP_INIT,
-    memory::{MemoryAccessType, SectionDefinition},
+    memory::{Chunk, MemoryAccessType, SectionDefinition},
     trace::{generate_initial_step_hash, hashvec_to_string},
 };
 
 use crate::riscv::{
     memory_alignment::{is_aligned, load_lower_half_nibble_table, load_upper_half_nibble_table},
-    operations::sub,
     script_utils::{
-        address_not_in_sections, is_equal_to, is_lower_than, nibbles_to_number, shift_number,
-        witness_equals, StackTables, WordTable,
+        address_in_range, address_in_sections, address_not_in_sections, get_selected_vars,
+        is_lower_than, verify_wrong_chunk_value, witness_equals, StackTables,
     },
 };
 
@@ -55,46 +54,6 @@ pub fn input_challenge(stack: &mut StackTracker, address: u32) {
     let init = stack.number_u64(LAST_STEP_INIT);
     stack.equality(prover_step_1, true, init, true, true, false);
     stack.equality(read_1, true, input, true, false, false);
-    let const_address = stack.number_u32(address);
-    stack.equality(add_1, true, const_address, true, true, false);
-
-    stack.op_booland();
-    stack.op_booland();
-
-    //one of the two needs to be right
-    stack.op_boolor();
-    stack.op_verify();
-}
-
-// One rom value equivocation challenge
-// [WOTS_PROVER_READ_ADD_1|WOTS_PROVER_READ_VALUE_1|WOTS_PROVER_LAST_STEP_1|WOTS_PROVER_READ_ADD_2|WOTS_PROVER_READ_VALUE_2|WOTS_PROVER_LAST_STEP_2]
-// If STEP_1 == INIT && ADD_1 == const_address && VALUE_1 != const_value || STEP_2 == INIT && ADD_2 == const_address && VALUE_2 != const_value  => verifier wins
-pub fn rom_challenge(stack: &mut StackTracker, address: u32, value: u32) {
-    assert_ne!(address, 0x0000_0000);
-    stack.clear_definitions();
-    let add_1 = stack.define(8, "prover_read_add_1");
-    let read_1 = stack.define(8, "prover_read_value_1");
-    let prover_step_1 = stack.define(16, "prover_last_step_1");
-
-    let add_2 = stack.define(8, "prover_read_add_2");
-    let read_2 = stack.define(8, "prover_read_value_2");
-    let prover_step_2 = stack.define(16, "prover_last_step_2");
-
-    //compares agaisnt read_2
-    let init = stack.number_u64(LAST_STEP_INIT);
-    stack.equality(prover_step_2, true, init, true, true, false);
-    let const_value = stack.number_u32(value);
-    stack.equality(read_2, true, const_value, true, false, false);
-    let const_address = stack.number_u32(address);
-    stack.equality(add_2, true, const_address, true, true, false);
-    stack.op_booland();
-    stack.op_booland();
-
-    //compares agaisnt read_1
-    let init = stack.number_u64(LAST_STEP_INIT);
-    stack.equality(prover_step_1, true, init, true, true, false);
-    let const_value = stack.number_u32(value);
-    stack.equality(read_1, true, const_value, true, false, false);
     let const_address = stack.number_u32(address);
     stack.equality(add_1, true, const_address, true, true, false);
 
@@ -418,43 +377,134 @@ pub fn addresses_sections_challenge(
     stack.drop(memory_witness);
 }
 
-pub fn opcode_challenge(stack: &mut StackTracker, chunk_base: u32, opcodes_chunk: &Vec<u32>) {
+pub fn opcode_challenge(stack: &mut StackTracker, chunk: &Chunk) {
     stack.clear_definitions();
 
     let pc = stack.define(8, "prover_pc");
     let opcode = stack.define(8, "prover_opcode");
     let tables = StackTables::new(stack, true, false, 0, 0, 0);
 
-    let start = stack.number_u32(chunk_base);
-    let end = stack.number_u32(chunk_base + 4 * opcodes_chunk.len() as u32);
-
-    let start_copy = stack.copy_var(start);
-    let pc_copy = stack.copy_var(pc);
-    is_equal_to(stack, &start_copy, &pc_copy);
-    is_lower_than(stack, start_copy, pc_copy, true);
-    stack.op_boolor();
-
-    let pc_copy = stack.copy_var(pc);
-    is_lower_than(stack, pc_copy, end, true);
-    stack.op_booland();
-
+    address_in_range(stack, &chunk.range(), &pc);
     stack.op_verify();
 
-    let opcodes_table = WordTable::new(stack, opcodes_chunk.clone());
-
-    let to_shift = stack.number(2);
-    let opcode_offset = sub(stack, &tables, pc, start);
-    let opcode_index = shift_number(stack, to_shift, opcode_offset, true, false);
-
-    let index_nibbles = stack.explode(opcode_index);
-    nibbles_to_number(stack, index_nibbles);
-
-    let real_opcode = opcodes_table.peek(stack);
-
-    stack.equality(real_opcode, true, opcode, true, false, true);
-
-    opcodes_table.drop(stack);
+    verify_wrong_chunk_value(stack, &tables, chunk, pc, opcode);
     tables.drop(stack);
+}
+
+pub fn initialized_challenge(stack: &mut StackTracker, chunk: &Chunk) {
+    stack.clear_definitions();
+
+    let read_addr_1 = stack.define(8, "prover_read_addr_1");
+    let read_value_1 = stack.define(8, "prover_read_value_1");
+    let read_step_1 = stack.define(16, "prover_read_step_1");
+
+    let read_addr_2 = stack.define(8, "prover_read_addr_2");
+    let read_value_2 = stack.define(8, "prover_read_value_2");
+    let read_step_2 = stack.define(16, "prover_read_step_2");
+
+    let read_selector = stack.define(2, "read_selector");
+
+    let [read_addr, read_value, read_step] = get_selected_vars(
+        stack,
+        [read_addr_1, read_value_1, read_step_1],
+        [read_addr_2, read_value_2, read_step_2],
+        read_selector,
+    );
+
+    address_in_range(stack, &chunk.range(), &read_addr);
+    stack.op_verify();
+
+    let init = stack.number_u64(LAST_STEP_INIT);
+    stack.equality(read_step, true, init, true, true, true);
+
+    let tables = &StackTables::new(stack, true, false, 0, 0, 0);
+    verify_wrong_chunk_value(stack, tables, chunk, read_addr, read_value);
+
+    tables.drop(stack);
+}
+
+pub fn uninitialized_challenge(
+    stack: &mut StackTracker,
+    uninitialized_sections: &SectionDefinition,
+) {
+    stack.clear_definitions();
+
+    let read_addr_1 = stack.define(8, "prover_read_addr_1");
+    let read_value_1 = stack.define(8, "prover_read_value_1");
+    let read_step_1 = stack.define(16, "prover_read_step_1");
+
+    let read_addr_2 = stack.define(8, "prover_read_addr_2");
+    let read_value_2 = stack.define(8, "prover_read_value_2");
+    let read_step_2 = stack.define(16, "prover_read_step_2");
+
+    let read_selector = stack.define(2, "read_selector");
+
+    let [read_addr, read_value, read_step] = get_selected_vars(
+        stack,
+        [read_addr_1, read_value_1, read_step_1],
+        [read_addr_2, read_value_2, read_step_2],
+        read_selector,
+    );
+
+    address_in_sections(stack, &read_addr, uninitialized_sections);
+    stack.op_verify();
+
+    let init = stack.number_u64(LAST_STEP_INIT);
+    stack.equality(read_step, true, init, true, true, true);
+
+    let zero = stack.number_u32(0);
+    stack.equality(read_value, true, zero, true, false, true);
+
+    stack.drop(read_addr);
+}
+
+pub fn read_value_challenge(stack: &mut StackTracker) {
+    stack.clear_definitions();
+
+    let read_addr_1 = stack.define(8, "prover_read_addr_1");
+    let read_value_1 = stack.define(8, "prover_read_value_1");
+    let read_step_1 = stack.define(16, "prover_read_step_1");
+
+    let read_addr_2 = stack.define(8, "prover_read_addr_2");
+    let read_value_2 = stack.define(8, "prover_read_value_2");
+    let read_step_2 = stack.define(16, "prover_read_step_2");
+
+    let read_selector = stack.define(2, "read_selector");
+
+    let write_addr = stack.define(8, "write_addr");
+    let write_value = stack.define(8, "write_value");
+    let write_step = stack.define(16, "write_step");
+
+    let [read_addr, read_value, read_step] = get_selected_vars(
+        stack,
+        [read_addr_1, read_value_1, read_step_1],
+        [read_addr_2, read_value_2, read_step_2],
+        read_selector,
+    );
+
+    stack.rename(read_step, "read_Step");
+
+    // if read_step == write_step -> write_addr != read_addr || write_value != read_value
+    stack.equality(read_step, false, write_step, false, true, false);
+
+    stack.equality(write_addr, false, read_addr, false, false, false);
+    stack.equality(write_value, true, read_value, true, false, false);
+    stack.op_boolor();
+    stack.op_booland();
+
+    let init = stack.number_u64(LAST_STEP_INIT);
+
+    // if read_step == INIT || read_step < write_step -> write_addr == read_addr
+    stack.equality(read_step, false, init, true, true, false);
+    is_lower_than(stack, read_step, write_step, true);
+    stack.op_boolor();
+
+    stack.equality(write_addr, true, read_addr, true, true, false);
+    stack.op_booland();
+
+    stack.op_boolor();
+
+    stack.op_verify();
 }
 
 //TODO: memory section challenge
@@ -496,28 +546,52 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             stack.number_u32(prover_pc_read.pc.get_address());
             stack.byte(prover_pc_read.pc.get_micro());
 
-            stack.hexstr_as_nibbles(&prover_step_hash);
+            stack.hexstr_as_nibbles(prover_step_hash);
 
             program_counter_challenge(&mut stack);
+        }
+        ChallengeType::Opcode(pc_read, _, chunk) => {
+            stack.number_u32(pc_read.pc.get_address());
+            stack.number_u32(pc_read.opcode);
+            opcode_challenge(&mut stack, chunk.as_ref().unwrap());
         }
         ChallengeType::InputData(read_1, read_2, address, input_for_address) => {
             stack.number_u32(*input_for_address); //TODO: this should make input_wots[address]
             stack.number_u32(read_1.address);
             stack.number_u32(read_1.value);
             stack.number_u64(read_1.last_step);
+
             stack.number_u32(read_2.address);
             stack.number_u32(read_2.value);
             stack.number_u64(read_2.last_step);
+
             input_challenge(&mut stack, *address);
         }
-        ChallengeType::RomData(read_1, read_2 ,address, input_for_address ) => {
+        ChallengeType::InitializedData(read_1, read_2, read_selector, _, chunk) => {
             stack.number_u32(read_1.address);
             stack.number_u32(read_1.value);
             stack.number_u64(read_1.last_step);
+
             stack.number_u32(read_2.address);
             stack.number_u32(read_2.value);
             stack.number_u64(read_2.last_step);
-            rom_challenge(&mut stack, *address, *input_for_address);
+
+            stack.byte(*read_selector);
+
+            initialized_challenge(&mut stack, chunk.as_ref().unwrap());
+        }
+        ChallengeType::UninitializedData(read_1, read_2, read_selector, uninitialized_sections) => {
+            stack.number_u32(read_1.address);
+            stack.number_u32(read_1.value);
+            stack.number_u64(read_1.last_step);
+
+            stack.number_u32(read_2.address);
+            stack.number_u32(read_2.value);
+            stack.number_u64(read_2.last_step);
+
+            stack.byte(*read_selector);
+
+            uninitialized_challenge(&mut stack, uninitialized_sections.as_ref().unwrap());
         }
         ChallengeType::AddressesSections(
             read_1,
@@ -544,10 +618,27 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
                 code_sections.as_ref().unwrap(),
             );
         }
-        ChallengeType::Opcode(pc_read, _, chunk_base, opcodes_chunk) => {
-            stack.number_u32(pc_read.pc.get_address());
-            stack.number_u32(pc_read.opcode);
-            opcode_challenge(&mut stack, chunk_base.unwrap(), opcodes_chunk.as_ref().unwrap());
+        ChallengeType::ReadValue {
+            read_1,
+            read_2,
+            read_selector,
+            trace,
+        } => {
+            stack.number_u32(read_1.address);
+            stack.number_u32(read_1.value);
+            stack.number_u64(read_1.last_step);
+
+            stack.number_u32(read_2.address);
+            stack.number_u32(read_2.value);
+            stack.number_u64(read_2.last_step);
+
+            stack.byte(*read_selector);
+
+            stack.number_u32(trace.trace_step.write_1.address);
+            stack.number_u32(trace.trace_step.write_1.value);
+            stack.number_u64(trace.step_number);
+
+            read_value_challenge(&mut stack);
         }
         _ => {
             return false;
@@ -560,7 +651,10 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
 #[cfg(test)]
 mod tests {
 
-    use bitvmx_cpu_definitions::{memory::MemoryWitness, trace::TraceRead};
+    use bitvmx_cpu_definitions::{
+        memory::MemoryWitness,
+        trace::{TraceRead, TraceWrite},
+    };
 
     use super::*;
 
@@ -783,55 +877,6 @@ mod tests {
         assert!(!test_trace_hash_aux(
             pre_hash, 0xf000003c, 0x0000003f, 0x80000064, 0x00, hash
         ));
-    }
-
-    fn test_rom_aux(read_1: &TraceRead, read_2: &TraceRead, rom_add: u32, rom_value: u32) -> bool {
-        let mut stack = StackTracker::new();
-
-        stack.number_u32(read_1.address);
-        stack.number_u32(read_1.value);
-        stack.number_u64(read_1.last_step);
-        stack.number_u32(read_2.address);
-        stack.number_u32(read_2.value);
-        stack.number_u64(read_2.last_step);
-
-        rom_challenge(&mut stack, rom_add, rom_value);
-
-        stack.op_true();
-        stack.run().success
-    }
-
-    #[test]
-    fn test_rom() {
-        //can't challenge not init state
-        let read_1 = TraceRead::new(0x0000_0002, 0x1234_5678, 1);
-        let read_2 = TraceRead::new(0x0000_0002, 0x1234_5678, 2);
-        assert!(!test_rom_aux(&read_1, &read_2, 0x0000_0002, 0x0000_0000));
-
-        //can't challenge if value is right
-        let read_1 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
-        let read_2 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
-        assert!(!test_rom_aux(&read_1, &read_2, 0x0000_0002, 0x1234_5678));
-
-        //can't challenge if address is different
-        let read_1 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
-        let read_2 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
-        assert!(!test_rom_aux(&read_1, &read_2, 0x0000_0003, 0x1234_0000));
-
-        //challenge is valid if the address is the same but the value differs in both
-        let read_1 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
-        let read_2 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
-        assert!(test_rom_aux(&read_1, &read_2, 0x0000_0002, 0x1234_0000));
-
-        //challenge is valid if the address is the same but the value differs in read_1
-        let read_1 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
-        let read_2 = TraceRead::new(0x0000_0005, 0x1234_0000, LAST_STEP_INIT);
-        assert!(test_rom_aux(&read_1, &read_2, 0x0000_0002, 0x1234_0000));
-
-        //challenge is valid if the address is the same but the value differs in read_2
-        let read_1 = TraceRead::new(0x0000_0005, 0x1234_0000, LAST_STEP_INIT);
-        let read_2 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
-        assert!(test_rom_aux(&read_1, &read_2, 0x0000_0002, 0x1234_0000));
     }
 
     fn test_input_aux(
@@ -1246,7 +1291,13 @@ mod tests {
         stack.number_u32(pc);
         stack.number_u32(opcode);
 
-        opcode_challenge(&mut stack, chunk_base, opcodes_chunk);
+        opcode_challenge(
+            &mut stack,
+            &Chunk {
+                base_addr: chunk_base,
+                data: opcodes_chunk.to_vec(),
+            },
+        );
 
         stack.op_true();
         let r = stack.run();
@@ -1267,5 +1318,261 @@ mod tests {
         // can challenge invalid opcodes
         assert!(test_opcode_aux(0xab00_0000, 8888, 0xab00_0000, opcodes));
         assert!(test_opcode_aux(0xab00_0004, 8888, 0xab00_0000, opcodes));
+    }
+
+    fn test_initialized_aux(
+        read_1: &TraceRead,
+        read_2: &TraceRead,
+        read_selector: u8,
+        chunk: &Chunk,
+    ) -> bool {
+        let mut stack = StackTracker::new();
+
+        stack.number_u32(read_1.address);
+        stack.number_u32(read_1.value);
+        stack.number_u64(read_1.last_step);
+
+        stack.number_u32(read_2.address);
+        stack.number_u32(read_2.value);
+        stack.number_u64(read_2.last_step);
+
+        stack.byte(read_selector);
+
+        initialized_challenge(&mut stack, chunk);
+
+        stack.op_true();
+        stack.run().success
+    }
+
+    #[test]
+    fn test_initialized() {
+        let chunk = &Chunk {
+            base_addr: 0x1000_0000,
+            data: vec![0x1111_1111, 0x2222_2222, 0x3333_3333, 0x4444_4444],
+        };
+
+        // can't challenge not init state
+        let read_1 = TraceRead::new(0x1000_0000, 0x1234_5678, 1);
+        let read_2 = TraceRead::new(0x1000_0004, 0x1234_5678, 2);
+        assert!(!test_initialized_aux(&read_1, &read_2, 1, chunk));
+        assert!(!test_initialized_aux(&read_1, &read_2, 2, chunk));
+
+        // can't challenge if value is right
+        let read_1 = TraceRead::new(0x1000_0000, 0x1111_1111, LAST_STEP_INIT);
+        let read_2 = TraceRead::new(0x1000_0004, 0x2222_2222, LAST_STEP_INIT);
+        assert!(!test_initialized_aux(&read_1, &read_2, 1, chunk));
+        assert!(!test_initialized_aux(&read_1, &read_2, 2, chunk));
+
+        // can't challenge if address is outside chunk
+        let read_1 = TraceRead::new(0x0000_0004, 0x1234_5678, LAST_STEP_INIT);
+        let read_2 = TraceRead::new(0x0000_0008, 0x1234_5678, LAST_STEP_INIT);
+        assert!(!test_initialized_aux(&read_1, &read_2, 1, chunk));
+        assert!(!test_initialized_aux(&read_1, &read_2, 2, chunk));
+
+        // challenge is valid if the address is the same but the value differs in both
+        let read_1 = TraceRead::new(0x1000_0000, 0x1234_5678, LAST_STEP_INIT);
+        let read_2 = TraceRead::new(0x1000_0004, 0x1234_5678, LAST_STEP_INIT);
+        assert!(test_initialized_aux(&read_1, &read_2, 1, chunk));
+        assert!(test_initialized_aux(&read_1, &read_2, 2, chunk));
+
+        // challenge is valid if the address is the same but the value differs in read_1 and uses correct selector
+        let read_1 = TraceRead::new(0x1000_0000, 0x1234_5678, LAST_STEP_INIT);
+        let read_2 = TraceRead::new(0x1000_0004, 0x2222_2222, LAST_STEP_INIT);
+        assert!(test_initialized_aux(&read_1, &read_2, 1, chunk));
+        assert!(!test_initialized_aux(&read_1, &read_2, 2, chunk));
+
+        // challenge is valid if the address is the same but the value differs in read_2 and uses correct selector
+        let read_1 = TraceRead::new(0x1000_0000, 0x1111_1111, LAST_STEP_INIT);
+        let read_2 = TraceRead::new(0x1000_0004, 0x1234_5678, LAST_STEP_INIT);
+        assert!(!test_initialized_aux(&read_1, &read_2, 1, chunk));
+        assert!(test_initialized_aux(&read_1, &read_2, 2, chunk));
+    }
+
+    fn test_uninitialized_aux(
+        read_1: &TraceRead,
+        read_2: &TraceRead,
+        read_selector: u8,
+        sections: &SectionDefinition,
+    ) -> bool {
+        let mut stack = StackTracker::new();
+
+        stack.number_u32(read_1.address);
+        stack.number_u32(read_1.value);
+        stack.number_u64(read_1.last_step);
+
+        stack.number_u32(read_2.address);
+        stack.number_u32(read_2.value);
+        stack.number_u64(read_2.last_step);
+
+        stack.byte(read_selector);
+
+        uninitialized_challenge(&mut stack, sections);
+
+        stack.op_true();
+        stack.run().success
+    }
+
+    #[test]
+    fn test_uninitialized() {
+        let uninitialized_sections = &SectionDefinition {
+            ranges: vec![(0x1000_0000, 0x2000_0000), (0xA000_0000, 0xB000_0000)],
+        };
+
+        // can't challenge not init state
+        let read_1 = TraceRead::new(0x1000_0000, 0x1234_5678, 1);
+        let read_2 = TraceRead::new(0xA000_0000, 0x1234_5678, 2);
+        assert!(!test_uninitialized_aux(
+            &read_1,
+            &read_2,
+            1,
+            uninitialized_sections
+        ));
+        assert!(!test_uninitialized_aux(
+            &read_1,
+            &read_2,
+            2,
+            uninitialized_sections
+        ));
+
+        // can't challenge if value is right
+        let read_1 = TraceRead::new(0x1000_0000, 0, LAST_STEP_INIT);
+        let read_2 = TraceRead::new(0xA000_0000, 0, LAST_STEP_INIT);
+        assert!(!test_uninitialized_aux(
+            &read_1,
+            &read_2,
+            1,
+            uninitialized_sections
+        ));
+        assert!(!test_uninitialized_aux(
+            &read_1,
+            &read_2,
+            2,
+            uninitialized_sections
+        ));
+
+        // can't challenge if address is outside uninitialized sections
+        let read_1 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
+        let read_2 = TraceRead::new(0x0000_0002, 0x1234_5678, LAST_STEP_INIT);
+        assert!(!test_uninitialized_aux(
+            &read_1,
+            &read_2,
+            1,
+            uninitialized_sections
+        ));
+        assert!(!test_uninitialized_aux(
+            &read_1,
+            &read_2,
+            2,
+            uninitialized_sections
+        ));
+
+        // challenge is valid if the address is the same but the value differs in both
+        let read_1 = TraceRead::new(0x1000_0000, 0x1234_5678, LAST_STEP_INIT);
+        let read_2 = TraceRead::new(0xA000_0000, 0x1234_5678, LAST_STEP_INIT);
+        assert!(test_uninitialized_aux(
+            &read_1,
+            &read_2,
+            1,
+            uninitialized_sections
+        ));
+        assert!(test_uninitialized_aux(
+            &read_1,
+            &read_2,
+            2,
+            uninitialized_sections
+        ));
+
+        // challenge is valid if the address is the same but the value differs in read_1 and uses correct selector
+        let read_1 = TraceRead::new(0x1000_0000, 0x1234_5678, LAST_STEP_INIT);
+        let read_2 = TraceRead::new(0xA000_0000, 0, LAST_STEP_INIT);
+        assert!(test_uninitialized_aux(
+            &read_1,
+            &read_2,
+            1,
+            uninitialized_sections
+        ));
+        assert!(!test_uninitialized_aux(
+            &read_1,
+            &read_2,
+            2,
+            uninitialized_sections
+        ));
+
+        // challenge is valid if the address is the same but the value differs in read_2 and uses correct selector
+        let read_1 = TraceRead::new(0x1000_0000, 0, LAST_STEP_INIT);
+        let read_2 = TraceRead::new(0xA000_0000, 0x1234_5678, LAST_STEP_INIT);
+        assert!(!test_uninitialized_aux(
+            &read_1,
+            &read_2,
+            1,
+            uninitialized_sections
+        ));
+        assert!(test_uninitialized_aux(
+            &read_1,
+            &read_2,
+            2,
+            uninitialized_sections
+        ));
+    }
+
+    fn test_read_value_aux(read: TraceRead, write: TraceWrite, write_step: u64) -> bool {
+        let stack = &mut StackTracker::new();
+
+        stack.number_u32(read.address);
+        stack.number_u32(read.value);
+        stack.number_u64(read.last_step);
+
+        stack.number_u32(read.address);
+        stack.number_u32(read.value);
+        stack.number_u64(read.last_step);
+
+        stack.byte(1);
+
+        stack.number_u32(write.address);
+        stack.number_u32(write.value);
+        stack.number_u64(write_step);
+
+        read_value_challenge(stack);
+
+        stack.op_true();
+        stack.run().success
+    }
+    #[test]
+    fn test_read_value() {
+        // can't challenge if read is correct
+        let read = TraceRead::new(0x1000_0000, 0, 100);
+        let step = 100;
+        let write = TraceWrite::new(0x1000_0000, 0);
+        assert!(!test_read_value_aux(read, write, step));
+
+        // can't challenge if write is older
+        let read = TraceRead::new(0x1000_0000, 0, 100);
+        let step = 50;
+        let write = TraceWrite::new(0x1000_0000, 100);
+        assert!(!test_read_value_aux(read, write, step));
+
+        // can't challenge if write is newer but for different address
+        let read = TraceRead::new(0x1000_0000, 0, 100);
+        let step = 200;
+        let write = TraceWrite::new(0x2000_0000, 100);
+        assert!(!test_read_value_aux(read, write, step));
+
+        // challenge is valid if write is newer for the same address
+        let read = TraceRead::new(0x1000_0000, 0, 100);
+        let write_step = 200;
+        let write = TraceWrite::new(0x1000_0000, 100);
+        assert!(test_read_value_aux(read, write, write_step));
+
+        // challenge is valid if write is at the same step but for different address
+        let read = TraceRead::new(0x1000_0000, 0, 100);
+        let write_step = 100;
+        let write = TraceWrite::new(0x2000_0000, 100);
+        assert!(test_read_value_aux(read, write, write_step));
+
+        // challenge is valid if write is at the same step for different address but different value
+        let read = TraceRead::new(0x1000_0000, 0, 100);
+        let write_step = 100;
+        let write = TraceWrite::new(0x1000_0000, 100);
+        assert!(test_read_value_aux(read, write, write_step));
     }
 }

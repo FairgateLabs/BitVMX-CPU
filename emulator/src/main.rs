@@ -3,13 +3,17 @@ use bitvmx_cpu_definitions::{challenge::EmulatorResultType, trace::TraceRWStep};
 use clap::{Parser, Subcommand};
 use emulator::{
     constants::REGISTERS_BASE_ADDRESS,
-    decision::challenge::{
-        prover_execute, prover_final_trace, prover_get_hashes_for_round, verifier_check_execution,
-        verifier_choose_challenge, verifier_choose_segment, ForceChallenge, ForceCondition,
+    decision::{
+        challenge::{
+            prover_execute, prover_final_trace, prover_get_hashes_for_round,
+            verifier_check_execution, verifier_choose_challenge, verifier_choose_segment,
+            ForceChallenge, ForceCondition,
+        },
+        nary_search::NArySearchType,
     },
     executor::{
         fetcher::execute_program,
-        utils::{FailConfiguration, FailExecute, FailOpcode, FailReads, FailWrite},
+        utils::{FailConfiguration, FailExecute, FailOpcode, FailReads, FailTraceWrite, FailWrite},
     },
     loader::program::{generate_rom_commitment, load_elf, Program},
     EmulatorError, ExecutionResult,
@@ -112,6 +116,10 @@ enum Commands {
         /// Command File to write the result
         #[arg(short, long, value_name = "COMMAND_PATH")]
         command_file: String,
+
+        /// Nary Search type
+        #[arg(short, long, value_name = "NARY_TYPE")]
+        nary_type: NArySearchType,
     },
 
     VerifierChooseSegment {
@@ -138,6 +146,10 @@ enum Commands {
         /// Command File to write the result
         #[arg(short, long, value_name = "COMMAND_PATH")]
         command_file: String,
+
+        /// Nary Search type
+        #[arg(short, long, value_name = "NARY_TYPE")]
+        nary_type: NArySearchType,
     },
 
     ProverFinalTrace {
@@ -160,6 +172,10 @@ enum Commands {
         /// Command File to write the result
         #[arg(short, long, value_name = "COMMAND_PATH")]
         command_file: String,
+
+        /// Nary Search type
+        #[arg(short, long, value_name = "NARY_TYPE")]
+        nary_type: NArySearchType,
     },
 
     VerifierChooseChallenge {
@@ -265,6 +281,12 @@ enum Commands {
         #[arg(long)]
         fail_hash: Option<u64>,
 
+        /// Fail producing hash but only for steps until a specific one.
+        /// fail_hash will propagate the error to the next steps due to the hash of a step depending on the previous hash.
+        /// this one doesn't since we modify the hash after all the hashes have been calculated in get_round_hashes
+        #[arg(long)]
+        fail_hash_until: Option<u64>,
+
         /// Fail producing the write value for a specific step
         #[arg(long, value_names = &["step", "fake_trace"], num_args = 2)]
         fail_execute: Option<Vec<String>>,
@@ -284,6 +306,10 @@ enum Commands {
         /// Fail write at a given step
         #[arg(long, value_names = &["step", "address_original", "value", "modified_address"], num_args = 4)]
         fail_write: Option<Vec<String>>,
+
+        /// Fail trace write **after** calculating the step hash
+        #[arg(long, value_names = &["step", "address", "value"])]
+        fail_trace_write: Option<Vec<String>>,
 
         /// Fail while reading the pc at the given step
         #[arg(long)]
@@ -340,11 +366,13 @@ fn main() -> Result<(), EmulatorError> {
             sections,
             checkpoint_path,
             fail_hash,
+            fail_hash_until,
             fail_execute: fail_execute_args,
             list,
             fail_read_1: fail_read_1_args,
             fail_read_2: fail_read_2_args,
             fail_write: fail_write_args,
+            fail_trace_write: fail_trace_write_args,
             fail_opcode: fail_opcode_args,
             dump_mem,
             fail_pc,
@@ -404,11 +432,14 @@ fn main() -> Result<(), EmulatorError> {
             };
 
             let fail_write = fail_write_args.as_ref().map(FailWrite::new);
+            let fail_trace_write = fail_trace_write_args.as_ref().map(FailTraceWrite::new);
             let fail_opcode = fail_opcode_args.as_ref().map(FailOpcode::new);
 
             let debugvar = *debug;
             let fail_config = FailConfiguration {
                 fail_hash: *fail_hash,
+                fail_hash_until: *fail_hash_until,
+                fail_trace_write,
                 fail_execute,
                 fail_reads,
                 fail_write,
@@ -505,6 +536,7 @@ fn main() -> Result<(), EmulatorError> {
             v_decision,
             fail_config_prover,
             command_file,
+            nary_type,
         }) => {
             let result = prover_get_hashes_for_round(
                 pdf,
@@ -512,6 +544,7 @@ fn main() -> Result<(), EmulatorError> {
                 *round_number,
                 *v_decision,
                 fail_config_prover.clone(),
+                *nary_type,
             )?;
             info!("Prover get hashes for round: {:?}", result);
 
@@ -531,6 +564,7 @@ fn main() -> Result<(), EmulatorError> {
             hashes,
             fail_config_verifier,
             command_file,
+            nary_type,
         }) => {
             let result = verifier_choose_segment(
                 pdf,
@@ -538,6 +572,7 @@ fn main() -> Result<(), EmulatorError> {
                 *round_number,
                 hashes.clone(),
                 fail_config_verifier.clone(),
+                *nary_type,
             )?;
             info!("Verifier choose segment: {:?}", result);
 
@@ -556,12 +591,14 @@ fn main() -> Result<(), EmulatorError> {
             v_decision,
             fail_config_prover,
             command_file,
+            nary_type,
         }) => {
             let result: TraceRWStep = prover_final_trace(
                 pdf,
                 checkpoint_prover_path,
                 *v_decision,
                 fail_config_prover.clone(),
+                *nary_type,
             )?;
             info!("Prover final trace: {:?}", result);
 
