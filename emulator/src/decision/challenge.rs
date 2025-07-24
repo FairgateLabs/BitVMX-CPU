@@ -416,8 +416,8 @@ pub fn verifier_choose_challenge(
             (trace.read_2.clone(), 2)
         };
 
-        let conflict_address = conflict_trace.address;
-        let section = program.find_section(conflict_address)?;
+        let section_idx = program.find_section_idx(conflict_address)?;
+        let section = program.sections.get(section_idx).unwrap();
 
         if (conflict_trace.last_step == LAST_STEP_INIT && force == ForceChallenge::No)
             || force == ForceChallenge::InputData
@@ -435,13 +435,7 @@ pub fn verifier_choose_challenge(
                 || force == ForceChallenge::InputData
             {
                 info!("Verifier choose to challenge invalid INPUT DATA");
-                let value = program.read_mem(conflict_address).or_else(|_| {
-                    Ok::<u32, ExecutionResult>(
-                        program
-                            .registers
-                            .get(program.registers.get_original_idx(conflict_address)),
-                    )
-                })?;
+                let value = program.read_mem(conflict_address)?;
 
                 return Ok(ChallengeType::InputData(
                     trace.read_1,
