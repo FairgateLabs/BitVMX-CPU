@@ -152,7 +152,7 @@ pub struct FailWrite {
 impl FailWrite {
     pub fn new(args: &Vec<String>) -> Self {
         Self {
-            step: parse_value::<u64>(&args[0]) - 1,
+            step: parse_value::<u64>(&args[0]),
             address_original: parse_value::<u32>(&args[1]),
             value: parse_value::<u32>(&args[2]),
             modified_address: parse_value::<u32>(&args[3]),
@@ -407,7 +407,7 @@ mod utils_tests {
             "4026531900".to_string(),
         ];
         let fail_write = FailWrite::new(&fail_write_args);
-        program.step = 9;
+        program.step = 10;
         fail_write.patch_mem(&mut program);
         let idx = program.registers.get_original_idx(4026531900);
 
@@ -435,7 +435,7 @@ mod utils_tests {
             "4096".to_string(),
         ];
         let fail_write = FailWrite::new(&fail_write_args);
-        program.step = 9;
+        program.step = 10;
         fail_write.patch_mem(&mut program);
 
         assert_eq!(program.read_mem(4096).unwrap(), 10);
