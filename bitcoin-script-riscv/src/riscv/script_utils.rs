@@ -636,6 +636,9 @@ pub fn is_lower_than(
     than: StackVariable,
     unsigned: bool,
 ) -> StackVariable {
+    assert_eq!(stack.get_size(value), stack.get_size(than));
+    let size = stack.get_size(value);
+
     if !unsigned {
         stack.copy_var_sub_n(value, 0);
         if_greater(stack, 7, 1, 0); //1 if negative
@@ -643,6 +646,7 @@ pub fn is_lower_than(
         if_greater(stack, 7, 1, 0); //1 if negative
         stack.op_2dup();
         stack.op_equal();
+        let n = 2_i32.pow(size + 1);
         stack
             .custom(
                 script! {
@@ -652,9 +656,9 @@ pub fn is_lower_than(
                     OP_ELSE
                         OP_GREATERTHAN
                         OP_IF
-                            512
+                            { n }
                         OP_ELSE
-                            { -512 }
+                            { -n }
                         OP_ENDIF
                     OP_ENDIF
                 },
@@ -666,8 +670,8 @@ pub fn is_lower_than(
             .unwrap();
     }
 
-    for i in 0..8 {
-        let n: i32 = 2_i32.pow(8 - i);
+    for i in 0..size {
+        let n: i32 = 2_i32.pow(size - i);
         stack.move_var_sub_n(value, 0);
         stack.move_var_sub_n(than, 0);
         stack.op_2dup();
@@ -677,7 +681,7 @@ pub fn is_lower_than(
                 script! {
                     OP_IF
                         OP_2DROP
-                        { n}
+                        { n }
                     OP_ELSE
                         OP_EQUAL
                         OP_IF
@@ -694,7 +698,7 @@ pub fn is_lower_than(
             )
             .unwrap();
     }
-    for _ in 0..7 {
+    for _ in 0..size - 1 {
         stack.op_add();
     }
     if !unsigned {
@@ -1736,6 +1740,24 @@ mod tests {
         test_lower_helper(0x0000_0000, 0xffff_f800, 0, false);
     }
 
+    fn test_lower_helper_64bits(value: u64, than: u64, expected: u32, unsigned: bool) {
+        let mut stack = StackTracker::new();
+        let value = stack.number_u64(value);
+        let than = stack.number_u64(than);
+        is_lower_than(&mut stack, value, than, unsigned);
+        stack.number(expected);
+        stack.op_equal();
+        assert!(stack.run().success);
+    }
+
+    #[test]
+    fn test_lower_64bits() {
+        test_lower_helper_64bits(0x0000_0000_0000_0000, 0xffff_ffff_ffff_ffff, 1, true);
+        test_lower_helper_64bits(0x0000_0000_0000_0000, 0xffff_ffff_ffff_ffff, 0, false);
+        test_lower_helper_64bits(0xf000_0000_0000_0000, 0xffff_ffff_ffff_ffff, 1, false);
+        test_lower_helper_64bits(0x0000_0000_0000_0000, 0xffff_f800_0000_0000, 0, false);
+    }
+
     #[test]
     fn test_shift_dynamic() {
         for y in 0..16 {
@@ -1973,9 +1995,25 @@ mod tests {
             data: vec![0x1111_1111, 0x2222_2222],
         };
 
-        assert!(test_verify_wrong_chunk_value_aux(0x1000_0000, 0x1234_5678, chunk));
-        assert!(test_verify_wrong_chunk_value_aux(0x1000_0004, 0x1234_5678, chunk));
-        assert!(!test_verify_wrong_chunk_value_aux(0x1000_0000, 0x1111_1111, chunk));
-        assert!(!test_verify_wrong_chunk_value_aux(0x1000_0004, 0x2222_2222, chunk));
+        assert!(test_verify_wrong_chunk_value_aux(
+            0x1000_0000,
+            0x1234_5678,
+            chunk
+        ));
+        assert!(test_verify_wrong_chunk_value_aux(
+            0x1000_0004,
+            0x1234_5678,
+            chunk
+        ));
+        assert!(!test_verify_wrong_chunk_value_aux(
+            0x1000_0000,
+            0x1111_1111,
+            chunk
+        ));
+        assert!(!test_verify_wrong_chunk_value_aux(
+            0x1000_0004,
+            0x2222_2222,
+            chunk
+        ));
     }
 }
