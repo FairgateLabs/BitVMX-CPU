@@ -244,6 +244,7 @@ pub struct FailConfiguration {
     pub fail_trace_write: Option<FailTraceWrite>,
     pub fail_pc: Option<u64>,
     pub fail_opcode: Option<FailOpcode>,
+    pub fail_memory_protection: bool,
 }
 
 impl FailConfiguration {
@@ -292,6 +293,12 @@ impl FailConfiguration {
     pub fn new_fail_opcode(fail_opcode: FailOpcode) -> Self {
         Self {
             fail_opcode: Some(fail_opcode),
+            ..Default::default()
+        }
+    }
+    pub fn new_fail_memory_protection() -> Self {
+        Self {
+            fail_memory_protection: true,
             ..Default::default()
         }
     }

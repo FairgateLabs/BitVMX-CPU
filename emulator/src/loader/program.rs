@@ -357,6 +357,19 @@ impl Program {
             .find(|section| section.name == name)
     }
 
+    pub fn read_instruction(&self, address: u32) -> Result<u32, ExecutionResult> {
+        if cfg!(target_endian = "big") {
+            panic!("Big endian machine not supported");
+        }
+        let section = self.find_section(address)?;
+        if !section.is_code {
+            return Err(ExecutionResult::ReadFromNonCodeSection);
+        }
+        Ok(u32::from_be(
+            section.data[(address - section.start) as usize / 4],
+        ))
+    }
+
     pub fn read_mem(&self, address: u32) -> Result<u32, ExecutionResult> {
         if cfg!(target_endian = "big") {
             panic!("Big endian machine not supported");

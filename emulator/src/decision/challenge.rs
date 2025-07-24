@@ -284,7 +284,7 @@ pub fn verifier_choose_challenge(
     let mut verifier_log = VerifierChallengeLog::load(checkpoint_path)?;
     let conflict_step_log = &mut verifier_log.conflict_step_log;
     conflict_step_log.final_trace = trace.clone();
-    
+
     let (step_hash, next_hash) = get_hashes(
         &nary_def.step_mapping(&conflict_step_log.verifier_decisions),
         &conflict_step_log.prover_hash_rounds,
@@ -501,8 +501,8 @@ pub fn verifier_choose_challenge(
             read_challenge_log.base_step = 0;
             read_challenge_log.verifier_decisions.push(bits);
             read_challenge_log
-            .prover_hash_rounds
-            .push(conflict_step_log.prover_hash_rounds[0].clone());
+                .prover_hash_rounds
+                .push(conflict_step_log.prover_hash_rounds[0].clone());
             verifier_log.read_step = step_to_challenge - 1;
             verifier_log.read_selector = read_selector;
             verifier_log.save(checkpoint_path)?;
@@ -1836,6 +1836,28 @@ mod tests {
             ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::ReadValueNArySearch,
             ForceChallenge::ReadValue,
+        );
+    }
+
+    #[test]
+    fn test_challenge_pc_read_from_non_code() {
+        init_trace();
+
+        let fail_mem_protection = FailConfiguration::new_fail_memory_protection();
+
+        test_challenge_aux(
+            "audit_01",
+            "audit_01.yaml",
+            0,
+            false,
+            Some(fail_mem_protection),
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+            ForceChallenge::No,
         );
     }
 }
