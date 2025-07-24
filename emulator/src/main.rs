@@ -112,6 +112,10 @@ enum Commands {
         /// Command File to write the result
         #[arg(short, long, value_name = "COMMAND_PATH")]
         command_file: String,
+
+        /// Nary Search type
+        #[arg(short, long, value_name = "NARY_TYPE")]
+        nary_type: NArySearchType,
     },
 
     VerifierChooseSegment {
@@ -138,6 +142,10 @@ enum Commands {
         /// Command File to write the result
         #[arg(short, long, value_name = "COMMAND_PATH")]
         command_file: String,
+
+        /// Nary Search type
+        #[arg(short, long, value_name = "NARY_TYPE")]
+        nary_type: NArySearchType,
     },
 
     ProverFinalTrace {
@@ -160,6 +168,10 @@ enum Commands {
         /// Command File to write the result
         #[arg(short, long, value_name = "COMMAND_PATH")]
         command_file: String,
+
+        /// Nary Search type
+        #[arg(short, long, value_name = "NARY_TYPE")]
+        nary_type: NArySearchType,
     },
 
     VerifierChooseChallenge {
@@ -504,6 +516,7 @@ fn main() -> Result<(), EmulatorError> {
             v_decision,
             fail_config_prover,
             command_file,
+            nary_type,
         }) => {
             let result = prover_get_hashes_for_round(
                 pdf,
@@ -511,6 +524,7 @@ fn main() -> Result<(), EmulatorError> {
                 *round_number,
                 *v_decision,
                 fail_config_prover.clone(),
+                *nary_type,
             )?;
             info!("Prover get hashes for round: {:?}", result);
 
@@ -530,6 +544,7 @@ fn main() -> Result<(), EmulatorError> {
             hashes,
             fail_config_verifier,
             command_file,
+            nary_type,
         }) => {
             let result = verifier_choose_segment(
                 pdf,
@@ -537,6 +552,7 @@ fn main() -> Result<(), EmulatorError> {
                 *round_number,
                 hashes.clone(),
                 fail_config_verifier.clone(),
+                *nary_type,
             )?;
             info!("Verifier choose segment: {:?}", result);
 
@@ -555,12 +571,14 @@ fn main() -> Result<(), EmulatorError> {
             v_decision,
             fail_config_prover,
             command_file,
+            nary_type,
         }) => {
             let result: TraceRWStep = prover_final_trace(
                 pdf,
                 checkpoint_prover_path,
                 *v_decision,
                 fail_config_prover.clone(),
+                *nary_type,
             )?;
             info!("Prover final trace: {:?}", result);
 

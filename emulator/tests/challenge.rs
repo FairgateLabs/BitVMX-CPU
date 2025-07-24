@@ -1,6 +1,6 @@
 use emulator::{
     constants::REGISTERS_BASE_ADDRESS,
-    decision::nary_search::{choose_segment, ExecutionHashes},
+    decision::nary_search::{choose_segment, ExecutionHashes, NArySearchType},
     executor::verifier::verify_script,
     loader::program_definition::ProgramDefinition,
 };
@@ -42,7 +42,7 @@ fn test_nary_search_trace_aux(input: u8, expect_err: bool, checkpoint_path: &str
         let my_hashes = ExecutionHashes::from_hexstr(&reply_hashes);
 
         let (bits, new_base, new_selected) =
-            choose_segment(&defs, base, selected, round, &claim_hashes, &my_hashes);
+            choose_segment(&defs, base, selected, round, &claim_hashes, &my_hashes, NArySearchType::ConflictStep);
         base = new_base;
         selected = new_selected;
 

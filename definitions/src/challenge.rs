@@ -27,6 +27,13 @@ pub enum ChallengeType {
         Option<SectionDefinition>, // register sections
         Option<SectionDefinition>, // code sections
     ),
+    ReadValueNArySearch(u32),
+    ReadValue {
+        read_1: TraceRead,
+        read_2: TraceRead,
+        read_selector: u8,
+        trace: TraceRWStep,
+    },
     No,
 }
 

@@ -1,7 +1,40 @@
 use std::collections::HashMap;
 
+use clap::ValueEnum;
 use serde::Serialize;
 use tracing::{error, info};
+
+use crate::decision::execution_log::{
+    ProverChallengeLog, ProverNAryLog, VerifierChallengeLog, VerifierNAryLog,
+};
+
+#[derive(Clone, Copy, PartialEq, ValueEnum)]
+pub enum NArySearchType {
+    ConflictStep,
+    ReadValueChallenge,
+}
+
+impl NArySearchType {
+    pub fn get_prover_nary_log<'a>(
+        &'a self,
+        challenge_log: &'a mut ProverChallengeLog,
+    ) -> &'a mut ProverNAryLog {
+        match self {
+            Self::ConflictStep => &mut challenge_log.conflict_step_log,
+            Self::ReadValueChallenge => &mut challenge_log.read_challenge_log,
+        }
+    }
+
+    pub fn get_verifier_nary_log<'a>(
+        &'a self,
+        challenge_log: &'a mut VerifierChallengeLog,
+    ) -> &'a mut VerifierNAryLog {
+        match self {
+            Self::ConflictStep => &mut challenge_log.conflict_step_log,
+            Self::ReadValueChallenge => &mut challenge_log.read_challenge_log,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct NArySearchDefinition {
@@ -157,19 +190,26 @@ pub fn choose_segment(
     round: u8,
     prover_hashes: &ExecutionHashes,
     my_hashes: &ExecutionHashes,
+    nary_type: NArySearchType,
 ) -> (u32, u64, u64) {
     if prover_hashes.hashes.len() != my_hashes.hashes.len() {
         error!("Prover and my hashes should have the same length");
     }
 
     // finds if there is any difference in the hashes
-    let mut selection = prover_hashes.hashes.len() + 1;
+    let mut selection = if nary_type == NArySearchType::ConflictStep {
+        prover_hashes.hashes.len() + 1
+    } else {
+        1
+    };
     for i in 0..prover_hashes.hashes.len() {
         let prover_hash = &prover_hashes.hashes[i];
         let my_hash = &my_hashes.hashes[i];
         if prover_hash != my_hash {
             selection = i + 1;
-            break;
+            if nary_type == NArySearchType::ConflictStep {
+                break;
+            };
         }
     }
 
@@ -177,12 +217,19 @@ pub fn choose_segment(
     //println!("Selection: {}", selection);
     let mismatch_step = nary_defs.step_from_base_and_bits(round, base_step, selection as u32) - 1;
     //println!("Mismatch step: {}", mismatch_step);
-    let lower_limit_bits = if selected_step < mismatch_step {
-        nary_defs.step_bits_for_round(round, selected_step)
+    let (lower_limit_bits, choice) = if selected_step < mismatch_step {
+        if nary_type == NArySearchType::ConflictStep {
+            (nary_defs.step_bits_for_round(round, selected_step), selected_step)
+        } else {
+            (selection as u32, mismatch_step + 1)
+        }
     } else {
-        selection as u32 - 1
+        if nary_type == NArySearchType::ConflictStep {
+            (selection as u32 - 1, mismatch_step)
+        } else {
+            (nary_defs.step_bits_for_round(round, selected_step), selected_step)
+        }
     };
-    let choice = mismatch_step.min(selected_step);
 
     //println!("Lower limit bits: {}", lower_limit_bits);
     let base_step = nary_defs.step_from_base_and_bits(round, base_step, lower_limit_bits);
@@ -331,6 +378,7 @@ mod tests {
             round,
             &prover_hashes.into(),
             &my_hashes.into(),
+            NArySearchType::ConflictStep,
         );
         assert_eq!(bits, exp_bits);
         assert_eq!(base, exp_step);
