@@ -498,13 +498,13 @@ pub fn verifier_choose_challenge(
 
             let read_challenge_log = &mut verifier_log.read_challenge_log;
             read_challenge_log.step_to_challenge = step_to_challenge - 1;
-            read_challenge_log.read_step = step_to_challenge - 1;
-            read_challenge_log.read_selector = read_selector;
             read_challenge_log.base_step = 0;
             read_challenge_log.verifier_decisions.push(bits);
             read_challenge_log
-                .prover_hash_rounds
-                .push(conflict_step_log.prover_hash_rounds[0].clone());
+            .prover_hash_rounds
+            .push(conflict_step_log.prover_hash_rounds[0].clone());
+            verifier_log.read_step = step_to_challenge - 1;
+            verifier_log.read_selector = read_selector;
             verifier_log.save(checkpoint_path)?;
 
             return Ok(ChallengeType::ReadValueNArySearch(bits));
@@ -546,14 +546,14 @@ pub fn verifier_choose_challenge_read_challenge(
         ));
     };
 
-    let read_step = read_challenge_log.read_step;
+    let read_step = verifier_log.read_step;
     if (read_step == challenge_step && force == ForceChallenge::No)
         || force == ForceChallenge::ReadValue
     {
         let conflict_step_trace = verifier_log.conflict_step_log.final_trace;
         let read_1 = conflict_step_trace.read_1;
         let read_2 = conflict_step_trace.read_2;
-        let read_selector = read_challenge_log.read_selector;
+        let read_selector = verifier_log.read_selector;
 
         return Ok(ChallengeType::ReadValue {
             read_1,

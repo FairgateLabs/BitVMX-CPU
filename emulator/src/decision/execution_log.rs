@@ -58,9 +58,7 @@ impl ProverChallengeLog {
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct VerifierNAryLog {
     pub base_step: u64,
-    pub read_selector: u8,
     pub step_to_challenge: u64,
-    pub read_step: u64,
     pub verifier_decisions: Vec<u32>,
     pub prover_hash_rounds: Vec<Vec<String>>,
     pub verifier_hash_rounds: Vec<Vec<String>>,
@@ -83,6 +81,8 @@ pub struct VerifierChallengeLog {
     pub input: Vec<u8>,
     pub conflict_step_log: VerifierNAryLog,
     pub read_challenge_log: VerifierNAryLog,
+    pub read_selector: u8,
+    pub read_step: u64,
 }
 
 impl VerifierChallengeLog {
@@ -98,6 +98,8 @@ impl VerifierChallengeLog {
             input,
             conflict_step_log: VerifierNAryLog::new(step_to_challenge),
             read_challenge_log: VerifierNAryLog::default(),
+            read_selector: 0,
+            read_step: 0,
         }
     }
 
