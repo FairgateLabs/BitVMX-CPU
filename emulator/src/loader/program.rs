@@ -286,6 +286,16 @@ impl Program {
                 }
             }
         }
+
+        let low_section = self.sections.iter().find(|section| section.start < 0x1000);
+
+        if let Some(low_section) = low_section {
+            return Err(EmulatorError::CantLoadPorgram(format!(
+                "Cannot load program: section '{}' starts at a low memory address (0x{:X}), which is below the allowed threshold of 0x1000.",
+                low_section.name,
+                low_section.start,
+            )));
+        }
         Ok(())
     }
 
