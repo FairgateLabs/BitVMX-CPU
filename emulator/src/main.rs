@@ -204,6 +204,28 @@ enum Commands {
         command_file: String,
     },
 
+    VerifierChooseChallengeForReadChallenge {
+        /// Yaml file to load
+        #[arg(short, long, value_name = "FILE")]
+        pdf: String,
+
+        /// Checkpoint verifier path
+        #[arg(short, long, value_name = "CHECKPOINT_VERIFIER_PATH")]
+        checkpoint_verifier_path: String,
+
+        /// Prover final trace
+        #[arg(short, long, value_name = "PROVER_FINAL_TRACE")]
+        prover_final_trace: TraceRWStep,
+
+        /// Force
+        #[arg(short, long, default_value = "no")]
+        force: ForceChallenge,
+
+        /// Command File to write the result
+        #[arg(short, long, value_name = "COMMAND_PATH")]
+        command_file: String,
+    },
+
     ///Generate the instruction mapping
     InstructionMapping,
 
@@ -625,6 +647,29 @@ fn main() -> Result<(), EmulatorError> {
                 force.clone(),
                 fail_config_verifier.clone(),
                 false,
+            )?;
+            info!("Verifier choose challenge: {:?}", result);
+
+            let result = EmulatorResultType::VerifierChooseChallengeResult {
+                challenge: result.clone(),
+            }
+            .to_value()?;
+            let mut file = create_or_open_file(command_file);
+            file.write_all(result.to_string().as_bytes())
+                .expect("Failed to write JSON to file");
+        }
+        Some(Commands::VerifierChooseChallengeForReadChallenge {
+            pdf,
+            checkpoint_verifier_path,
+            prover_final_trace,
+            force,
+            command_file,
+        }) => {
+            let result = verifier_choose_challenge_for_read_challenge(
+                pdf,
+                checkpoint_verifier_path,
+                prover_final_trace.clone(),
+                force.clone(),
             )?;
             info!("Verifier choose challenge: {:?}", result);
 

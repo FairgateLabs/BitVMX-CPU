@@ -514,7 +514,7 @@ pub fn verifier_choose_challenge(
     Ok(ChallengeType::No)
 }
 
-pub fn verifier_choose_challenge_read_challenge(
+pub fn verifier_choose_challenge_for_read_challenge(
     program_definition_file: &str,
     checkpoint_path: &str,
     trace: TraceRWStep,
@@ -809,7 +809,7 @@ mod tests {
                 .unwrap();
                 info!("Prover final trace: {:?}", final_trace.to_csv());
 
-                verifier_choose_challenge_read_challenge(
+                verifier_choose_challenge_for_read_challenge(
                     pdf,
                     chk_verifier_path,
                     final_trace,
