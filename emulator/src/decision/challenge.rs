@@ -99,25 +99,24 @@ pub fn verifier_check_execution(
     let mut should_challenge = true;
 
     if result == ExecutionResult::Halt(0, last_step) {
-        info!("The program executed successfully with the prover input");
-        info!("Do not challenge.");
-
         if claim_last_step != last_step || claim_last_hash != last_hash {
-            warn!("The prover provided a valid input, but the last step or hash differs");
-            warn!("Do not challenge (as the challenge is not waranteed to be successful)");
-            warn!("Report this case to be evaluated by the security team");
-            should_challenge = force_condition == ForceCondition::ValidInputWrongStepOrHash
-                || force_condition == ForceCondition::Always;
+            if force_condition == ForceCondition::ValidInputWrongStepOrHash {
+                should_challenge = true;
+            } else {
+                warn!("The prover provided a valid input, but the last step or hash differs");
+                warn!("Do not challenge (as the challenge is not waranteed to be successful)");
+                warn!("Report this case to be evaluated by the security team");
+            }
         } else {
-            should_challenge = force_condition == ForceCondition::ValidInputStepAndHash
-                || force_condition == ForceCondition::Always;
+            should_challenge = force_condition == ForceCondition::ValidInputStepAndHash;
         }
     }
 
-    // if !should_challenge {
-    //     // TODO: Should be removed after here, not creating challenge_log.
-    //     return Ok(None);
-    // }
+    if !should_challenge && force_condition != ForceCondition::Always {
+        info!("The program executed successfully with the prover input");
+        info!("Do not challenge.");
+        return Ok(None);
+    }
 
     warn!("There is a discrepancy between the prover and verifier execution");
     warn!("This execution will be challenged");
@@ -138,11 +137,6 @@ pub fn verifier_check_execution(
         step_to_challenge,
     );
     challenge_log.save(checkpoint_path)?;
-
-    if !should_challenge {
-        // TODO: Remove
-        return Ok(None);
-    }
 
     Ok(Some(step_to_challenge))
 }
