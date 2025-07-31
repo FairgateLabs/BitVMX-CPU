@@ -72,15 +72,13 @@ impl ProgramDefinition {
             )));
         }
 
-        let mut checkpoint_step = 0;
-        loop {
-            if step < checkpoint_step + CHECKPOINT_SIZE {
-                break;
-            }
-            checkpoint_step += CHECKPOINT_SIZE;
-        }
+        let checkpoint_step = (step / CHECKPOINT_SIZE) * CHECKPOINT_SIZE;
 
-        Program::deserialize_from_file(checkpoint_path, checkpoint_step)
+        if checkpoint_step == 0 {
+            self.load_program()
+        } else {
+            Program::deserialize_from_file(checkpoint_path, checkpoint_step)
+        }
     }
 
     pub fn execute_helper(
@@ -89,6 +87,7 @@ impl ProgramDefinition {
         input_data: Vec<u8>,
         steps: Option<Vec<u64>>,
         fail_config: Option<FailConfiguration>,
+        save_non_checkpoint_steps: bool,
     ) -> Result<(ExecutionResult, FullTrace), EmulatorError> {
         let checkpoint_path_str = checkpoint_path.to_string();
         let (mut program, checkpoint_path, output_trace) = match &steps {
@@ -117,6 +116,7 @@ impl ProgramDefinition {
             steps,
             None,
             fail_config.unwrap_or_default(),
+            save_non_checkpoint_steps,
         ))
     }
 
@@ -125,9 +125,15 @@ impl ProgramDefinition {
         input_data: Vec<u8>,
         checkpoint_path: &str,
         fail_config: Option<FailConfiguration>,
+        save_non_checkpoint_steps: bool,
     ) -> Result<(ExecutionResult, u64, String), EmulatorError> {
-        let (result, trace) =
-            self.execute_helper(checkpoint_path, input_data, None, fail_config)?;
+        let (result, trace) = self.execute_helper(
+            checkpoint_path,
+            input_data,
+            None,
+            fail_config,
+            save_non_checkpoint_steps,
+        )?;
 
         if trace.len() == 0 {
             return Err(EmulatorError::CantObtainTrace);
@@ -145,6 +151,7 @@ impl ProgramDefinition {
     pub fn get_round_hashes(
         &self,
         checkpoint_path: &str,
+        input: Vec<u8>,
         round: u8,
         base: u64,
         fail_config: Option<FailConfiguration>,
@@ -157,8 +164,13 @@ impl ProgramDefinition {
         let required_hashes = steps.len();
         steps.insert(0, base); //asks base step as it should be always obtainable
 
-        let (_result, trace) =
-            self.execute_helper(checkpoint_path, vec![], Some(steps), fail_config.clone())?;
+        let (_result, trace) = self.execute_helper(
+            checkpoint_path,
+            input,
+            Some(steps),
+            fail_config.clone(),
+            false,
+        )?;
         // at least the base step should be present
         if trace.len() == 0 {
             return Err(EmulatorError::CantObtainTrace);
@@ -201,12 +213,13 @@ impl ProgramDefinition {
     pub fn get_trace_step(
         &self,
         checkpoint_path: &str,
+        input: Vec<u8>,
         step: u64,
         fail_config: Option<FailConfiguration>,
     ) -> Result<TraceRWStep, EmulatorError> {
         let steps = vec![step];
         let (_result, trace) =
-            self.execute_helper(checkpoint_path, vec![], Some(steps), fail_config)?;
+            self.execute_helper(checkpoint_path, input, Some(steps), fail_config, false)?;
         // at least the base step should be present
         if trace.len() == 0 {
             return Err(EmulatorError::CantObtainTrace);

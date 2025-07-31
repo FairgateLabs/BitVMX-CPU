@@ -28,10 +28,15 @@ pub fn prover_execute(
     checkpoint_path: &str,
     force: bool,
     fail_config: Option<FailConfiguration>,
+    save_non_checkpoint_steps: bool,
 ) -> Result<(ExecutionResult, u64, String), EmulatorError> {
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
-    let (result, last_step, last_hash) =
-        program_def.get_execution_result(input.clone(), checkpoint_path, fail_config)?;
+    let (result, last_step, last_hash) = program_def.get_execution_result(
+        input.clone(),
+        checkpoint_path,
+        fail_config,
+        save_non_checkpoint_steps,
+    )?;
     if result != ExecutionResult::Halt(0, last_step) {
         error!(
             "The execution of the program {} failed with error: {:?}. The claim should not be commited on-chain.",
@@ -62,6 +67,7 @@ pub fn prover_get_hashes_for_round(
     nary_type: NArySearchType,
 ) -> Result<Vec<String>, EmulatorError> {
     let mut challenge_log = ProverChallengeLog::load(checkpoint_path)?;
+    let input = challenge_log.input.clone();
     let nary_log = nary_type.get_prover_nary_log(&mut challenge_log);
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
 
@@ -75,8 +81,13 @@ pub fn prover_get_hashes_for_round(
     };
 
     nary_log.base_step = new_base;
-    let hashes =
-        program_def.get_round_hashes(checkpoint_path, round, nary_log.base_step, fail_config)?;
+    let hashes = program_def.get_round_hashes(
+        checkpoint_path,
+        input,
+        round,
+        nary_log.base_step,
+        fail_config,
+    )?;
     nary_log.hash_rounds.push(hashes.clone());
     nary_log.verifier_decisions.push(verifier_decision);
     challenge_log.save(checkpoint_path)?;
@@ -91,10 +102,15 @@ pub fn verifier_check_execution(
     claim_last_hash: &str,
     force_condition: ForceCondition,
     fail_config: Option<FailConfiguration>,
+    save_non_checkpoint_steps: bool,
 ) -> Result<Option<u64>, EmulatorError> {
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
-    let (result, last_step, last_hash) =
-        program_def.get_execution_result(input.clone(), checkpoint_path, fail_config)?;
+    let (result, last_step, last_hash) = program_def.get_execution_result(
+        input.clone(),
+        checkpoint_path,
+        fail_config,
+        save_non_checkpoint_steps,
+    )?;
 
     let mut should_challenge = true;
 
@@ -150,11 +166,18 @@ pub fn verifier_choose_segment(
     nary_type: NArySearchType,
 ) -> Result<u32, EmulatorError> {
     let mut challenge_log = VerifierChallengeLog::load(checkpoint_path)?;
+    let input = challenge_log.input.clone();
+
     let nary_log = nary_type.get_verifier_nary_log(&mut challenge_log);
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
 
-    let hashes =
-        program_def.get_round_hashes(checkpoint_path, round, nary_log.base_step, fail_config)?;
+    let hashes = program_def.get_round_hashes(
+        checkpoint_path,
+        input,
+        round,
+        nary_log.base_step,
+        fail_config,
+    )?;
 
     let claim_hashes = ExecutionHashes::from_hexstr(&prover_last_hashes);
     let my_hashes = ExecutionHashes::from_hexstr(&hashes);
@@ -188,6 +211,7 @@ pub fn prover_final_trace(
     nary_type: NArySearchType,
 ) -> Result<TraceRWStep, EmulatorError> {
     let mut challenge_log = ProverChallengeLog::load(checkpoint_path)?;
+    let input = challenge_log.input.clone();
     let nary_log = nary_type.get_prover_nary_log(&mut challenge_log);
 
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
@@ -200,7 +224,8 @@ pub fn prover_final_trace(
     nary_log.verifier_decisions.push(final_bits);
 
     info!("The prover needs to provide the full trace for the selected step {final_step}");
-    let final_trace = program_def.get_trace_step(checkpoint_path, final_step, fail_config)?;
+    let final_trace =
+        program_def.get_trace_step(checkpoint_path, input, final_step, fail_config)?;
     nary_log.final_trace = final_trace.clone();
     challenge_log.save(checkpoint_path)?;
     Ok(final_trace)
@@ -272,12 +297,18 @@ pub fn verifier_choose_challenge(
     return_script_parameters: bool,
 ) -> Result<ChallengeType, EmulatorError> {
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
-    let program = program_def.load_program_from_checkpoint(checkpoint_path, 0)?;
+    let mut program = program_def.load_program()?;
     let nary_def = program_def.nary_def();
 
     let mut verifier_log = VerifierChallengeLog::load(checkpoint_path)?;
     let conflict_step_log = &mut verifier_log.conflict_step_log;
     conflict_step_log.final_trace = trace.clone();
+
+    program.load_input(
+        verifier_log.input.clone(),
+        &program_def.input_section_name,
+        false,
+    )?;
 
     let (step_hash, next_hash) = get_hashes(
         &nary_def.step_mapping(&conflict_step_log.verifier_decisions),
@@ -314,7 +345,13 @@ pub fn verifier_choose_challenge(
 
     //obtain all the steps needed
     let my_execution = program_def
-        .execute_helper(checkpoint_path, vec![], Some(steps), fail_config)?
+        .execute_helper(
+            checkpoint_path,
+            verifier_log.input.clone(),
+            Some(steps),
+            fail_config,
+            false,
+        )?
         .1;
     info!("execution: {:?}", my_execution);
     let my_trace = my_execution[my_trace_idx].0.clone();
@@ -687,6 +724,7 @@ mod tests {
             chk_prover_path,
             true,
             fail_config_prover.clone(),
+            false,
         )
         .unwrap();
         info!("{:?}", result_1);
@@ -700,6 +738,7 @@ mod tests {
             &result_1.2,
             force_condition,
             fail_config_verifier.clone(),
+            false,
         )
         .unwrap();
         info!("{:?}", result);

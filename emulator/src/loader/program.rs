@@ -200,6 +200,30 @@ pub struct Program {
 }
 
 impl Program {
+    pub fn load_input(
+        &mut self,
+        input: Vec<u8>,
+        input_section_name: &str,
+        little_endian: bool,
+    ) -> Result<(), ExecutionResult> {
+        // if the step is non-zero then we are running the program from a checkpoint
+        // so we shouldn't rewrite the input. First, because it's already included in the checkpoint
+        // and second, because the input section is writable and the value could've been changed
+        if !input.is_empty() && self.step == 0 {
+            if let Some(section) = self.find_section_by_name_mut(input_section_name) {
+                let input_as_u32 = vec_u8_to_vec_u32(&input, little_endian);
+                for (i, byte) in input_as_u32.iter().enumerate() {
+                    section.data[i] = *byte;
+                }
+            } else {
+                return Err(ExecutionResult::SectionNotFound(
+                    input_section_name.to_string(),
+                ));
+            }
+        }
+
+        Ok(())
+    }
     pub fn serialize_to_file(&self, fpath: &str) {
         let fname = format!("{}/checkpoint.{}.json", fpath, self.step);
         let serialized = serde_json::to_string(self).unwrap();
