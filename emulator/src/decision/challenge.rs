@@ -1280,7 +1280,7 @@ mod tests {
             fail_write,
             None,
             false,
-            ForceCondition::No,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::AddressesSections,
             ForceChallenge::No,
         );
@@ -1345,7 +1345,7 @@ mod tests {
             fail_write,
             None,
             false,
-            ForceCondition::No,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::AddressesSections,
             ForceChallenge::No,
         );
@@ -1411,7 +1411,7 @@ mod tests {
             fail_write,
             None,
             false,
-            ForceCondition::No,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::AddressesSections,
             ForceChallenge::No,
         );
@@ -1708,7 +1708,7 @@ mod tests {
             None,
             None,
             true,
-            ForceCondition::No,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::No,
             ForceChallenge::No,
         );
@@ -1760,7 +1760,7 @@ mod tests {
             None,
             None,
             true,
-            ForceCondition::No,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::No,
             ForceChallenge::No,
         );
@@ -1805,7 +1805,7 @@ mod tests {
             None,
             None,
             true,
-            ForceCondition::No,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::No,
             ForceChallenge::No,
         );
@@ -1849,7 +1849,7 @@ mod tests {
             None,
             None,
             true,
-            ForceCondition::No,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::No,
             ForceChallenge::No,
         );
