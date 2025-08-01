@@ -3,7 +3,7 @@ use bitcoin_script_stack::stack::{StackTracker, StackVariable};
 pub use bitcoin_script::{define_pushable, script};
 define_pushable!();
 pub use bitcoin::ScriptBuf as Script;
-use bitvmx_cpu_definitions::memory::{MemoryAccessType, SectionDefinition};
+use bitvmx_cpu_definitions::memory::{Chunk, MemoryAccessType, SectionDefinition};
 
 use super::operations::{sort_nibbles, sub};
 
@@ -636,6 +636,9 @@ pub fn is_lower_than(
     than: StackVariable,
     unsigned: bool,
 ) -> StackVariable {
+    assert_eq!(stack.get_size(value), stack.get_size(than));
+    let size = stack.get_size(value);
+
     if !unsigned {
         stack.copy_var_sub_n(value, 0);
         if_greater(stack, 7, 1, 0); //1 if negative
@@ -643,6 +646,7 @@ pub fn is_lower_than(
         if_greater(stack, 7, 1, 0); //1 if negative
         stack.op_2dup();
         stack.op_equal();
+        let n = 2_i32.pow(size + 1);
         stack
             .custom(
                 script! {
@@ -652,9 +656,9 @@ pub fn is_lower_than(
                     OP_ELSE
                         OP_GREATERTHAN
                         OP_IF
-                            512
+                            { n }
                         OP_ELSE
-                            { -512 }
+                            { -n }
                         OP_ENDIF
                     OP_ENDIF
                 },
@@ -666,8 +670,8 @@ pub fn is_lower_than(
             .unwrap();
     }
 
-    for i in 0..8 {
-        let n: i32 = 2_i32.pow(8 - i);
+    for i in 0..size {
+        let n: i32 = 2_i32.pow(size - i);
         stack.move_var_sub_n(value, 0);
         stack.move_var_sub_n(than, 0);
         stack.op_2dup();
@@ -677,7 +681,7 @@ pub fn is_lower_than(
                 script! {
                     OP_IF
                         OP_2DROP
-                        { n}
+                        { n }
                     OP_ELSE
                         OP_EQUAL
                         OP_IF
@@ -694,7 +698,7 @@ pub fn is_lower_than(
             )
             .unwrap();
     }
-    for _ in 0..7 {
+    for _ in 0..size - 1 {
         stack.op_add();
     }
     if !unsigned {
@@ -1418,30 +1422,112 @@ pub fn witness_equals(
     stack.op_equal();
 }
 
-pub fn address_not_in_sections(
+pub fn verify_wrong_chunk_value(
+    stack: &mut StackTracker,
+    tables: &StackTables,
+    chunk: &Chunk,
+    address: StackVariable,
+    value: StackVariable,
+) {
+    let chunk_table = WordTable::new(stack, chunk.data.clone());
+
+    let base_addr = stack.number_u32(chunk.base_addr);
+    let offset = sub(stack, &tables, address, base_addr);
+
+    let to_shift = stack.number(2);
+    let index = shift_number(stack, to_shift, offset, true, false);
+
+    let index_nibbles = stack.explode(index);
+    nibbles_to_number(stack, index_nibbles);
+
+    let real_opcode = chunk_table.peek(stack);
+
+    stack.equality(real_opcode, true, value, true, false, true);
+    chunk_table.drop(stack);
+}
+
+pub fn get_selected_vars<const N: usize>(
+    stack: &mut StackTracker,
+    vars_1: [StackVariable; N],
+    vars_2: [StackVariable; N],
+    var_selector: StackVariable,
+) -> [StackVariable; N] {
+    assert_eq!(vars_1.len(), vars_2.len());
+    let consumes = vars_1.len() as u32 * 2;
+
+    let output: Vec<_> = vars_1
+        .iter()
+        .enumerate()
+        .map(|(i, var)| (stack.get_size(*var), format!("var_{}", i)))
+        .collect();
+
+    // we need the variables to be on top of the stack, or we will break variables that are higher when merging the branches
+    for (var_1, var_2) in vars_1.iter().zip(vars_2.iter()) {
+        assert_eq!(stack.get_size(*var_1), stack.get_size(*var_2));
+        stack.move_var(*var_1);
+        stack.move_var(*var_2);
+    }
+
+    let one = stack.byte(1);
+    stack.equality(var_selector, true, one, true, true, false);
+
+    let (mut chose_var_1, mut chose_var_2) = stack.open_if();
+
+    for (var_1, var_2) in vars_1.into_iter().zip(vars_2.into_iter()) {
+        chose_var_1.move_var(var_2);
+        chose_var_1.drop(var_2);
+        chose_var_1.move_var(var_1);
+
+        chose_var_2.move_var(var_1);
+        chose_var_2.drop(var_1);
+        chose_var_2.move_var(var_2);
+    }
+
+    stack
+        .end_if(chose_var_1, chose_var_2, consumes, output, 0)
+        .try_into()
+        .ok()
+        .expect("Vec length does not match expected array size")
+}
+
+pub fn address_in_range(stack: &mut StackTracker, range: &(u32, u32), address: &StackVariable) {
+    let start = stack.number_u32(range.0);
+    let end = stack.number_u32(range.1);
+    let address_copy = stack.copy_var(*address);
+
+    is_equal_to(stack, &start, &address_copy);
+    is_lower_than(stack, start, address_copy, true);
+    stack.op_boolor();
+
+    let address_copy = stack.copy_var(*address);
+    is_equal_to(stack, &end, &address_copy);
+    is_lower_than(stack, address_copy, end, true);
+    stack.op_boolor();
+
+    stack.op_booland();
+}
+
+pub fn address_in_sections(
     stack: &mut StackTracker,
     address: &StackVariable,
     sections: &SectionDefinition,
 ) {
     for range in &sections.ranges {
-        assert!(range.0 + 3 <= range.1);
-        let section_start = stack.number_u32(range.0);
-        let address_copy: StackVariable = stack.copy_var(*address);
-
-        is_lower_than(stack, address_copy, section_start, true);
-
-        // when we do a read on an address, we also read the 3 addresses after
-        let section_end = stack.number_u32(range.1 - 3);
-        let address_copy = stack.copy_var(*address);
-
-        is_lower_than(stack, section_end, address_copy, true);
-
-        stack.op_boolor();
+        address_in_range(stack, range, address);
     }
 
     for _ in 0..sections.ranges.len() - 1 {
-        stack.op_booland();
+        stack.op_boolor();
     }
+}
+
+pub fn address_not_in_sections(
+    stack: &mut StackTracker,
+    address: &StackVariable,
+    sections: &SectionDefinition,
+) {
+    address_in_sections(stack, address, sections);
+    stack.op_not();
 }
 
 pub fn nibbles_to_number(stack: &mut StackTracker, nibbles: Vec<StackVariable>) -> StackVariable {
@@ -1654,6 +1740,24 @@ mod tests {
         test_lower_helper(0x0000_0000, 0xffff_f800, 0, false);
     }
 
+    fn test_lower_helper_64bits(value: u64, than: u64, expected: u32, unsigned: bool) {
+        let mut stack = StackTracker::new();
+        let value = stack.number_u64(value);
+        let than = stack.number_u64(than);
+        is_lower_than(&mut stack, value, than, unsigned);
+        stack.number(expected);
+        stack.op_equal();
+        assert!(stack.run().success);
+    }
+
+    #[test]
+    fn test_lower_64bits() {
+        test_lower_helper_64bits(0x0000_0000_0000_0000, 0xffff_ffff_ffff_ffff, 1, true);
+        test_lower_helper_64bits(0x0000_0000_0000_0000, 0xffff_ffff_ffff_ffff, 0, false);
+        test_lower_helper_64bits(0xf000_0000_0000_0000, 0xffff_ffff_ffff_ffff, 1, false);
+        test_lower_helper_64bits(0x0000_0000_0000_0000, 0xffff_f800_0000_0000, 0, false);
+    }
+
     #[test]
     fn test_shift_dynamic() {
         for y in 0..16 {
@@ -1790,12 +1894,12 @@ mod tests {
         test_witness_equals_aux(memory_witness, 1, false, MemoryAccessType::Unused);
     }
 
-    fn test_address_not_in_sections_aux(address: u32, sections: &SectionDefinition) -> bool {
+    fn test_address_in_range_aux(address: u32, range: &(u32, u32)) -> bool {
         let mut stack = StackTracker::new();
 
         let address = stack.number_u32(address);
 
-        address_not_in_sections(&mut stack, &address, sections);
+        address_in_range(&mut stack, range, &address);
 
         stack.op_verify();
         stack.drop(address);
@@ -1804,27 +1908,18 @@ mod tests {
     }
 
     #[test]
-    fn test_address_not_in_sections() {
-        const START_1: u32 = 0x0000_00f0;
-        const START_2: u32 = 0x000f_00f0;
-        const END_1: u32 = 0x0000_f003;
-        const END_2: u32 = 0x000f_f003;
+    fn test_address_in_range() {
+        const START: u32 = 0x0000_00f0;
+        const END: u32 = 0x0000_f003;
 
-        let sections = &SectionDefinition {
-            ranges: vec![(START_1, END_1), (START_2, END_2)],
-        };
+        let range = &(START, END);
 
-        assert!(!test_address_not_in_sections_aux(START_1, sections));
-        assert!(!test_address_not_in_sections_aux(0x0000_0f00, sections));
-        assert!(!test_address_not_in_sections_aux(END_1 - 3, sections));
-        assert!(!test_address_not_in_sections_aux(START_2, sections));
-        assert!(!test_address_not_in_sections_aux(0x000f_0f00, sections));
-        assert!(!test_address_not_in_sections_aux(END_2 - 3, sections));
+        assert!(test_address_in_range_aux(START, range));
+        assert!(test_address_in_range_aux((START + END) / 2, range));
+        assert!(test_address_in_range_aux(END, range));
 
-        assert!(test_address_not_in_sections_aux(START_1 - 1, sections));
-        assert!(test_address_not_in_sections_aux(END_1 - 2, sections));
-        assert!(test_address_not_in_sections_aux(START_2 - 1, sections));
-        assert!(test_address_not_in_sections_aux(END_2 - 2, sections));
+        assert!(!test_address_in_range_aux(START - 1, range));
+        assert!(!test_address_in_range_aux(END + 1, range));
     }
 
     #[test]
@@ -1838,5 +1933,87 @@ mod tests {
         stack.equals(expected, true, result, true);
         stack.op_true();
         assert!(stack.run().success);
+    }
+
+    fn test_get_selected_vars_aux(var_selector: u8) {
+        let mut stack = StackTracker::new();
+
+        let previous_var = stack.number_u32(0x3333_3333);
+
+        let var_1 = stack.number_u32(0x1111_1111);
+        let var_2 = stack.number_u32(0x2222_2222);
+        let selector = stack.byte(var_selector);
+
+        let next_var = stack.number_u32(0x4444_4444);
+
+        let [chosen_var] = get_selected_vars(&mut stack, [var_1], [var_2], selector);
+
+        // we should get the selected variable
+        let expected_var = if var_selector == 1 {
+            0x1111_1111
+        } else {
+            0x2222_2222
+        };
+        let expected_var = stack.number_u32(expected_var);
+        stack.equality(chosen_var, true, expected_var, true, true, true);
+
+        // previous variable should remain unchanged
+        let expected_var = stack.number_u32(0x3333_3333);
+        stack.equality(previous_var, true, expected_var, true, true, true);
+
+        // next variable should also remain unchanged
+        let expected_var = stack.number_u32(0x4444_4444);
+        stack.equality(next_var, true, expected_var, true, true, true);
+
+        stack.op_true();
+        assert!(stack.run().success);
+    }
+
+    #[test]
+    fn test_get_selected_vars() {
+        test_get_selected_vars_aux(1);
+        test_get_selected_vars_aux(2);
+    }
+
+    fn test_verify_wrong_chunk_value_aux(address: u32, value: u32, chunk: &Chunk) -> bool {
+        let mut stack = StackTracker::new();
+
+        let address = stack.number_u32(address);
+        let value = stack.number_u32(value);
+        let tables = &StackTables::new(&mut stack, true, false, 0, 0, 0);
+
+        verify_wrong_chunk_value(&mut stack, tables, chunk, address, value);
+        tables.drop(&mut stack);
+        stack.op_true();
+        stack.run().success
+    }
+
+    #[test]
+    fn test_verify_wrong_chunk_value() {
+        let chunk = &Chunk {
+            base_addr: 0x1000_0000,
+            data: vec![0x1111_1111, 0x2222_2222],
+        };
+
+        assert!(test_verify_wrong_chunk_value_aux(
+            0x1000_0000,
+            0x1234_5678,
+            chunk
+        ));
+        assert!(test_verify_wrong_chunk_value_aux(
+            0x1000_0004,
+            0x1234_5678,
+            chunk
+        ));
+        assert!(!test_verify_wrong_chunk_value_aux(
+            0x1000_0000,
+            0x1111_1111,
+            chunk
+        ));
+        assert!(!test_verify_wrong_chunk_value_aux(
+            0x1000_0004,
+            0x2222_2222,
+            chunk
+        ));
     }
 }

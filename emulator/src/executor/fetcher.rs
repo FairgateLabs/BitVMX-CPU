@@ -32,24 +32,17 @@ pub fn execute_program(
     trace_list: Option<Vec<u64>>,
     mem_dump: Option<u64>,
     fail_config: FailConfiguration,
+    save_non_checkpoint_steps: bool,
 ) -> (ExecutionResult, FullTrace) {
     let trace_set: Option<HashSet<u64>> = trace_list.map(|vec| vec.into_iter().collect());
 
     let mut traces = Vec::new();
 
-    if !input.is_empty() {
-        if let Some(section) = program.find_section_by_name(input_section_name) {
-            let input_as_u32 = vec_u8_to_vec_u32(&input, little_endian);
-            for (i, byte) in input_as_u32.iter().enumerate() {
-                section.data[i] = *byte;
-            }
-        } else {
-            return (
-                ExecutionResult::SectionNotFound(input_section_name.to_string()),
-                traces,
-            );
-        }
+    let load_input_result = program.load_input(input.clone(), input_section_name, little_endian);
+    if load_input_result.is_err() {
+        return (load_input_result.err().unwrap(), traces);
     }
+
     let instruction_mapping = match verify_on_chain && use_instruction_mapping {
         true => Some(create_verification_script_mapping(
             program.registers.get_base_address(),
@@ -64,7 +57,9 @@ pub fn execute_program(
     if let Some(path) = &checkpoint_path {
         //create path if it does not exist
         std::fs::create_dir_all(path).unwrap();
-        program.serialize_to_file(path);
+        if save_non_checkpoint_steps {
+            program.serialize_to_file(path);
+        }
     }
 
     if print_trace && (trace_set.is_none() || trace_set.as_ref().unwrap().contains(&program.step)) {
@@ -153,6 +148,14 @@ pub fn execute_program(
             }
         }
 
+        if let Some(fail_trace_write) = &fail_config.fail_trace_write {
+            if fail_trace_write.step == program.step {
+                if let Ok(trace) = trace.as_mut() {
+                    trace.trace_step.write_1 = fail_trace_write.trace_write.clone()
+                }
+            }
+        }
+
         if let Some(step) = mem_dump {
             if program.step == step {
                 info!("\n========== Dumping memory at step: {} ==========", step);
@@ -181,7 +184,9 @@ pub fn execute_program(
         }
 
         if let Some(path) = &checkpoint_path {
-            if program.step % CHECKPOINT_SIZE == 0 || trace.is_err() || program.halt {
+            if program.step % CHECKPOINT_SIZE == 0
+                || ((trace.is_err() || program.halt) && save_non_checkpoint_steps)
+            {
                 program.serialize_to_file(path);
             }
         }
@@ -980,16 +985,6 @@ pub fn op_load(
     x: &IType,
     program: &mut Program,
 ) -> Result<(TraceRead, TraceRead, TraceWrite, MemoryWitness), ExecutionResult> {
-    if x.rd() == REGISTER_ZERO as u32 {
-        program.pc.next_address();
-        return Ok((
-            TraceRead::default(),
-            TraceRead::default(),
-            TraceWrite::default(),
-            MemoryWitness::default(),
-        ));
-    }
-
     let micro = program.pc.get_micro();
 
     let (read_1, mut src_mem, alignment) = get_src_mem(&program.registers, x);
@@ -1075,8 +1070,22 @@ pub fn op_load(
             let value = program.registers.get(AUX_REGISTER_1);
             let read_1 = program.registers.to_trace_read(AUX_REGISTER_1);
 
-            program.registers.set(x.rd(), value, program.step);
             program.pc.next_address();
+
+            if x.rd() == REGISTER_ZERO as u32 {
+                return Ok((
+                    read_1,
+                    TraceRead::default(),
+                    TraceWrite::default(),
+                    MemoryWitness::new(
+                        MemoryAccessType::Register,
+                        MemoryAccessType::Unused,
+                        MemoryAccessType::Unused,
+                    ),
+                ));
+            }
+
+            program.registers.set(x.rd(), value, program.step);
             let write_1 = program.registers.to_trace_write(x.rd());
 
             (read_1, TraceRead::default(), write_1, MemoryWitness::rur())
