@@ -112,25 +112,23 @@ pub fn verifier_check_execution(
         save_non_checkpoint_steps,
     )?;
 
-    let mut should_challenge = true;
+    let input_is_valid = result == ExecutionResult::Halt(0, last_step);
+    let same_step_and_hash = last_step == claim_last_step && last_hash == claim_last_hash;
 
-    if result == ExecutionResult::Halt(0, last_step) {
-        if claim_last_step != last_step || claim_last_hash != last_hash {
-            if force_condition == ForceCondition::ValidInputWrongStepOrHash {
-                should_challenge = true;
-            } else {
-                warn!("The prover provided a valid input, but the last step or hash differs");
-                warn!("Do not challenge (as the challenge is not waranteed to be successful)");
-                warn!("Report this case to be evaluated by the security team");
-            }
+    let should_challenge = force_condition == ForceCondition::Always
+        || !input_is_valid
+        || (force_condition == ForceCondition::ValidInputWrongStepOrHash && !same_step_and_hash)
+        || (force_condition == ForceCondition::ValidInputStepAndHash && same_step_and_hash);
+
+    if !should_challenge {
+        if same_step_and_hash {
+            info!("The program executed successfully with the prover input");
+            info!("Do not challenge.");
         } else {
-            should_challenge = force_condition == ForceCondition::ValidInputStepAndHash;
+            warn!("The prover provided a valid input, but the last step or hash differs");
+            warn!("Do not challenge (as the challenge is not guaranteed to be successful)");
+            warn!("Report this case to be evaluated by the security team");
         }
-    }
-
-    if !should_challenge && force_condition != ForceCondition::Always {
-        info!("The program executed successfully with the prover input");
-        info!("Do not challenge.");
         return Ok(None);
     }
 
