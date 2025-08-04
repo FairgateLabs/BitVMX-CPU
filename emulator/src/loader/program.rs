@@ -294,7 +294,7 @@ impl Program {
         }
     }
 
-    pub fn sanity_check(&self) -> Result<(), EmulatorError> {
+    pub fn sanity_check(&self, sp_base_address: Option<u32>) -> Result<(), EmulatorError> {
         //check overlapping sections
         for i in 0..self.sections.len() {
             for j in i + 1..self.sections.len() {
@@ -312,7 +312,6 @@ impl Program {
         }
 
         let low_section = self.sections.iter().find(|section| section.start < 0x1000);
-
         if let Some(low_section) = low_section {
             return Err(EmulatorError::CantLoadPorgram(format!(
                 "Cannot load program: section '{}' starts at a low memory address (0x{:X}), which is below the allowed threshold of 0x1000.",
@@ -320,6 +319,35 @@ impl Program {
                 low_section.start,
             )));
         }
+
+        if sp_base_address.is_none() {
+            return Ok(());
+        }
+
+        let stack_section = self.find_section(sp_base_address.unwrap());
+
+        if stack_section.is_err() {
+            return Ok(());
+        }
+
+        let stack_section = stack_section.unwrap();
+
+        let section_next_to_stack = self.sections.iter().find(|&other_section| {
+            let stack_section_end = stack_section.start + stack_section.size;
+            let other_section_end = other_section.start + other_section.size;
+
+            (other_section != stack_section)
+                && (stack_section_end == other_section.start
+                    || other_section_end == stack_section.start)
+        });
+
+        if let Some(section_next_to_stack) = section_next_to_stack {
+            return Err(EmulatorError::CantLoadPorgram(format!(
+                "Cannot load program: section '{}' is next to the stack section and a stack overflow could corrupt its content",
+                section_next_to_stack.name
+            )));
+        }
+
         Ok(())
     }
 
@@ -683,9 +711,9 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Result<Program, EmulatorErr
         program.add_section(Section::new_with_data(&name, data, start, size, is_code, is_write, initialized));
     });
 
+    program.sanity_check(Some(STACK_BASE_ADDRESS))?;
     program.merge_sections();
     program.generate_sections_definitions();
-    program.sanity_check()?;
 
     Ok(program)
 }
@@ -777,7 +805,7 @@ mod tests {
         let mut program = Program::new(0, 0, 0);
         program.add_section(Section::new("test_1", 0, 10, false, true, false));
         program.add_section(Section::new("test_2", 9, 5, false, true, false));
-        assert!(program.sanity_check().is_err());
+        assert!(program.sanity_check(None).is_err());
     }
 
     #[test]
