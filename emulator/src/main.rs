@@ -5,7 +5,10 @@ use emulator::{
     constants::REGISTERS_BASE_ADDRESS,
     decision::{
         challenge::{
-            prover_execute, prover_final_trace, prover_get_hashes_for_round, verifier_check_execution, verifier_choose_challenge, verifier_choose_challenge_for_read_challenge, verifier_choose_segment, ForceChallenge, ForceCondition
+            prover_execute, prover_final_trace, prover_get_hashes_for_round,
+            verifier_check_execution, verifier_choose_challenge,
+            verifier_choose_challenge_for_read_challenge, verifier_choose_segment, ForceChallenge,
+            ForceCondition,
         },
         nary_search::NArySearchType,
     },
@@ -219,9 +222,9 @@ enum Commands {
         #[arg(short, long, value_name = "CHECKPOINT_VERIFIER_PATH")]
         checkpoint_verifier_path: String,
 
-        /// Prover final trace
-        #[arg(short, long, value_name = "PROVER_FINAL_TRACE")]
-        prover_final_trace: TraceRWStep,
+        /// Fail Configuration
+        #[arg(short, long, value_name = "FailConfigVerifier")]
+        fail_config_verifier: Option<FailConfiguration>,
 
         /// Force
         #[arg(short, long, default_value = "no")]
@@ -677,14 +680,14 @@ fn main() -> Result<(), EmulatorError> {
         Some(Commands::VerifierChooseChallengeForReadChallenge {
             pdf,
             checkpoint_verifier_path,
-            prover_final_trace,
+            fail_config_verifier,
             force,
             command_file,
         }) => {
             let result = verifier_choose_challenge_for_read_challenge(
                 pdf,
                 checkpoint_verifier_path,
-                prover_final_trace.clone(),
+                fail_config_verifier.clone(),
                 force.clone(),
             )?;
             info!("Verifier choose challenge: {:?}", result);

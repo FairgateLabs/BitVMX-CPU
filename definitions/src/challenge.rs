@@ -32,7 +32,16 @@ pub enum ChallengeType {
         read_1: TraceRead,
         read_2: TraceRead,
         read_selector: u8,
-        trace: TraceRWStep,
+        step_hash: String,
+        trace: TraceStep,
+        next_hash: String,
+        step: u64,
+    },
+    CorrectHash {
+        prover_hash: String,
+        verifier_hash: String,
+        trace: TraceStep,
+        next_hash: String,
     },
     No,
 }

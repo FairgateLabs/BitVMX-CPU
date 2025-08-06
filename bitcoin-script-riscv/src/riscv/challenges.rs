@@ -471,8 +471,15 @@ pub fn read_value_challenge(stack: &mut StackTracker) {
 
     let read_selector = stack.define(2, "read_selector");
 
+    let step_hash = stack.define(40, "step_hash");
+
     let write_addr = stack.define(8, "write_addr");
     let write_value = stack.define(8, "write_value");
+    let write_pc = stack.define(8, "write_pc");
+    let write_micro = stack.define(2, "write_micro");
+
+    let next_hash = stack.define(40, "next_hash");
+
     let write_step = stack.define(16, "write_step");
 
     let [read_addr, read_value, read_step] = get_selected_vars(
@@ -482,13 +489,11 @@ pub fn read_value_challenge(stack: &mut StackTracker) {
         read_selector,
     );
 
-    stack.rename(read_step, "read_Step");
-
     // if read_step == write_step -> write_addr != read_addr || write_value != read_value
     stack.equality(read_step, false, write_step, false, true, false);
 
     stack.equality(write_addr, false, read_addr, false, false, false);
-    stack.equality(write_value, true, read_value, true, false, false);
+    stack.equality(write_value, false, read_value, true, false, false);
     stack.op_boolor();
     stack.op_booland();
 
@@ -499,12 +504,54 @@ pub fn read_value_challenge(stack: &mut StackTracker) {
     is_lower_than(stack, read_step, write_step, true);
     stack.op_boolor();
 
-    stack.equality(write_addr, true, read_addr, true, true, false);
+    stack.equality(write_addr, false, read_addr, true, true, false);
     stack.op_booland();
 
     stack.op_boolor();
 
     stack.op_verify();
+
+    //save the hash to compare
+    stack.to_altstack();
+
+    stack.explode(step_hash);
+    stack.explode(write_addr);
+    stack.explode(write_value);
+    stack.explode(write_pc);
+    stack.explode(write_micro);
+
+    let result = blake3::blake3(stack, (40 + 8 + 8 + 8 + 2) / 2, 5);
+    stack.from_altstack();
+    stack.equals(result, true, next_hash, true);
+}
+
+pub fn correct_hash_challenge(stack: &mut StackTracker) {
+    stack.clear_definitions();
+
+    let prover_hash = stack.define(40, "prover_hash");
+    let verifier_hash = stack.define(40, "verifier_hash");
+
+    let write_addr = stack.define(8, "write_addr");
+    let write_value = stack.define(8, "write_value");
+    let write_pc = stack.define(8, "write_pc");
+    let write_micro = stack.define(2, "write_micro");
+
+    let next_hash = stack.define(40, "next_hash");
+
+    stack.not_equal(prover_hash, true, verifier_hash, false);
+
+    //save the hash to compare
+    stack.to_altstack();
+
+    stack.explode(verifier_hash);
+    stack.explode(write_addr);
+    stack.explode(write_value);
+    stack.explode(write_pc);
+    stack.explode(write_micro);
+
+    let result = blake3::blake3(stack, (40 + 8 + 8 + 8 + 2) / 2, 5);
+    stack.from_altstack();
+    stack.equals(result, true, next_hash, true);
 }
 
 //TODO: memory section challenge
@@ -622,7 +669,10 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             read_1,
             read_2,
             read_selector,
+            step_hash,
             trace,
+            next_hash,
+            step,
         } => {
             stack.number_u32(read_1.address);
             stack.number_u32(read_1.value);
@@ -634,11 +684,36 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
 
             stack.byte(*read_selector);
 
-            stack.number_u32(trace.trace_step.write_1.address);
-            stack.number_u32(trace.trace_step.write_1.value);
-            stack.number_u64(trace.step_number);
+            stack.hexstr_as_nibbles(step_hash);
+
+            stack.number_u32(trace.get_write().address);
+            stack.number_u32(trace.get_write().value);
+            stack.number_u32(trace.get_pc().get_address());
+            stack.byte(trace.get_pc().get_micro());
+
+            stack.hexstr_as_nibbles(next_hash);
+
+            stack.number_u64(*step);
 
             read_value_challenge(&mut stack);
+        }
+        ChallengeType::CorrectHash {
+            prover_hash,
+            verifier_hash,
+            trace,
+            next_hash,
+        } => {
+            stack.hexstr_as_nibbles(prover_hash);
+            stack.hexstr_as_nibbles(verifier_hash);
+
+            stack.number_u32(trace.get_write().address);
+            stack.number_u32(trace.get_write().value);
+            stack.number_u32(trace.get_pc().get_address());
+            stack.byte(trace.get_pc().get_micro());
+
+            stack.hexstr_as_nibbles(next_hash);
+
+            correct_hash_challenge(&mut stack);
         }
         _ => {
             return false;
@@ -653,7 +728,7 @@ mod tests {
 
     use bitvmx_cpu_definitions::{
         memory::MemoryWitness,
-        trace::{TraceRead, TraceWrite},
+        trace::{ProgramCounter, TraceRead, TraceStep, TraceWrite},
     };
 
     use super::*;
@@ -862,6 +937,72 @@ mod tests {
         ));
     }
 
+    fn test_correct_hash_aux(
+        prover_hash: &str,
+        verifier_hash: &str,
+        write_add: u32,
+        write_value: u32,
+        pc: u32,
+        micro: u8,
+        next_hash: &str,
+    ) -> bool {
+        let mut stack = StackTracker::new();
+
+        stack.hexstr_as_nibbles(prover_hash);
+        stack.hexstr_as_nibbles(verifier_hash);
+
+        stack.number_u32(write_add);
+        stack.number_u32(write_value);
+        stack.number_u32(pc);
+        stack.byte(micro);
+
+        stack.hexstr_as_nibbles(next_hash);
+
+        correct_hash_challenge(&mut stack);
+
+        stack.op_true();
+        stack.run().success
+    }
+
+    #[test]
+    fn test_correct_hash() {
+        let wrong_hash = "006942ae363a1a52823aa28eebe597d32b9d92e9";
+        let correct_hash = "e2f115006467b4b1b2b27612bbfd40ed3bc8299b";
+        let next_hash = "345721506e79c53d2549fc63d02ba8fc3b17efa4";
+
+        // can't challenge if prover has same hash
+        assert!(!test_correct_hash_aux(
+            correct_hash,
+            correct_hash,
+            0xf0000028,
+            0x00000001,
+            0x8000010c,
+            0x00,
+            next_hash
+        ));
+
+        // can't challenge if verifier has wrong hash
+        assert!(!test_correct_hash_aux(
+            correct_hash,
+            wrong_hash,
+            0xf0000028,
+            0x00000001,
+            0x8000010c,
+            0x00,
+            next_hash
+        ));
+
+        // challenge is valid if prover has wrong hash and verifier correct hash
+        assert!(test_correct_hash_aux(
+            wrong_hash,
+            correct_hash,
+            0xf0000028,
+            0x00000001,
+            0x8000010c,
+            0x00,
+            next_hash
+        ));
+    }
     #[test]
     fn test_padding_hash() {
         let pre_hash = "006942ae363a1a52823aa28eebe597d32b9d92e9";
@@ -1515,7 +1656,13 @@ mod tests {
         ));
     }
 
-    fn test_read_value_aux(read: TraceRead, write: TraceWrite, write_step: u64) -> bool {
+    fn test_read_value_aux(
+        read: TraceRead,
+        trace: &TraceStep,
+        step_hash: &str,
+        next_hash: &str,
+        write_step: u64,
+    ) -> bool {
         let stack = &mut StackTracker::new();
 
         stack.number_u32(read.address);
@@ -1528,8 +1675,15 @@ mod tests {
 
         stack.byte(1);
 
-        stack.number_u32(write.address);
-        stack.number_u32(write.value);
+        stack.hexstr_as_nibbles(&step_hash);
+
+        stack.number_u32(trace.get_write().address);
+        stack.number_u32(trace.get_write().value);
+        stack.number_u32(trace.get_pc().get_address());
+        stack.byte(trace.get_pc().get_micro());
+
+        stack.hexstr_as_nibbles(&next_hash);
+
         stack.number_u64(write_step);
 
         read_value_challenge(stack);
@@ -1539,40 +1693,50 @@ mod tests {
     }
     #[test]
     fn test_read_value() {
+        let hash = "e2f115006467b4b1b2b27612bbfd40ed3bc8299b";
+        let next_hash = "345721506e79c53d2549fc63d02ba8fc3b17efa4";
+        let wrong_hash = "006942ae363a1a52823aa28eebe597d32b9d92e9";
+
+        let write_pc = ProgramCounter::new(0x8000010c, 0x00);
+        let write = TraceWrite::new(0xf0000028, 1);
+        let trace = &TraceStep::new(write, write_pc);
+
         // can't challenge if read is correct
-        let read = TraceRead::new(0x1000_0000, 0, 100);
+        let read = TraceRead::new(0xf0000028, 1, 100);
         let step = 100;
-        let write = TraceWrite::new(0x1000_0000, 0);
-        assert!(!test_read_value_aux(read, write, step));
+        assert!(!test_read_value_aux(read, trace, hash, next_hash, step));
 
         // can't challenge if write is older
-        let read = TraceRead::new(0x1000_0000, 0, 100);
+        let read = TraceRead::new(0xf0000028, 0, 100);
         let step = 50;
-        let write = TraceWrite::new(0x1000_0000, 100);
-        assert!(!test_read_value_aux(read, write, step));
+        assert!(!test_read_value_aux(read, trace, hash, next_hash, step));
 
         // can't challenge if write is newer but for different address
         let read = TraceRead::new(0x1000_0000, 0, 100);
         let step = 200;
-        let write = TraceWrite::new(0x2000_0000, 100);
-        assert!(!test_read_value_aux(read, write, step));
+        assert!(!test_read_value_aux(read, trace, hash, next_hash, step));
 
-        // challenge is valid if write is newer for the same address
-        let read = TraceRead::new(0x1000_0000, 0, 100);
-        let write_step = 200;
-        let write = TraceWrite::new(0x1000_0000, 100);
-        assert!(test_read_value_aux(read, write, write_step));
+        // challenge is valid if write is newer for the same address and has correct hash
+        let read = TraceRead::new(0xf0000028, 0, 100);
+        let step = 200;
+        assert!(test_read_value_aux(
+            read.clone(),
+            trace,
+            hash,
+            next_hash,
+            step
+        ));
+        // can't challenge if hash is wrong
+        assert!(!test_read_value_aux(read, trace, hash, wrong_hash, step));
 
         // challenge is valid if write is at the same step but for different address
         let read = TraceRead::new(0x1000_0000, 0, 100);
-        let write_step = 100;
-        let write = TraceWrite::new(0x2000_0000, 100);
-        assert!(test_read_value_aux(read, write, write_step));
+        let step = 100;
+        assert!(test_read_value_aux(read, trace, hash, next_hash, step));
 
         // challenge is valid if write is at the same step for different address but different value
-        let read = TraceRead::new(0x1000_0000, 0, 100);
-        let write_step = 100;
-        let write = TraceWrite::new(0x1000_0000, 100);
-        assert!(test_read_value_aux(read, write, write_step));
+        let read = TraceRead::new(0xf0000028, 0, 100);
+        let step = 100;
+        assert!(test_read_value_aux(read, trace, hash, next_hash, step));
     }
 }

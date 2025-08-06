@@ -256,6 +256,7 @@ pub fn get_hashes(
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, EnumString, Display, EnumIter)]
 #[strum(serialize_all = "snake_case")]
 pub enum ForceChallenge {
+    CorrectHash,
     TraceHash,
     TraceHashZero,
     EntryPoint,
@@ -529,9 +530,15 @@ pub fn verifier_choose_challenge(
             read_challenge_log.step_to_challenge = step_to_challenge - 1;
             read_challenge_log.base_step = nary_def.step_from_base_and_bits(1, 0, bits);
             read_challenge_log.verifier_decisions.push(bits);
+
             read_challenge_log
                 .prover_hash_rounds
                 .push(conflict_step_log.prover_hash_rounds[0].clone());
+
+            read_challenge_log
+                .verifier_hash_rounds
+                .push(conflict_step_log.verifier_hash_rounds[0].clone());
+
             verifier_log.read_step = step_to_challenge - 1;
             verifier_log.read_selector = read_selector;
             verifier_log.save(checkpoint_path)?;
@@ -546,7 +553,7 @@ pub fn verifier_choose_challenge(
 pub fn verifier_choose_challenge_for_read_challenge(
     program_definition_file: &str,
     checkpoint_path: &str,
-    trace: TraceRWStep,
+    fail_config: Option<FailConfiguration>,
     force: ForceChallenge,
 ) -> Result<ChallengeType, EmulatorError> {
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
@@ -562,18 +569,36 @@ pub fn verifier_choose_challenge_for_read_challenge(
         challenge_step,
     );
 
-    // check trace_hash
-    if (!validate_step_hash(&step_hash, &trace.trace_step, &next_hash)
-        && force == ForceChallenge::No)
-        || force == ForceChallenge::TraceHash
+    let (my_step_hash, my_next_hash) = get_hashes(
+        &nary_def.step_mapping(&read_challenge_log.verifier_decisions),
+        &read_challenge_log.verifier_hash_rounds,
+        challenge_step,
+    );
+
+    assert_eq!(next_hash, my_next_hash);
+
+    let my_execution = program_def
+        .execute_helper(
+            checkpoint_path,
+            verifier_log.input.clone(),
+            Some(vec![challenge_step + 1]),
+            fail_config,
+            false,
+        )?
+        .1;
+    info!("execution: {:?}", my_execution);
+    let my_trace = my_execution[0].0.clone();
+
+    if (step_hash != my_step_hash && force == ForceChallenge::No)
+        || force == ForceChallenge::CorrectHash
     {
-        info!("Verifier choose to challenge TRACE_HASH");
-        return Ok(ChallengeType::TraceHash(
-            step_hash,
-            trace.trace_step,
+        return Ok(ChallengeType::CorrectHash {
+            prover_hash: step_hash,
+            verifier_hash: my_step_hash,
+            trace: my_trace.trace_step,
             next_hash,
-        ));
-    };
+        });
+    }
 
     let read_step = verifier_log.read_step;
     if (read_step == challenge_step && force == ForceChallenge::No)
@@ -588,7 +613,10 @@ pub fn verifier_choose_challenge_for_read_challenge(
             read_1,
             read_2,
             read_selector,
-            trace,
+            step_hash,
+            trace: my_trace.trace_step,
+            next_hash,
+            step: challenge_step + 1,
         });
     }
 
@@ -669,7 +697,7 @@ mod tests {
         constants::REGISTERS_BASE_ADDRESS,
         decision::challenge::*,
         executor::{
-            utils::{FailExecute, FailOpcode, FailReads, FailTraceWrite, FailWrite},
+            utils::{FailExecute, FailOpcode, FailReads, FailWrite},
             verifier::verify_script,
         },
         loader::program_definition::ProgramDefinition,
@@ -843,7 +871,7 @@ mod tests {
                 verifier_choose_challenge_for_read_challenge(
                     pdf,
                     chk_verifier_path,
-                    final_trace,
+                    fail_config_verifier_read_challenge,
                     force_read_challenge,
                 )
                 .unwrap()
@@ -1673,59 +1701,6 @@ mod tests {
             ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::UninitializedData,
             ForceChallenge::No,
-        );
-    }
-
-    #[test]
-    fn test_challenge_modified_value_lies_write_step_trace() {
-        init_trace();
-        let fail_read_args = vec!["1106", "0xaa000000", "0x11111100", "0xaa000000", "200"]
-            .iter()
-            .map(|x| x.to_string())
-            .collect::<Vec<String>>();
-
-        let fail_read_2 = Some(FailConfiguration::new_fail_reads(FailReads::new(
-            None,
-            Some(&fail_read_args),
-        )));
-
-        let fail_trace_write_args = vec!["200", "0xaa000000", "0x11111100"]
-            .iter()
-            .map(|x| x.to_string())
-            .collect::<Vec<String>>();
-
-        let fail_trace_write = Some(FailConfiguration::new_fail_trace_write(
-            FailTraceWrite::new(&fail_trace_write_args),
-        ));
-
-        test_challenge_aux(
-            "33",
-            "hello-world.yaml",
-            17,
-            false,
-            fail_read_2.clone(),
-            fail_trace_write.clone(),
-            None,
-            None,
-            true,
-            ForceCondition::ValidInputWrongStepOrHash,
-            ForceChallenge::No,
-            ForceChallenge::No,
-        );
-
-        test_challenge_aux(
-            "34",
-            "hello-world.yaml",
-            17,
-            false,
-            None,
-            None,
-            fail_read_2,
-            fail_trace_write,
-            false,
-            ForceCondition::ValidInputWrongStepOrHash,
-            ForceChallenge::ReadValueNArySearch,
-            ForceChallenge::TraceHash,
         );
     }
 
