@@ -527,7 +527,7 @@ pub fn verifier_choose_challenge(
 
             let read_challenge_log = &mut verifier_log.read_challenge_log;
             read_challenge_log.step_to_challenge = step_to_challenge - 1;
-            read_challenge_log.base_step = 0;
+            read_challenge_log.base_step = nary_def.step_from_base_and_bits(1, 0, bits);
             read_challenge_log.verifier_decisions.push(bits);
             read_challenge_log
                 .prover_hash_rounds
@@ -1732,7 +1732,7 @@ mod tests {
     #[test]
     fn test_challenge_modified_value_lies_all_hashes_from_write_step() {
         init_trace();
-        let fail_read_args = vec!["1106", "0xaa000000", "0x11111100", "0xaa000000", "200"]
+        let fail_read_args = vec!["1106", "0xaa000000", "0x11111100", "0xaa000000", "600"]
             .iter()
             .map(|x| x.to_string())
             .collect::<Vec<String>>();
@@ -1742,7 +1742,7 @@ mod tests {
             Some(&fail_read_args),
         )));
 
-        let fail_write_args = vec!["200", "0xaa000000", "0x11111100", "0xaa000000"]
+        let fail_write_args = vec!["600", "0xaa000000", "0x11111100", "0xaa000000"]
             .iter()
             .map(|x| x.to_string())
             .collect::<Vec<String>>();
@@ -1783,7 +1783,7 @@ mod tests {
     #[test]
     fn test_challenge_modified_value_lies_hashes_until_step() {
         init_trace();
-        let fail_read_args = vec!["1106", "0xaa000000", "0x11111100", "0xaa000000", "200"]
+        let fail_read_args = vec!["1106", "0xaa000000", "0x11111100", "0xaa000000", "600"]
             .iter()
             .map(|x| x.to_string())
             .collect::<Vec<String>>();
@@ -1793,7 +1793,7 @@ mod tests {
             Some(&fail_read_args),
         )));
 
-        let fail_hash_until = Some(FailConfiguration::new_fail_hash_until(233));
+        let fail_hash_until = Some(FailConfiguration::new_fail_hash_until(700));
 
         test_challenge_aux(
             "37",
@@ -1829,7 +1829,7 @@ mod tests {
     #[test]
     fn test_challenge_modified_value_doesnt_lie() {
         init_trace();
-        let fail_read_args = vec!["1106", "0xaa000000", "0x11111100", "0xaa000000", "200"]
+        let fail_read_args = vec!["1106", "0xaa000000", "0x11111100", "0xaa000000", "600"]
             .iter()
             .map(|x| x.to_string())
             .collect::<Vec<String>>();
