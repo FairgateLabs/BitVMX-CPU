@@ -535,7 +535,7 @@ pub fn op_arithmetic(
         }),
         Remu(_) => Some({
             if value_2 == 0 {
-                std::i32::MAX as u32
+                std::u32::MAX
             } else {
                 value_1 / value_2
             }
@@ -574,7 +574,7 @@ pub fn op_arithmetic(
         },
         Divu(_) => {
             if value_2 == 0 {
-                std::u32::MAX as u32
+                std::u32::MAX
             } else {
                 value_1 / value_2
             }
