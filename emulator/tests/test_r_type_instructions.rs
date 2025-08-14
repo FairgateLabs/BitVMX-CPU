@@ -198,3 +198,43 @@ fn test_sra() {
 
     assert_eq!(program.registers.get(1), 0x1);
 }
+
+fn test_division_aux(dividend: i32, divisor: i32, quotioent: i32, remainder: i32, signed: bool) {
+    let mut program = get_new_program();
+
+    program.registers.set(3, divisor as u32, 0);
+    program.registers.set(2, dividend as u32, 0);
+
+    let x = create_rtype_from(3, 2, 1);
+
+    let (div, rem) = if signed {
+        (Instruction::Div(x), Instruction::Rem(x))
+    } else {
+        (Instruction::Divu(x), Instruction::Remu(x))
+    };
+
+    let (_, witness) = op_arithmetic(&div, &x, &mut program);
+    assert_eq!(program.registers.get(1), quotioent as u32);
+    assert_eq!(witness.unwrap(), remainder as u32);
+
+
+    let (_, witness) = op_arithmetic(&rem, &x, &mut program);
+    assert_eq!(program.registers.get(1), remainder as u32);
+    assert_eq!(witness.unwrap(), quotioent as u32);
+}
+
+#[test]
+pub fn test_division() {
+    // signed division by 0
+    test_division_aux(100, 0, -1, 100, true);
+    // unsigned division by 0
+    test_division_aux(100, 0, std::u32::MAX as i32, 100, false);
+    // overflow
+    test_division_aux(std::i32::MIN, -1, std::i32::MIN, 0, true);
+
+    test_division_aux(100, -6, -16, 4, true);
+    test_division_aux(-100, 6, -16, -4, true);
+    test_division_aux(-100, -6, 16, -4, true);
+
+    test_division_aux(100, 6, 16, 4, false);
+}
