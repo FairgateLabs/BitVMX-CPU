@@ -1176,7 +1176,7 @@ pub fn sign_check(
     stack_false.op_equalverify();
     stack.end_if(stack_true, stack_false, 2, vec![], 0);
 
-    //then assert sign of divisor and dividen are the same the quotient sign is positive and negative otherwise
+    //then assert that if the sign of divisor and dividen are the same then the quotient sign is positive and negative otherwise
     is_negative(stack, divisor); // divisor_sign | dividend_sign dividend_sign  rem_sign
     stack.op_dup(); // divisor_sign divisor_sign | dividend_sign dividend_sign  rem_sign
     stack.from_altstack(); // divisor_sign divisor_sign dividend_sign | dividend_sign rem_sign
@@ -1210,19 +1210,48 @@ pub fn sign_check(
     (divisor, quotient, dividend, remainder)
 }
 
-pub fn edge_case(
+pub fn div_by_zero_case(
     stack: &mut StackTracker,
     dividend: StackVariable,
     divisor: StackVariable,
     quotient: StackVariable,
     remainder: StackVariable,
-    compare: u32,
     result: Option<u32>,
 ) -> (StackTracker, StackTracker) {
-    let value = stack.number_u32(compare);
-    is_equal_to(stack, &value, &divisor);
+    let zero = stack.number_u32(0);
+    is_equal_to(stack, &zero, &divisor);
     stack.to_altstack();
-    stack.drop(value);
+    stack.drop(zero);
+    stack.from_altstack();
+    let (mut stack_true, stack_false) = stack.open_if();
+
+    stack_true.drop(remainder);
+    stack_true.drop(quotient);
+    stack_true.drop(divisor);
+    if result.is_some() {
+        stack_true.drop(dividend);
+        stack_true.number_u32(result.unwrap());
+    }
+
+    (stack_true, stack_false)
+}
+
+pub fn overflow_case(
+    stack: &mut StackTracker,
+    dividend: StackVariable,
+    divisor: StackVariable,
+    quotient: StackVariable,
+    remainder: StackVariable,
+    result: Option<u32>,
+) -> (StackTracker, StackTracker) {
+    let minus_one = stack.number_u32(-1 as i32 as u32);
+    let min_i32 = stack.number_u32(std::i32::MIN as u32);
+    is_equal_to(stack, &minus_one, &divisor);
+    is_equal_to(stack, &min_i32, &dividend);
+    stack.op_booland();
+    stack.to_altstack();
+    stack.drop(min_i32);
+    stack.drop(minus_one);
     stack.from_altstack();
     let (mut stack_true, stack_false) = stack.open_if();
 
@@ -1244,8 +1273,7 @@ pub fn division_and_remainder(
     divisor: StackVariable,
     quotient: StackVariable,
     remainder: StackVariable,
-    compare: u32,
-    result: Option<u32>,
+    div_by_zero_result: Option<u32>,
     is_rem_check: bool,
 ) -> StackVariable {
     stack.move_var(dividend);
@@ -1253,8 +1281,13 @@ pub fn division_and_remainder(
     stack.move_var(quotient);
     stack.move_var(remainder);
 
-    let (stack_true, mut stack_false) = edge_case(
-        stack, dividend, divisor, quotient, remainder, compare, result,
+    let (stack_true, mut stack_false) = div_by_zero_case(
+        stack,
+        dividend,
+        divisor,
+        quotient,
+        remainder,
+        div_by_zero_result,
     );
 
     if is_rem_check {
@@ -1298,8 +1331,7 @@ pub fn divu(
         divisor,
         quotient,
         remainder,
-        0,
-        Some(0xFFFF_FFFF),
+        Some(std::u32::MAX),
         false,
     )
 }
@@ -1313,7 +1345,7 @@ pub fn remu(
     quotient: StackVariable,
 ) -> StackVariable {
     division_and_remainder(
-        stack, tables, dividend, divisor, quotient, remainder, 0, None, true,
+        stack, tables, dividend, divisor, quotient, remainder, None, true,
     )
 }
 
@@ -1324,10 +1356,8 @@ pub fn division_and_remainder_signed(
     divisor: StackVariable,
     quotient: StackVariable,
     remainder: StackVariable,
-    compare_1: u32,
-    result_1: Option<u32>,
-    compare_2: u32,
-    result_2: Option<u32>,
+    div_by_zero_result: Option<u32>,
+    overflow_result: Option<u32>,
     is_rem_check: bool,
 ) -> StackVariable {
     stack.move_var(dividend);
@@ -1335,18 +1365,22 @@ pub fn division_and_remainder_signed(
     stack.move_var(quotient);
     stack.move_var(remainder);
 
-    let (stack_true, mut stack_false) = edge_case(
-        stack, dividend, divisor, quotient, remainder, compare_1, result_1,
+    let (stack_true, mut stack_false) = div_by_zero_case(
+        stack,
+        dividend,
+        divisor,
+        quotient,
+        remainder,
+        div_by_zero_result,
     );
 
-    let (stack_true_2, mut stack_no_edge) = edge_case(
+    let (stack_true_2, mut stack_no_edge) = overflow_case(
         &mut stack_false,
         dividend,
         divisor,
         quotient,
         remainder,
-        compare_2,
-        result_2,
+        overflow_result,
     );
 
     if is_rem_check {
@@ -1405,10 +1439,8 @@ pub fn div(
         divisor,
         quotient,
         remainder,
-        0,
-        Some(0xFFFF_FFFF),
-        0xFFFF_FFFF,
-        None,
+        Some(-1 as i32 as u32),
+        Some(std::i32::MIN as u32),
         false,
     )
 }
@@ -1428,9 +1460,7 @@ pub fn rem(
         divisor,
         quotient,
         remainder,
-        0,
         None,
-        0xFFFF_FFFF,
         Some(0),
         true,
     )
