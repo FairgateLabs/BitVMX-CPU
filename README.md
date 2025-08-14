@@ -1,12 +1,14 @@
 
 # BitVMX-CPU
 
-**WARNING**: This repository contains the work in progress implementation of the CPU for [BitVMX](https://bitvmx.org/), and has not received careful code review. This implementation is NOT production ready.
-
 The BitVMX-CPU is a core component of the BitVMX Protocol, please refer to the [BitVMX](https://bitvmx.org/) website and white paper for a better understanding.
 
 The architecture adopted for this first version is [RISCV-32i](https://riscv.org/), with additional support for the 'M' extension, which significantly reduces the number of opcodes needed to perform multiplication, division, and remainder operations.
 
+## ⚠️ Disclaimer
+
+This library is currently under development and may not be fully stable.
+It is not production-ready, has not been audited, and future updates may introduce breaking changes without preserving backward compatibility.
 
 ## Structure
 
