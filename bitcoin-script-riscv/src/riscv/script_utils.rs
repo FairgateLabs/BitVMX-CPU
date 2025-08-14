@@ -1693,6 +1693,67 @@ mod tests {
         test_multiply_aux(0xFFFF_FFFF, 0x1, 0x0, 0xFFFF_FFFF);
     }
 
+    fn test_division_aux(
+        dividend: i32,
+        divisor: i32,
+        quotient: i32,
+        remainder: i32,
+        signed: bool,
+    ) {
+        let mut stack = StackTracker::new();
+        let tables = StackTables::new(&mut stack, true, true, 0, 0, 0);
+
+        let dividend = stack.number_u32(dividend as u32);
+        let dividend_copy = stack.copy_var(dividend);
+
+        let divisor = stack.number_u32(divisor as u32);
+        let divisor_copy = stack.copy_var(divisor);
+
+        let quotient = stack.number_u32(quotient as u32);
+        let quotient_copy = stack.copy_var(quotient);
+
+        let remainder = stack.number_u32(remainder as u32);
+        let remainder_copy = stack.copy_var(remainder);
+
+        let expected_div = stack.copy_var(quotient);
+        let expected_rem = stack.copy_var(remainder);
+
+        let result_div;
+        let result_rem;
+
+        if signed {
+            result_div = div(&mut stack, &tables, dividend, divisor, quotient, remainder);
+            result_rem = rem(&mut stack, &tables, dividend_copy, divisor_copy, remainder_copy, quotient_copy);
+        } else {
+            result_div = divu(&mut stack, &tables, dividend, divisor, quotient, remainder);
+            result_rem = remu(&mut stack, &tables, dividend_copy, divisor_copy, remainder_copy, quotient_copy);
+        }
+
+        stack.equals(expected_div, true, result_div, true);
+        stack.equals(expected_rem, true, result_rem, true);
+
+        tables.drop(&mut stack);
+
+        stack.op_true();
+        assert!(stack.run().success);
+    }
+
+    #[test]
+    pub fn test_division() {
+        // signed division by 0
+        test_division_aux(100, 0, -1, 100, true);
+        // unsigned division by 0
+        test_division_aux(100, 0, std::u32::MAX as i32, 100, false);
+        // overflow
+        test_division_aux(std::i32::MIN, -1, std::i32::MIN, 0, true);
+
+        test_division_aux(100, -6, -16, 4, true);
+        test_division_aux(-100, 6, -16, -4, true);
+        test_division_aux(-100, -6, 16, -4, true);
+
+        test_division_aux(100, 6, 16, 4, false);
+    }
+
     fn test_left_rotate_helper(value: u32, rotate: u32, expected: u32) {
         let mut stack = StackTracker::new();
         let value = stack.number_u32(value);
