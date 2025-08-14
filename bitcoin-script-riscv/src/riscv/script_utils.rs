@@ -1752,6 +1752,7 @@ mod tests {
         test_division_aux(-100, -6, 16, -4, true);
 
         test_division_aux(100, 6, 16, 4, false);
+        test_division_aux(100, -1, -100, 0, true);
     }
 
     fn test_left_rotate_helper(value: u32, rotate: u32, expected: u32) {

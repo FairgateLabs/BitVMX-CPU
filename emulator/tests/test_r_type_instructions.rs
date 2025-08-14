@@ -237,4 +237,5 @@ pub fn test_division() {
     test_division_aux(-100, -6, 16, -4, true);
 
     test_division_aux(100, 6, 16, 4, false);
+    test_division_aux(100, -1, -100, 0, true);
 }
