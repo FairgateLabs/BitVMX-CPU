@@ -13,7 +13,7 @@ fn audit_tests() {
         if let Ok(path) = path {
             let fname = path.file_name();
             let fname = fname.to_string_lossy();
-            if fname.ends_with("verify.elf") && fname.contains("09") {
+            if fname.ends_with("verify.elf") && (fname.contains("09") || fname.contains("12")) || fname.contains("13") {
                 let path = path.path();
                 let path = path.to_string_lossy();
 
@@ -31,5 +31,5 @@ fn audit_tests() {
     }
 
     info!("Total files executed: {}", count);
-    assert_eq!(count, 1);
+    assert_eq!(count, 3);
 }
