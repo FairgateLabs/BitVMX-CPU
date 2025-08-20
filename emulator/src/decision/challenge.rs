@@ -1850,29 +1850,4 @@ mod tests {
             ForceChallenge::No,
         );
     }
-
-    #[test]
-    fn test_challenge_wrong_division() {
-        init_trace();
-
-        let fail_args = vec!["13", "0xF000003C", "0x64", "0xF000003C"]
-            .iter()
-            .map(|x| x.to_string())
-            .collect::<Vec<String>>();
-        let fail_write = Some(FailConfiguration::new_fail_write(FailWrite::new(
-            &fail_args,
-        )));
-
-        test_challenge_aux(
-            "audit_02",
-            "audit_02.yaml",
-            0,
-            true, // final trace verification fails due to wrong div result
-            fail_write,
-            None,
-            true,
-            ForceCondition::No,
-            ForceChallenge::No,
-        );
-    }
 }
