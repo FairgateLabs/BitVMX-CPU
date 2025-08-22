@@ -980,7 +980,9 @@ pub fn op_load(
     x: &IType,
     program: &mut Program,
 ) -> Result<(TraceRead, TraceRead, TraceWrite, MemoryWitness), ExecutionResult> {
-    if x.rd() == REGISTER_ZERO as u32 {
+    let micro = program.pc.get_micro();
+
+    if micro > 1 && x.rd() == REGISTER_ZERO as u32 {
         program.pc.next_address();
         return Ok((
             TraceRead::default(),
@@ -989,8 +991,6 @@ pub fn op_load(
             MemoryWitness::default(),
         ));
     }
-
-    let micro = program.pc.get_micro();
 
     let (read_1, mut src_mem, alignment) = get_src_mem(&program.registers, x);
     let (_word, _half, _byte, reads) = get_type_and_read_from_instruction(instruction, alignment);
@@ -1029,6 +1029,18 @@ pub fn op_load(
 
             let write_1 = if reads == 1 {
                 program.pc.next_address();
+                if x.rd() == REGISTER_ZERO as u32 {
+                    return Ok((
+                        read_1,
+                        read_2,
+                        TraceWrite::default(),
+                        MemoryWitness::new(
+                            MemoryAccessType::Register,
+                            MemoryAccessType::Memory,
+                            MemoryAccessType::Unused,
+                        ),
+                    ));
+                }
                 program.registers.set(x.rd(), shifted, program.step);
                 program.registers.to_trace_write(x.rd())
             } else {

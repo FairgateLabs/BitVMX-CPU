@@ -1,4 +1,4 @@
-use bitcoin_script_stack::stack::{StackTracker, StackVariable};
+use bitcoin_script_stack::{stack::{StackTracker, StackVariable}};
 use bitvmx_cpu_definitions::memory::{MemoryAccessType, MemoryWitness};
 use riscv_decode::Instruction::{self, *};
 
@@ -18,10 +18,10 @@ pub fn op_load(
     base_register_address: u32,
 ) -> STraceStep {
     match micro {
-        0 => op_load_micro_0(instruction, stack, trace_read, micro, base_register_address),
-        1 => op_load_micro_1(instruction, stack, trace_read, micro, base_register_address),
-        2 => op_load_micro_2(instruction, stack, trace_read, micro, base_register_address),
-        3 => op_load_micro_3(instruction, stack, trace_read, micro, base_register_address),
+        0 => op_load_micro_0(instruction, stack, trace_read, base_register_address),
+        1 => op_load_micro_1(instruction, stack, trace_read, base_register_address),
+        2 => op_load_micro_2(instruction, stack, trace_read, base_register_address),
+        3 => op_load_micro_3(instruction, stack, trace_read, base_register_address),
         _ => panic!("Unreachable"),
     }
 }
@@ -30,7 +30,6 @@ pub fn op_load_micro_0(
     instruction: &Instruction,
     stack: &mut StackTracker,
     trace_read: &STraceRead,
-    micro: u8,
     base_register_address: u32,
 ) -> STraceStep {
     let (func3, aligned_if_less_than) = match instruction {
@@ -48,16 +47,6 @@ pub fn op_load_micro_0(
 
     let (imm, rs1, rd, bit_extension) =
         decode_i_type(stack, &tables, trace_read.opcode, func3, 0x3, None);
-
-    verify_memory_witness(
-        stack,
-        trace_read.mem_witness,
-        MemoryWitness::new(
-            MemoryAccessType::Register,
-            MemoryAccessType::Memory,
-            MemoryAccessType::Register,
-        ),
-    );
 
     stack.move_var(trace_read.micro);
     let expected_micro = stack.number(0);
@@ -92,7 +81,6 @@ pub fn op_load_micro_0(
         aligned,
         alignment,
         trace_read,
-        micro,
         base_register_address,
     );
     op_load_micro_0_missaligned(
@@ -103,14 +91,13 @@ pub fn op_load_micro_0(
         aligned,
         alignment,
         trace_read,
-        micro,
         base_register_address,
     );
 
     let ret = stack.end_if(
         if_true,
         if_false,
-        11,
+        12,
         vec![
             (8, "write_add".to_string()),
             (8, "write_value".to_string()),
@@ -132,9 +119,18 @@ pub fn op_load_micro_0_missaligned(
     aligned: StackVariable,
     alignment: StackVariable,
     trace_read: &STraceRead,
-    _micro: u8,
     base_register_address: u32,
 ) -> STraceStep {
+    verify_memory_witness(
+        stack,
+        trace_read.mem_witness,
+        MemoryWitness::new(
+            MemoryAccessType::Register,
+            MemoryAccessType::Memory,
+            MemoryAccessType::Register,
+        ),
+    );
+    
     let (nibs, max_extra, prepad, unsigned) = match instruction {
         Lb(_) => (2, 0, 6, false),
         Lh(_) => (4, 2, 4, false),
@@ -193,7 +189,6 @@ pub fn op_load_micro_0_aligned(
     aligned: StackVariable,
     alignment: StackVariable,
     trace_read: &STraceRead,
-    _micro: u8,
     base_register_address: u32,
 ) -> STraceStep {
     let (nibs, max_extra, prepad, unsigned) = match instruction {
@@ -205,23 +200,52 @@ pub fn op_load_micro_0_aligned(
         _ => panic!("Unreachable"),
     };
 
-    //save the alignment
-    stack.to_altstack();
-    //assert read_2_add with expected memory read
+    stack.move_var(trace_read.mem_witness);
+    stack.move_var(trace_read.read_2_value);
 
+    //assert read_2_add with expected memory read
     stack.equals(trace_read.read_2_add, true, aligned, true);
 
-    //generate the write address
-    let write_addr = number_u32_partial(stack, base_register_address, 6);
-    stack.move_var(rd);
-    stack.join(write_addr);
-    stack.rename(write_addr, "write_add");
+    let register_zero = stack.byte(0);
+    stack.equality(register_zero, true, rd, false, true, false);
+    let (mut if_is_register_zero, mut if_false) = stack.open_if();
 
+    verify_memory_witness(
+        &mut if_is_register_zero,
+        trace_read.mem_witness,
+        MemoryWitness::new(
+            MemoryAccessType::Register,
+            MemoryAccessType::Memory,
+            MemoryAccessType::Unused,
+        ),
+    );
+
+    if_is_register_zero.drop(trace_read.read_2_value);
+    if_is_register_zero.drop(alignment);
+    if_is_register_zero.drop(rd);
+    if_is_register_zero.number_u32(0);
+    if_is_register_zero.number_u32(0);
+
+    verify_memory_witness(
+        &mut if_false,
+        trace_read.mem_witness,
+        MemoryWitness::new(
+            MemoryAccessType::Register,
+            MemoryAccessType::Memory,
+            MemoryAccessType::Register,
+        ),
+    );
+
+    //generate the write address
+    let write_addr = number_u32_partial(&mut if_false, base_register_address, 6);
+    if_false.move_var(rd);
+    if_false.join(write_addr);
+    
     //calculate the byte to be stored (with proper bit extension)
-    stack.move_var(trace_read.read_2_value);
-    stack.from_altstack(); //restore alignment
-    let write_value = choose_nibbles(
-        stack,
+    if_false.move_var(trace_read.read_2_value);
+    if_false.move_var(alignment); //restore alignment
+    choose_nibbles(
+        &mut if_false,
         trace_read.read_2_value,
         alignment,
         nibs,
@@ -230,13 +254,23 @@ pub fn op_load_micro_0_aligned(
         unsigned,
         0,
     );
-    stack.rename(write_value, "write_value");
+
+    let ret = stack.end_if(
+        if_is_register_zero,
+        if_false,
+        4,
+        vec![
+            (8, "write_add".to_string()),
+            (8, "write_value".to_string()),
+        ],
+        0,
+    );
 
     let write_pc = pc_next(stack, tables, trace_read.program_counter);
     let micro = stack.number(0);
     stack.rename(micro, "write_micro");
 
-    let trace = STraceStep::new(write_addr, write_value, write_pc, micro);
+    let trace = STraceStep::new(ret[0], ret[1], write_pc, micro);
     trace.to_altstack(stack);
     tables.drop(stack);
     trace.from_altstack(stack);
@@ -248,7 +282,6 @@ pub fn op_load_micro_1(
     instruction: &Instruction,
     stack: &mut StackTracker,
     trace_read: &STraceRead,
-    _micro: u8,
     base_register_address: u32,
 ) -> STraceStep {
     let (func3, nibs, max_extra, pre_pad, post, unsigned) = match instruction {
@@ -336,7 +369,6 @@ pub fn op_load_micro_2(
     instruction: &Instruction,
     stack: &mut StackTracker,
     trace_read: &STraceRead,
-    _micro: u8,
     base_register_address: u32,
 ) -> STraceStep {
     let func3 = match instruction {
@@ -398,7 +430,6 @@ pub fn op_load_micro_3(
     instruction: &Instruction,
     stack: &mut StackTracker,
     trace_read: &STraceRead,
-    _micro: u8,
     base_register_address: u32,
 ) -> STraceStep {
     let func3 = match instruction {
