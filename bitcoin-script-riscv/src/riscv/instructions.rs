@@ -793,7 +793,7 @@ pub fn execute_step(
         )),
 
         Lh(x) | Lhu(x) | Lw(x) | Lbu(x) | Lb(x) => {
-            if x.rd() == 0 {
+            if micro > 1 && x.rd() == 0 {
                 Ok(op_nop(stack, trace_read))
             } else {
                 Ok(op_load(
