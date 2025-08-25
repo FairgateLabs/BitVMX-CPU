@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use bitvmx_cpu_definitions::trace::{TraceRWStep, TraceRead};
+use bitvmx_cpu_definitions::trace::{TraceRWStep, TraceRead, TraceWrite};
 use num_traits;
 
 use crate::loader::program::Program;
@@ -152,7 +152,7 @@ pub struct FailWrite {
 impl FailWrite {
     pub fn new(args: &Vec<String>) -> Self {
         Self {
-            step: parse_value::<u64>(&args[0]) - 1,
+            step: parse_value::<u64>(&args[0]),
             address_original: parse_value::<u32>(&args[1]),
             value: parse_value::<u32>(&args[2]),
             modified_address: parse_value::<u32>(&args[3]),
@@ -216,12 +216,32 @@ impl FailOpcode {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FailTraceWrite {
+    pub step: u64,
+    pub trace_write: TraceWrite,
+}
+
+impl FailTraceWrite {
+    pub fn new(args: &Vec<String>) -> Self {
+        Self {
+            step: parse_value::<u64>(&args[0]),
+            trace_write: TraceWrite {
+                address: parse_value::<u32>(&args[1]),
+                value: parse_value::<u32>(&args[2]),
+            },
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct FailConfiguration {
     pub fail_hash: Option<u64>,
+    pub fail_hash_until: Option<u64>,
     pub fail_execute: Option<FailExecute>,
     pub fail_reads: Option<FailReads>,
     pub fail_write: Option<FailWrite>,
+    pub fail_trace_write: Option<FailTraceWrite>,
     pub fail_pc: Option<u64>,
     pub fail_opcode: Option<FailOpcode>,
     pub fail_memory_protection: bool,
@@ -231,6 +251,18 @@ impl FailConfiguration {
     pub fn new_fail_hash(fail_hash: u64) -> Self {
         Self {
             fail_hash: Some(fail_hash),
+            ..Default::default()
+        }
+    }
+    pub fn new_fail_trace_write(fail_trace_write: FailTraceWrite) -> Self {
+        Self {
+            fail_trace_write: Some(fail_trace_write),
+            ..Default::default()
+        }
+    }
+    pub fn new_fail_hash_until(step: u64) -> Self {
+        Self {
+            fail_hash_until: Some(step),
             ..Default::default()
         }
     }
@@ -414,7 +446,7 @@ mod utils_tests {
             "4026531900".to_string(),
         ];
         let fail_write = FailWrite::new(&fail_write_args);
-        program.step = 9;
+        program.step = 10;
         fail_write.patch_mem(&mut program);
         let idx = program.registers.get_original_idx(4026531900);
 
@@ -442,7 +474,7 @@ mod utils_tests {
             "4096".to_string(),
         ];
         let fail_write = FailWrite::new(&fail_write_args);
-        program.step = 9;
+        program.step = 10;
         fail_write.patch_mem(&mut program);
 
         assert_eq!(program.read_mem(4096).unwrap(), 10);
