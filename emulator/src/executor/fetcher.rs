@@ -491,7 +491,7 @@ pub fn op_jalr(
         )
     };
 
-    program.pc.jump(wrapping_add_itype(src_value, x));
+    program.pc.jump(wrapping_add_itype(src_value, x) & !1);
 
     (read_1, TraceRead::default(), write_1, mem_witness)
 }

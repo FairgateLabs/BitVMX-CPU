@@ -6,6 +6,7 @@ use bitvmx_cpu_definitions::trace::TraceRWStep;
 use riscv_decode::Instruction;
 use riscv_decode::Instruction::*;
 
+use crate::riscv::memory_alignment::clear_least_significant_bit;
 use crate::ScriptValidation;
 
 use super::decoder::*;
@@ -393,6 +394,7 @@ pub fn op_jalr(
 
     let write_pc =
         add_with_bit_extension(stack, &tables, trace_read.read_1_value, imm, bit_extension);
+    let write_pc = clear_least_significant_bit(stack, write_pc);
     stack.rename(write_pc, "write_pc");
 
     let micro = stack.number(0);
