@@ -60,6 +60,9 @@ pub enum ExecutionResult {
 
     #[error("Failed to verify the bitcoin script {0}")]
     BitcoinScriptVerification(#[from] ScriptValidation),
+
+    #[error("Tried to jump to unaligned address: {0}")]
+    UnalignedJump(u32),
 }
 
 pub mod constants {

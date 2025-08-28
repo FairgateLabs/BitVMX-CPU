@@ -315,6 +315,11 @@ pub fn execute_step(
         }
     };
 
+    let new_pc = program.pc.get_address();
+    if !fail_config.fail_memory_protection && new_pc % 4 != 0 {
+        return Err(ExecutionResult::UnalignedJump(new_pc));
+    }
+
     let trace = TraceRWStep::new(
         program.step,
         read_1,
