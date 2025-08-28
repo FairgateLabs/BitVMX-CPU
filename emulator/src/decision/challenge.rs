@@ -1922,4 +1922,23 @@ mod tests {
             ForceChallenge::No,
         );
     }
+
+    #[test]
+    fn test_challenge_non_aligned_jump() {
+        init_trace();
+
+        let fail_mem_protection = FailConfiguration::new_fail_memory_protection();
+
+        test_challenge_aux(
+            "audit_15",
+            "audit_15.yaml",
+            0,
+            true,
+            Some(fail_mem_protection),
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+        );
+    }
 }
