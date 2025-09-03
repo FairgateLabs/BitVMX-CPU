@@ -258,11 +258,7 @@ pub fn execute_step(
     let opcode = match fail_config.fail_opcode {
         Some(fo) if fo.step == program.step => fo.opcode,
         _ => {
-            if fail_config.fail_memory_protection {
-                program.read_mem(pc.get_address())?
-            } else {
-                program.read_instruction(pc.get_address())?
-            }
+            program.read_instruction(pc.get_address(), fail_config.fail_memory_protection)?
         }
     };
 

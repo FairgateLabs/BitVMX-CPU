@@ -357,15 +357,15 @@ impl Program {
             .find(|section| section.name == name)
     }
 
-    pub fn read_instruction(&self, address: u32) -> Result<u32, ExecutionResult> {
+    pub fn read_instruction(&self, address: u32, fail_memory_protection: bool) -> Result<u32, ExecutionResult> {
         if cfg!(target_endian = "big") {
             panic!("Big endian machine not supported");
         }
         let section = self.find_section(address)?;
-        if !section.is_code {
+        if !section.is_code && !fail_memory_protection {
             return Err(ExecutionResult::ReadFromNonCodeSection);
         }
-        Ok(u32::from_be(
+        Ok(u32::from_le(
             section.data[(address - section.start) as usize / 4],
         ))
     }
@@ -641,8 +641,9 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Result<Program, EmulatorErr
             return;
         }
 
+        let is_code = phdr.sh_flags as u32 & SHF_EXECINSTR == SHF_EXECINSTR;
         let data = if initialized {
-            vec_u8_to_vec_u32(&slice[phdr.sh_offset as usize..(phdr.sh_offset + size as u64) as usize], false)
+            vec_u8_to_vec_u32(&slice[phdr.sh_offset as usize..(phdr.sh_offset + size as u64) as usize], is_code)
         } else {
             assert!(size % 4 == 0, "Number of bytes must be a multiple of 4");
             let num_u32 = size / 4;
@@ -653,7 +654,6 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Result<Program, EmulatorErr
             info!("Loading section: {} Start: 0x{:08x} Size: 0x{:08x} Initialized: {} Flags: {:0b} Type: {:0b} ", name, start, size, initialized, phdr.sh_flags, phdr.sh_type);
         }
 
-        let is_code = phdr.sh_flags as u32 & SHF_EXECINSTR == SHF_EXECINSTR;
         let is_write = phdr.sh_flags as u32 & SHF_WRITE == SHF_WRITE;
         assert!(!(is_code && is_write), "We don't allow writable code sections");
 
@@ -695,7 +695,7 @@ pub fn generate_rom_commitment(program: &Program) -> Result<RomCommitment, Emula
         if section.is_code {
             for i in 0..section.size / 4 {
                 let position = section.start + i * 4;
-                let data = program.read_mem(position)?;
+                let data = program.read_instruction(position, false)?;
 
                 let instruction = riscv_decode::decode(data).expect(&format!(
                     "code section with undecodeable instruction: 0x{:08x} at position: 0x{:08x}",

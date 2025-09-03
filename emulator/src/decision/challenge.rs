@@ -391,7 +391,7 @@ pub fn verifier_choose_challenge(
 
         let opcodes_chunk: Vec<u32> = section.data[chunk_start..chunk_end]
             .iter()
-            .map(|opcode| u32::from_be(*opcode))
+            .map(|opcode| u32::from_le(*opcode))
             .collect();
 
         return Ok(ChallengeType::Opcode(
