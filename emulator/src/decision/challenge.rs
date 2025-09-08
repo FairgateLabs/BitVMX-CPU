@@ -123,7 +123,7 @@ pub fn verifier_check_execution(
     warn!("There is a discrepancy between the prover and verifier execution");
     warn!("This execution will be challenged");
 
-    assert!(claim_last_step > 0 && last_step > 0);
+    assert!(last_step > 0);
 
     // we use the minimum agreed step (that is one before the disagreement)
     let step_to_challenge = claim_last_step.min(last_step) - 1;
