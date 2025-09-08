@@ -16,6 +16,7 @@ pub enum ChallengeType {
     InputData(TraceRead, TraceRead, u32, u32),
     InitializedData(TraceRead, TraceRead, u8, u32, Option<Chunk>),
     UninitializedData(TraceRead, TraceRead, u8, Option<SectionDefinition>),
+    RomData(TraceRead, TraceRead, u32, u32),
     AddressesSections(
         TraceRead,
         TraceRead,
