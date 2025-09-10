@@ -81,7 +81,7 @@ pub struct VerifierChallengeLog {
     pub input: Vec<u8>,
     pub conflict_step_log: VerifierNAryLog,
     pub read_challenge_log: VerifierNAryLog,
-    pub read_selector: u8,
+    pub read_selector: u32,
     pub read_step: u64,
 }
 

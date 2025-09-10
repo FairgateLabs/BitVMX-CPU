@@ -442,7 +442,7 @@ pub fn initialized_challenge(stack: &mut StackTracker, chunk: &Chunk) {
     let read_value_2 = stack.define(8, "prover_read_value_2");
     let read_step_2 = stack.define(16, "prover_read_step_2");
 
-    let read_selector = stack.define(2, "read_selector");
+    let read_selector = stack.define(1, "read_selector");
 
     let [read_addr, read_value, read_step] = get_selected_vars(
         stack,
@@ -477,7 +477,7 @@ pub fn uninitialized_challenge(
     let read_value_2 = stack.define(8, "prover_read_value_2");
     let read_step_2 = stack.define(16, "prover_read_step_2");
 
-    let read_selector = stack.define(2, "read_selector");
+    let read_selector = stack.define(1, "read_selector");
 
     let [read_addr, read_value, read_step] = get_selected_vars(
         stack,
@@ -509,7 +509,7 @@ pub fn read_value_challenge(stack: &mut StackTracker) {
     let read_value_2 = stack.define(8, "prover_read_value_2");
     let read_step_2 = stack.define(16, "prover_read_step_2");
 
-    let read_selector = stack.define(2, "read_selector");
+    let read_selector = stack.define(1, "read_selector");
 
     let step_hash = stack.define(40, "step_hash");
 
@@ -663,7 +663,7 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             stack.number_u32(read_2.value);
             stack.number_u64(read_2.last_step);
 
-            stack.byte(*read_selector);
+            stack.number(*read_selector);
 
             initialized_challenge(&mut stack, chunk.as_ref().unwrap());
         }
@@ -676,7 +676,7 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             stack.number_u32(read_2.value);
             stack.number_u64(read_2.last_step);
 
-            stack.byte(*read_selector);
+            stack.number(*read_selector);
 
             uninitialized_challenge(&mut stack, uninitialized_sections.as_ref().unwrap());
         }
@@ -731,7 +731,7 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             stack.number_u32(read_2.value);
             stack.number_u64(read_2.last_step);
 
-            stack.byte(*read_selector);
+            stack.number(*read_selector);
 
             stack.hexstr_as_nibbles(step_hash);
 
@@ -1562,7 +1562,7 @@ mod tests {
     fn test_initialized_aux(
         read_1: &TraceRead,
         read_2: &TraceRead,
-        read_selector: u8,
+        read_selector: u32,
         chunk: &Chunk,
     ) -> bool {
         let mut stack = StackTracker::new();
@@ -1575,7 +1575,7 @@ mod tests {
         stack.number_u32(read_2.value);
         stack.number_u64(read_2.last_step);
 
-        stack.byte(read_selector);
+        stack.number(read_selector);
 
         initialized_challenge(&mut stack, chunk);
 
@@ -1630,7 +1630,7 @@ mod tests {
     fn test_uninitialized_aux(
         read_1: &TraceRead,
         read_2: &TraceRead,
-        read_selector: u8,
+        read_selector: u32,
         sections: &SectionDefinition,
     ) -> bool {
         let mut stack = StackTracker::new();
@@ -1643,7 +1643,7 @@ mod tests {
         stack.number_u32(read_2.value);
         stack.number_u64(read_2.last_step);
 
-        stack.byte(read_selector);
+        stack.number(read_selector);
 
         uninitialized_challenge(&mut stack, sections);
 
@@ -1771,7 +1771,7 @@ mod tests {
         stack.number_u32(read.value);
         stack.number_u64(read.last_step);
 
-        stack.byte(1);
+        stack.number(1);
 
         stack.hexstr_as_nibbles(&step_hash);
 

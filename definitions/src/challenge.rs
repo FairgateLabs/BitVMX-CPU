@@ -14,8 +14,8 @@ pub enum ChallengeType {
     ProgramCounter(String, TraceStep, String, TraceReadPC),
     Opcode(TraceReadPC, u32, Option<Chunk>), // (PROVER_PC, PROVER_OPCODE), CHUNK_INDEX, CHUNK_BASE_ADDRESS, OPCODES_CHUNK
     InputData(TraceRead, TraceRead, u32, u32),
-    InitializedData(TraceRead, TraceRead, u8, u32, Option<Chunk>),
-    UninitializedData(TraceRead, TraceRead, u8, Option<SectionDefinition>),
+    InitializedData(TraceRead, TraceRead, u32, u32, Option<Chunk>),
+    UninitializedData(TraceRead, TraceRead, u32, Option<SectionDefinition>),
     RomData(TraceRead, TraceRead, u32, u32),
     AddressesSections(
         TraceRead,
@@ -32,7 +32,7 @@ pub enum ChallengeType {
     ReadValue {
         read_1: TraceRead,
         read_2: TraceRead,
-        read_selector: u8,
+        read_selector: u32,
         step_hash: String,
         trace: TraceStep,
         next_hash: String,

@@ -1468,9 +1468,9 @@ pub fn get_selected_vars<const N: usize>(
         stack.move_var(*var_2);
     }
 
-    let one = stack.byte(1);
-    stack.equality(var_selector, true, one, true, true, false);
-
+    stack.move_var(var_selector);
+    stack.number(1);
+    stack.op_equal();
     let (mut chose_var_1, mut chose_var_2) = stack.open_if();
 
     for (var_1, var_2) in vars_1.into_iter().zip(vars_2.into_iter()) {
@@ -1935,14 +1935,14 @@ mod tests {
         assert!(stack.run().success);
     }
 
-    fn test_get_selected_vars_aux(var_selector: u8) {
+    fn test_get_selected_vars_aux(var_selector: u32) {
         let mut stack = StackTracker::new();
 
         let previous_var = stack.number_u32(0x3333_3333);
 
         let var_1 = stack.number_u32(0x1111_1111);
         let var_2 = stack.number_u32(0x2222_2222);
-        let selector = stack.byte(var_selector);
+        let selector = stack.number(var_selector);
 
         let next_var = stack.number_u32(0x4444_4444);
 
