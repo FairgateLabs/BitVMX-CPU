@@ -422,7 +422,7 @@ pub fn opcode_challenge(stack: &mut StackTracker, chunk: &Chunk) {
 
     let pc = stack.define(8, "prover_pc");
     let opcode = stack.define(8, "prover_opcode");
-    let tables = StackTables::new(stack, true, false, 0, 0, 0);
+    let tables = StackTables::new(stack, true, false, 2, 2, 0);
 
     address_in_range(stack, &chunk.range(), &pc);
     stack.op_verify();
@@ -457,7 +457,7 @@ pub fn initialized_challenge(stack: &mut StackTracker, chunk: &Chunk) {
     let init = stack.number_u64(LAST_STEP_INIT);
     stack.equality(read_step, true, init, true, true, true);
 
-    let tables = &StackTables::new(stack, true, false, 0, 0, 0);
+    let tables = &StackTables::new(stack, true, false, 2, 2, 0);
     verify_wrong_chunk_value(stack, tables, chunk, read_addr, read_value);
 
     tables.drop(stack);

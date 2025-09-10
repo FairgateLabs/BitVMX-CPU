@@ -67,6 +67,34 @@ pub fn nib_to_bin(stack: &mut StackTracker) {
     }
 }
 
+pub fn static_right_shift_2(
+    stack: &mut StackTracker,
+    tables: &StackTables,
+    number: StackVariable,
+) -> StackVariable {
+    let size = stack.get_size(number);
+    for n in 0..size {
+        stack.move_var_sub_n(number, 0);
+        if n < size - 1 {
+            stack.op_dup();
+            stack.get_value_from_table(tables.lshift.shift_2, None);
+            stack.to_altstack();
+        }
+
+        stack.get_value_from_table(tables.rshift.shift_2, None);
+
+        if n > 0 {
+            stack.op_add();
+        }
+
+        if n < size - 1 {
+            stack.from_altstack();
+        }
+    }
+
+    stack.join_in_stack(size, None, Some("right_shift_2"))
+}
+
 //expects the shift ammount and the number to be shifted on the stack
 pub fn shift_number(
     stack: &mut StackTracker,
@@ -1434,8 +1462,7 @@ pub fn verify_wrong_chunk_value(
     let base_addr = stack.number_u32(chunk.base_addr);
     let offset = sub(stack, &tables, address, base_addr);
 
-    let to_shift = stack.number(2);
-    let index = shift_number(stack, to_shift, offset, true, false);
+    let index = static_right_shift_2(stack, tables, offset);
 
     let index_nibbles = stack.explode(index);
     nibbles_to_number(stack, index_nibbles);
@@ -1495,10 +1522,12 @@ pub fn address_in_range(stack: &mut StackTracker, range: &(u32, u32), address: &
     let end = stack.number_u32(range.1);
     let address_copy = stack.copy_var(*address);
 
+    // start <= address
     is_equal_to(stack, &start, &address_copy);
     is_lower_than(stack, start, address_copy, true);
     stack.op_boolor();
 
+    // address <= end
     let address_copy = stack.copy_var(*address);
     is_equal_to(stack, &end, &address_copy);
     is_lower_than(stack, address_copy, end, true);
@@ -1710,6 +1739,26 @@ mod tests {
         test_shift_case(0xF100_0013, 13, true, true, 0xFFFF_8800);
         test_shift_case(0xF100_0013, 13, true, false, 0x0007_8800);
         test_shift_case(0xF100_0013, 13, false, false, 0x0002_6000);
+    }
+
+    fn test_static_right_shift_2_case(value: u32, expected: u32) {
+        let mut stack = StackTracker::new();
+        let tables = &StackTables::new(&mut stack, false, false, 2, 2, 0);
+        let number = stack.number_u32(value);
+        let shifted = static_right_shift_2(&mut stack, tables, number);
+        println!("Size:  {} ", stack.get_script().len());
+        let expected = stack.number_u32(expected);
+        stack.equals(shifted, true, expected, true);
+        tables.drop(&mut stack);
+        stack.op_true();
+        assert!(stack.run().success);
+    }
+
+    #[test]
+    fn test_static_right_shift_2() {
+        test_static_right_shift_2_case(0b1101_1011, 0b0011_0110);
+        test_static_right_shift_2_case(0xF100_0013, 0x3C40_0004);
+        test_static_right_shift_2_case(3, 0);
     }
 
     #[test]
@@ -1980,7 +2029,7 @@ mod tests {
 
         let address = stack.number_u32(address);
         let value = stack.number_u32(value);
-        let tables = &StackTables::new(&mut stack, true, false, 0, 0, 0);
+        let tables = &StackTables::new(&mut stack, true, false, 2, 2, 0);
 
         verify_wrong_chunk_value(&mut stack, tables, chunk, address, value);
         tables.drop(&mut stack);
