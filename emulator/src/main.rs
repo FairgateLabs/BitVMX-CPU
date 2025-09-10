@@ -14,7 +14,7 @@ use emulator::{
     },
     executor::{
         fetcher::execute_program,
-        utils::{FailConfiguration, FailExecute, FailOpcode, FailReads, FailTraceWrite, FailWrite},
+        utils::{FailConfiguration, FailExecute, FailOpcode, FailReads, FailWrite},
     },
     loader::program::{generate_rom_commitment, load_elf, Program},
     EmulatorError, ExecutionResult,
@@ -181,10 +181,6 @@ enum Commands {
         /// Command File to write the result
         #[arg(short, long, value_name = "COMMAND_PATH")]
         command_file: String,
-
-        /// Nary Search type
-        #[arg(short, long, value_name = "NARY_TYPE")]
-        nary_type: NArySearchType,
     },
 
     VerifierChooseChallenge {
@@ -338,10 +334,6 @@ enum Commands {
         #[arg(long, value_names = &["step", "address_original", "value", "modified_address"], num_args = 4)]
         fail_write: Option<Vec<String>>,
 
-        /// Fail trace write **after** calculating the step hash
-        #[arg(long, value_names = &["step", "address", "value"])]
-        fail_trace_write: Option<Vec<String>>,
-
         /// Fail while reading the pc at the given step
         #[arg(long)]
         fail_pc: Option<u64>,
@@ -407,7 +399,6 @@ fn main() -> Result<(), EmulatorError> {
             fail_read_1: fail_read_1_args,
             fail_read_2: fail_read_2_args,
             fail_write: fail_write_args,
-            fail_trace_write: fail_trace_write_args,
             fail_opcode: fail_opcode_args,
             dump_mem,
             fail_pc,
@@ -468,14 +459,12 @@ fn main() -> Result<(), EmulatorError> {
             };
 
             let fail_write = fail_write_args.as_ref().map(FailWrite::new);
-            let fail_trace_write = fail_trace_write_args.as_ref().map(FailTraceWrite::new);
             let fail_opcode = fail_opcode_args.as_ref().map(FailOpcode::new);
 
             let debugvar = *debug;
             let fail_config = FailConfiguration {
                 fail_hash: *fail_hash,
                 fail_hash_until: *fail_hash_until,
-                fail_trace_write,
                 fail_execute,
                 fail_reads,
                 fail_write,
@@ -632,14 +621,12 @@ fn main() -> Result<(), EmulatorError> {
             v_decision,
             fail_config_prover,
             command_file,
-            nary_type,
         }) => {
             let result: TraceRWStep = prover_final_trace(
                 pdf,
                 checkpoint_prover_path,
                 *v_decision,
                 fail_config_prover.clone(),
-                *nary_type,
             )?;
             info!("Prover final trace: {:?}", result);
 

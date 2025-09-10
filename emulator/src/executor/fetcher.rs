@@ -148,14 +148,6 @@ pub fn execute_program(
             }
         }
 
-        if let Some(fail_trace_write) = &fail_config.fail_trace_write {
-            if fail_trace_write.step == program.step {
-                if let Ok(trace) = trace.as_mut() {
-                    trace.trace_step.write_1 = fail_trace_write.trace_write.clone()
-                }
-            }
-        }
-
         if let Some(step) = mem_dump {
             if program.step == step {
                 info!("\n========== Dumping memory at step: {} ==========", step);
