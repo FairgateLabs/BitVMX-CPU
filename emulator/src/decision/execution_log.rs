@@ -1,7 +1,7 @@
 use bitvmx_cpu_definitions::trace::TraceRWStep;
 use serde::{Deserialize, Serialize};
 
-use crate::{EmulatorError, ExecutionResult};
+use crate::{decision::nary_search::NArySearchType, EmulatorError, ExecutionResult};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ExecutionLog {
@@ -52,6 +52,13 @@ impl ProverChallengeLog {
 
     pub fn load(path: &str) -> Result<Self, EmulatorError> {
         deserialize_challenge_log(path)
+    }
+
+    pub fn get_nary_log(&mut self, nary_search: NArySearchType) -> &mut ProverNAryLog {
+        match nary_search {
+            NArySearchType::ConflictStep => &mut self.conflict_step_log,
+            NArySearchType::ReadValueChallenge => &mut self.read_challenge_log,
+        }
     }
 }
 
@@ -109,6 +116,13 @@ impl VerifierChallengeLog {
 
     pub fn load(path: &str) -> Result<Self, EmulatorError> {
         deserialize_challenge_log(path)
+    }
+
+    pub fn get_nary_log(&mut self, nary_search: NArySearchType) -> &mut VerifierNAryLog {
+        match nary_search {
+            NArySearchType::ConflictStep => &mut self.conflict_step_log,
+            NArySearchType::ReadValueChallenge => &mut self.read_challenge_log,
+        }
     }
 }
 

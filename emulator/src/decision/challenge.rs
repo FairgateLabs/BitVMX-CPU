@@ -68,7 +68,7 @@ pub fn prover_get_hashes_for_round(
 ) -> Result<Vec<String>, EmulatorError> {
     let mut challenge_log = ProverChallengeLog::load(checkpoint_path)?;
     let input = challenge_log.input.clone();
-    let nary_log = nary_type.get_prover_nary_log(&mut challenge_log);
+    let nary_log = challenge_log.get_nary_log(nary_type);
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
 
     let new_base = match round {
@@ -166,7 +166,7 @@ pub fn verifier_choose_segment(
     let mut challenge_log = VerifierChallengeLog::load(checkpoint_path)?;
     let input = challenge_log.input.clone();
 
-    let nary_log = nary_type.get_verifier_nary_log(&mut challenge_log);
+    let nary_log = challenge_log.get_nary_log(nary_type);
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
 
     let hashes = program_def.get_round_hashes(
@@ -206,11 +206,10 @@ pub fn prover_final_trace(
     checkpoint_path: &str,
     final_bits: u32,
     fail_config: Option<FailConfiguration>,
-    nary_type: NArySearchType,
 ) -> Result<TraceRWStep, EmulatorError> {
     let mut challenge_log = ProverChallengeLog::load(checkpoint_path)?;
     let input = challenge_log.input.clone();
-    let nary_log = nary_type.get_prover_nary_log(&mut challenge_log);
+    let nary_log = challenge_log.get_nary_log(NArySearchType::ConflictStep);
 
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
     let nary_def = program_def.nary_def();
@@ -800,14 +799,8 @@ mod tests {
 
         //PROVER PROVIDES EXECUTE STEP (and reveals full_trace)
         //Use v_desision + 1 as v_decision defines the last agreed step
-        let final_trace = prover_final_trace(
-            pdf,
-            chk_prover_path,
-            v_decision + 1,
-            fail_config_prover,
-            NArySearchType::ConflictStep,
-        )
-        .unwrap();
+        let final_trace =
+            prover_final_trace(pdf, chk_prover_path, v_decision + 1, fail_config_prover).unwrap();
         info!("Prover final trace: {:?}", final_trace.to_csv());
 
         let result = verify_script(&final_trace, REGISTERS_BASE_ADDRESS, &None);
@@ -857,16 +850,6 @@ mod tests {
                     .unwrap();
                     info!("{:?}", v_decision);
                 }
-
-                let final_trace = prover_final_trace(
-                    pdf,
-                    chk_prover_path,
-                    v_decision + 1,
-                    fail_config_prover_read_challenge,
-                    NArySearchType::ReadValueChallenge,
-                )
-                .unwrap();
-                info!("Prover final trace: {:?}", final_trace.to_csv());
 
                 verifier_choose_challenge_for_read_challenge(
                     pdf,

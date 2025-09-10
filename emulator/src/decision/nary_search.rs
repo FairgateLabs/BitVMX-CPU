@@ -4,36 +4,10 @@ use clap::ValueEnum;
 use serde::Serialize;
 use tracing::{error, info};
 
-use crate::decision::execution_log::{
-    ProverChallengeLog, ProverNAryLog, VerifierChallengeLog, VerifierNAryLog,
-};
-
 #[derive(Clone, Copy, PartialEq, ValueEnum)]
 pub enum NArySearchType {
     ConflictStep,
     ReadValueChallenge,
-}
-
-impl NArySearchType {
-    pub fn get_prover_nary_log<'a>(
-        &'a self,
-        challenge_log: &'a mut ProverChallengeLog,
-    ) -> &'a mut ProverNAryLog {
-        match self {
-            Self::ConflictStep => &mut challenge_log.conflict_step_log,
-            Self::ReadValueChallenge => &mut challenge_log.read_challenge_log,
-        }
-    }
-
-    pub fn get_verifier_nary_log<'a>(
-        &'a self,
-        challenge_log: &'a mut VerifierChallengeLog,
-    ) -> &'a mut VerifierNAryLog {
-        match self {
-            Self::ConflictStep => &mut challenge_log.conflict_step_log,
-            Self::ReadValueChallenge => &mut challenge_log.read_challenge_log,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize)]
