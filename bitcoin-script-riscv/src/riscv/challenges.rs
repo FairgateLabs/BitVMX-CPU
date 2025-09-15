@@ -486,6 +486,7 @@ pub fn uninitialized_challenge(
         read_selector,
     );
 
+    // TODO: ASSERT NOT TOO MANY SECTIONS
     address_in_sections(stack, &read_addr, uninitialized_sections);
     stack.op_verify();
 

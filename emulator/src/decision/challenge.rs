@@ -436,6 +436,8 @@ pub fn verifier_choose_challenge(
         ));
     }
 
+    // TODO: check read_step < current_step
+
     // check const read value
     let is_read_1_conflict = trace.read_1.value != my_trace.read_1.value;
     let is_read_2_conflict = trace.read_2.value != my_trace.read_2.value;
@@ -1784,6 +1786,7 @@ mod tests {
         );
     }
 
+    // TODO: add case for write to the same address and different value
     #[test]
     fn test_challenge_modified_value_doesnt_lie() {
         init_trace();
