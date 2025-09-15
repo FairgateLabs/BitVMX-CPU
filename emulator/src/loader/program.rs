@@ -562,8 +562,8 @@ impl Program {
 
     pub fn get_uninitialized_ranges(
         &self,
-        program_definition: ProgramDefinition,
-    ) -> Vec<(u32, u32)> {
+        program_definition: &ProgramDefinition,
+    ) -> SectionDefinition {
         let mut uninitialized: Vec<(u32, u32)> = self
             .sections
             .iter()
@@ -599,7 +599,9 @@ impl Program {
             uninitialized.push((uninit_start, end));
         }
 
-        uninitialized
+        SectionDefinition {
+            ranges: uninitialized,
+        }
     }
 }
 

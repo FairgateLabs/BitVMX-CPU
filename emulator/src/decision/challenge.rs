@@ -1,7 +1,7 @@
 use bitvmx_cpu_definitions::{
     challenge::ChallengeType,
     constants::{CHUNK_SIZE, LAST_STEP_INIT},
-    memory::{Chunk, SectionDefinition},
+    memory::Chunk,
     trace::{generate_initial_step_hash, hashvec_to_string, validate_step_hash, TraceRWStep},
 };
 
@@ -505,15 +505,13 @@ pub fn verifier_choose_challenge(
                 || force == ForceChallenge::UninitializedData
             {
                 info!("Verifier choose to challenge invalid UNINITIALIZED DATA");
-                let uninitilized_ranges = program.get_uninitialized_ranges(program_def);
+                let uninitilized_ranges = program.get_uninitialized_ranges(&program_def);
 
                 return Ok(ChallengeType::UninitializedData(
                     trace.read_1,
                     trace.read_2,
                     read_selector,
-                    return_script_parameters.then_some(SectionDefinition {
-                        ranges: uninitilized_ranges,
-                    }),
+                    return_script_parameters.then_some(uninitilized_ranges),
                 ));
             }
         } else {

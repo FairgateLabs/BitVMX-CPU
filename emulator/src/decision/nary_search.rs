@@ -1,13 +1,33 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, str::FromStr};
 
 use clap::ValueEnum;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 
-#[derive(Clone, Copy, PartialEq, ValueEnum)]
+#[derive(Clone, Copy, PartialEq, ValueEnum, Serialize, Deserialize, Debug)]
 pub enum NArySearchType {
     ConflictStep,
     ReadValueChallenge,
+}
+impl ToString for NArySearchType {
+    fn to_string(&self) -> String {
+        match self {
+            NArySearchType::ConflictStep => "conflict-step".to_string(),
+            NArySearchType::ReadValueChallenge => "read-value-challenge".to_string(),
+        }
+    }
+}
+
+impl FromStr for NArySearchType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "conflict-step" => Ok(NArySearchType::ConflictStep),
+            "read-value-challenge" => Ok(NArySearchType::ReadValueChallenge),
+            _ => Err(format!("'{}' is not a valid NArySearchType", s)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
