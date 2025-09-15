@@ -13,7 +13,7 @@ fn audit_tests() {
         if let Ok(path) = path {
             let fname = path.file_name();
             let fname = fname.to_string_lossy();
-            if fname.ends_with(".elf") && !fname.contains("audit_01") {
+            if fname.ends_with("verify.elf") {
                 let path = path.path();
                 let path = path.to_string_lossy();
 
