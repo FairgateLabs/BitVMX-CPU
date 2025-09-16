@@ -104,5 +104,6 @@ pub fn verify_file(
         None,
         None,
         FailConfiguration::default(),
+        false,
     ))
 }
