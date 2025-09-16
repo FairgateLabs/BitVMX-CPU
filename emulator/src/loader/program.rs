@@ -5,7 +5,7 @@ use bitcoin_script_riscv::riscv::instruction_mapping::{
 };
 use bitvmx_cpu_definitions::{
     constants::LAST_STEP_INIT,
-    memory::{MemoryAccessType, SectionDefinition},
+    memory::{Chunk, MemoryAccessType, SectionDefinition},
     trace::{generate_initial_step_hash, ProgramCounter, TraceRead, TraceWrite},
 };
 use elf::{abi::SHF_EXECINSTR, abi::SHF_WRITE, endian::LittleEndian, ElfBytes};
@@ -13,7 +13,9 @@ use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 use tracing::{error, info};
 
-use crate::{constants::*, EmulatorError, ExecutionResult};
+use crate::{
+    constants::*, loader::program_definition::ProgramDefinition, EmulatorError, ExecutionResult,
+};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Section {
@@ -76,17 +78,12 @@ impl Section {
         (self.start, self.start + self.size - 1)
     }
 
-    pub fn contains(&self, address: u32) -> bool {
-        let (start, end) = self.range();
-        return address >= start && address <= end - 3;
-    }
-
     pub fn is_merge_compatible(&self, other: &Self) -> bool {
-        return self.is_code == other.is_code
+        self.is_code == other.is_code
             && self.is_write == other.is_write
             && self.initialized == other.initialized
             && self.registers == other.registers
-            && self.start + self.size == other.start;
+            && self.start + self.size == other.start
     }
 
     pub fn merge_in_place(&mut self, other: Self) {
@@ -203,6 +200,30 @@ pub struct Program {
 }
 
 impl Program {
+    pub fn load_input(
+        &mut self,
+        input: Vec<u8>,
+        input_section_name: &str,
+        little_endian: bool,
+    ) -> Result<(), ExecutionResult> {
+        // if the step is non-zero then we are running the program from a checkpoint
+        // so we shouldn't rewrite the input. First, because it's already included in the checkpoint
+        // and second, because the input section is writable and the value could've been changed
+        if !input.is_empty() && self.step == 0 {
+            if let Some(section) = self.find_section_by_name_mut(input_section_name) {
+                let input_as_u32 = vec_u8_to_vec_u32(&input, little_endian);
+                for (i, byte) in input_as_u32.iter().enumerate() {
+                    section.data[i] = *byte;
+                }
+            } else {
+                return Err(ExecutionResult::SectionNotFound(
+                    input_section_name.to_string(),
+                ));
+            }
+        }
+
+        Ok(())
+    }
     pub fn serialize_to_file(&self, fpath: &str) {
         let fname = format!("{}/checkpoint.{}.json", fpath, self.step);
         let serialized = serde_json::to_string(self).unwrap();
@@ -256,7 +277,7 @@ impl Program {
         self.sections = merged;
     }
 
-    pub fn generate_sections_definitions(&mut self) {
+    fn generate_sections_definitions(&mut self) {
         for section in &self.sections {
             let section_range = section.range();
 
@@ -273,7 +294,7 @@ impl Program {
         }
     }
 
-    pub fn sanity_check(&self) -> Result<(), EmulatorError> {
+    pub fn sanity_check(&self, sp_base_address: Option<u32>) -> Result<(), EmulatorError> {
         //check overlapping sections
         for i in 0..self.sections.len() {
             for j in i + 1..self.sections.len() {
@@ -289,6 +310,44 @@ impl Program {
                 }
             }
         }
+
+        let low_section = self.sections.iter().find(|section| section.start < 0x1000);
+        if let Some(low_section) = low_section {
+            return Err(EmulatorError::CantLoadPorgram(format!(
+                "Cannot load program: section '{}' starts at a low memory address (0x{:X}), which is below the allowed threshold of 0x1000.",
+                low_section.name,
+                low_section.start,
+            )));
+        }
+
+        if sp_base_address.is_none() {
+            return Ok(());
+        }
+
+        let stack_section = self.find_section(sp_base_address.unwrap());
+
+        if stack_section.is_err() {
+            return Ok(());
+        }
+
+        let stack_section = stack_section.unwrap();
+
+        let section_next_to_stack = self.sections.iter().find(|&other_section| {
+            let stack_section_end = stack_section.start + stack_section.size;
+            let other_section_end = other_section.start + other_section.size;
+
+            (other_section != stack_section)
+                && (stack_section_end == other_section.start
+                    || other_section_end == stack_section.start)
+        });
+
+        if let Some(section_next_to_stack) = section_next_to_stack {
+            return Err(EmulatorError::CantLoadPorgram(format!(
+                "Cannot load program: section '{}' is next to the stack section and a stack overflow could corrupt its content",
+                section_next_to_stack.name
+            )));
+        }
+
         Ok(())
     }
 
@@ -300,10 +359,9 @@ impl Program {
         self.sections.insert(pos, section);
     }
 
-    fn find_section_idx(&self, address: u32) -> Result<usize, ExecutionResult> {
+    pub fn find_section_idx(&self, address: u32) -> Result<usize, ExecutionResult> {
         // Binary search to find the appropriate section
-        Ok(self
-            .sections
+        self.sections
             .binary_search_by(|section| {
                 if address < section.start {
                     Ordering::Greater
@@ -318,7 +376,7 @@ impl Program {
                     "Address 0x{:08x} not found in any section",
                     address
                 ))
-            })?)
+            })
     }
 
     // Find the section that contains the given address
@@ -351,7 +409,11 @@ impl Program {
         Ok(section)
     }
 
-    pub fn find_section_by_name(&mut self, name: &str) -> Option<&mut Section> {
+    pub fn find_section_by_name(&self, name: &str) -> Option<&Section> {
+        self.sections.iter().find(|section| section.name == name)
+    }
+
+    pub fn find_section_by_name_mut(&mut self, name: &str) -> Option<&mut Section> {
         self.sections
             .iter_mut()
             .find(|section| section.name == name)
@@ -467,88 +529,79 @@ impl Program {
         }
     }
 
-    pub fn get_chunks(&self, chunk_size: u32) -> Vec<(u32, Vec<u32>)> {
-        let mut chunks = Vec::new();
-
-        for section in &self.sections {
-            if !section.is_code {
-                continue;
-            }
-
-            for (index, chunk) in section.data.chunks(chunk_size as usize).enumerate() {
-                chunks.push((
-                    section.start + index as u32 * chunk_size,
-                    chunk
-                        .to_vec()
-                        .iter()
-                        .map(|opcode| u32::from_be(*opcode))
-                        .collect(),
-                ));
-            }
-        }
-
-        chunks
+    pub fn get_chunks(&self, chunk_size: u32, filter: impl Fn(&&Section) -> bool) -> Vec<Chunk> {
+        self.sections
+            .iter()
+            .filter(filter)
+            .flat_map(|section| {
+                section
+                    .data
+                    .chunks(chunk_size as usize)
+                    .enumerate()
+                    .map(|(index, chunk)| {
+                        let offset = section.start + index as u32 * chunk_size;
+                        let data = chunk.iter().map(|opcode| u32::from_be(*opcode)).collect();
+                        Chunk {
+                            base_addr: offset,
+                            data,
+                        }
+                    })
+            })
+            .collect()
     }
 
-    // Avoids calling get_chunks().len() to prevent unnecessary Vec allocations and cloning
-    pub fn get_chunk_count(&self, chunk_size: u32) -> u32 {
-        let mut chunk_count = 0;
-
-        for section in &self.sections {
-            if !section.is_code {
-                continue;
-            }
-
-            let section_instrs = section.size / 4;
-            // only counts full chunks
-            let mut section_chunks = section_instrs / chunk_size;
-
-            // if section_instrs isn't a multiple of chunk_size that means that there is a non-full chunk we have to count
-            if section_instrs % chunk_size != 0 {
-                section_chunks += 1;
-            }
-
-            chunk_count += section_chunks;
-        }
-
-        chunk_count
+    pub fn get_initialized_chunks(&self, chunk_size: u32) -> Vec<Chunk> {
+        self.get_chunks(chunk_size, |section| {
+            section.initialized && !section.is_code
+        })
     }
 
-    pub fn get_chunk_info(&self, address: u32, chunk_size: u32) -> (u32, u32, usize) {
-        let mut chunk_index = 0;
+    pub fn get_code_chunks(&self, chunk_size: u32) -> Vec<Chunk> {
+        self.get_chunks(chunk_size, |section| section.is_code)
+    }
 
-        for section in &self.sections {
-            if !section.is_code {
-                continue;
-            }
+    pub fn get_uninitialized_ranges(
+        &self,
+        program_definition: &ProgramDefinition,
+    ) -> SectionDefinition {
+        let mut uninitialized: Vec<(u32, u32)> = self
+            .sections
+            .iter()
+            .filter(|section| {
+                // we do inputs separately
+                !section.initialized && section.name != program_definition.input_section_name
+            })
+            .map(|section| section.range())
+            .collect();
 
-            if section.contains(address) {
-                let section_start = section.start;
-                let offset = address - section_start;
-                let instr_index = offset / 4;
+        let input_section = self
+            .find_section_by_name(&program_definition.input_section_name)
+            .expect("Input section not found");
 
-                chunk_index += instr_index / chunk_size;
+        // input section is usually bigger than the actual input of the program, so the remaining space should be uninitialized
+        let input_size = program_definition
+            .inputs
+            .iter()
+            .fold(0, |acc, input| acc + input.size);
 
-                let chunk_start_instr = instr_index - (instr_index % chunk_size);
-                let chunk_base_addr = section_start + chunk_start_instr * 4;
-                let chunk_start_index = chunk_start_instr as usize;
+        let (start, end) = input_section.range();
+        let uninit_start = start + input_size as u32;
 
-                return (chunk_index, chunk_base_addr, chunk_start_index);
-            }
+        assert!(
+            uninit_start <= end,
+            "Input size ({}) exceeds input section size ({}..{})",
+            input_size,
+            start,
+            end
+        );
 
-            let section_instrs = section.size / 4;
-            // only counts full chunks
-            let mut section_chunks = section_instrs / chunk_size;
-
-            // if section_instrs isn't a multiple of chunk_size that means that there is a non-full chunk we have to count
-            if section_instrs % chunk_size != 0 {
-                section_chunks += 1;
-            }
-
-            chunk_index += section_chunks;
+        if uninit_start < end {
+            uninitialized.push((uninit_start, end));
         }
 
-        unreachable!("Non-executable address: 0x{:08X}", address);
+        SectionDefinition {
+            ranges: uninitialized,
+        }
     }
 }
 
@@ -660,9 +713,9 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Result<Program, EmulatorErr
         program.add_section(Section::new_with_data(&name, data, start, size, is_code, is_write, initialized));
     });
 
+    program.sanity_check(Some(STACK_BASE_ADDRESS))?;
     program.merge_sections();
     program.generate_sections_definitions();
-    program.sanity_check()?;
 
     Ok(program)
 }
@@ -754,7 +807,7 @@ mod tests {
         let mut program = Program::new(0, 0, 0);
         program.add_section(Section::new("test_1", 0, 10, false, true, false));
         program.add_section(Section::new("test_2", 9, 5, false, true, false));
-        assert!(program.sanity_check().is_err());
+        assert!(program.sanity_check(None).is_err());
     }
 
     #[test]
@@ -826,61 +879,5 @@ mod tests {
 
         // there are no new sections
         assert_eq!(program.sections.len(), 4);
-    }
-
-    #[test]
-    fn test_chunk_info() {
-        let mut program = Program::new(0, 0, 0);
-
-        // first section has 3 chunks, two full chunks of 500 instructions and half a chunk of 250 instructions
-        program.add_section(Section::new(
-            "code_1",
-            1000,
-            500 * 4 * 2 + 250 * 4,
-            true,
-            false,
-            false,
-        ));
-        program.add_section(Section::new("code_2", 10000, 500 * 4, true, false, false));
-
-        // start of first chunk
-        let (chunk_index, chunk_base_addr, chunk_start_index) = program.get_chunk_info(1000, 500);
-        assert_eq!(chunk_index, 0);
-        assert_eq!(chunk_base_addr, 1000);
-        assert_eq!(chunk_start_index, 0);
-
-        // middle of first chunk
-        let (chunk_index, chunk_base_addr, chunk_start_index) =
-            program.get_chunk_info(1000 + 250 * 4, 500);
-        assert_eq!(chunk_index, 0);
-        assert_eq!(chunk_base_addr, 1000);
-        assert_eq!(chunk_start_index, 0);
-
-        // start of second chunk
-        let (chunk_index, chunk_base_addr, chunk_start_index) =
-            program.get_chunk_info(1000 + 500 * 4, 500);
-        assert_eq!(chunk_index, 1);
-        assert_eq!(chunk_base_addr, 1000 + 500 * 4);
-        assert_eq!(chunk_start_index, 500);
-
-        // middle of second chunk
-        let (chunk_index, chunk_base_addr, chunk_start_index) =
-            program.get_chunk_info(1000 + 500 * 4 + 250 * 4, 500);
-        assert_eq!(chunk_index, 1);
-        assert_eq!(chunk_base_addr, 1000 + 500 * 4);
-        assert_eq!(chunk_start_index, 500);
-
-        // start of first chunk of the second section
-        let (chunk_index, chunk_base_addr, chunk_start_index) = program.get_chunk_info(10000, 500);
-        assert_eq!(chunk_index, 3);
-        assert_eq!(chunk_base_addr, 10000);
-        assert_eq!(chunk_start_index, 0);
-
-        // middle of first chunk of the second section
-        let (chunk_index, chunk_base_addr, chunk_start_index) =
-            program.get_chunk_info(10000 + 250 * 4, 500);
-        assert_eq!(chunk_index, 3);
-        assert_eq!(chunk_base_addr, 10000);
-        assert_eq!(chunk_start_index, 0);
     }
 }
