@@ -1881,8 +1881,11 @@ mod tests {
             false,
             fail_execute,
             None,
+            None,
+            None,
             true,
             ForceCondition::No,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
     }
@@ -1917,8 +1920,11 @@ mod tests {
             false,
             fail_execute,
             None,
+            None,
+            None,
             true,
             ForceCondition::No,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
     }
@@ -1936,8 +1942,11 @@ mod tests {
             true,
             Some(fail_mem_protection),
             None,
+            None,
+            None,
             true,
             ForceCondition::No,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
     }
