@@ -1850,4 +1850,76 @@ mod tests {
             ForceChallenge::No,
         );
     }
+
+    #[test]
+    fn test_challenge_load_to_x0_aligned() {
+        init_trace();
+
+        let fail_execute = FailExecute {
+            step: 9,
+            fake_trace: TraceRWStep::new(
+                9,
+                TraceRead::new(4026531900, 2852134912, 8),
+                TraceRead::new(2852134912, 0, LAST_STEP_INIT),
+                TraceReadPC::new(ProgramCounter::new(2147483796, 0), 499715),
+                TraceStep::new(TraceWrite::default(), ProgramCounter::new(2147483800, 0)),
+                None,
+                MemoryWitness::new(
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Memory,
+                    MemoryAccessType::Unused,
+                ),
+            ),
+        };
+
+        let fail_execute = Some(FailConfiguration::new_fail_execute(fail_execute));
+
+        test_challenge_aux(
+            "audit_02_aligned",
+            "audit_02_aligned.yaml",
+            0,
+            false,
+            fail_execute,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+        );
+    }
+
+    #[test]
+    fn test_challenge_load_to_x0_unaligned() {
+        init_trace();
+
+        let fail_execute = FailExecute {
+            step: 10,
+            fake_trace: TraceRWStep::new(
+                10,
+                TraceRead::new(4026531900, 2852134912, 8),
+                TraceRead::new(2852134912, 0, LAST_STEP_INIT),
+                TraceReadPC::new(ProgramCounter::new(2147483796, 1), 4292321283),
+                TraceStep::new(TraceWrite::new(4026531972, 0), ProgramCounter::new(2147483796, 2)),
+                None,
+                MemoryWitness::new(
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Memory,
+                    MemoryAccessType::Register,
+                ),
+            ),
+        };
+
+        let fail_execute = Some(FailConfiguration::new_fail_execute(fail_execute));
+
+        test_challenge_aux(
+            "audit_02_unaligned",
+            "audit_02_unaligned.yaml",
+            0,
+            false,
+            fail_execute,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+        );
+    }
 }
