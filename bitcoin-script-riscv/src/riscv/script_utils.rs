@@ -949,8 +949,8 @@ pub fn multiply(
 
     logic_table.drop(stack);
 
-    let modulo = modulo_table(stack, 128);
-    let quotient = quotient_table_ex(stack, 128);
+    let modulo = modulo_table(stack, 135);
+    let quotient = quotient_table_ex(stack, 135);
 
     for _ in 0..15 {
         stack.from_altstack();
@@ -1691,6 +1691,33 @@ mod tests {
         test_multiply_aux(0xFFFF_FFFF, 0xFFFF_FFFF, 0xFFFF_FFFE, 0x0000_0001);
         test_multiply_aux(0x0, 0xFFFF_FFFF, 0, 0);
         test_multiply_aux(0xFFFF_FFFF, 0x1, 0x0, 0xFFFF_FFFF);
+        test_multiply_aux(0x1B49_F21B, 0x1F51_E1ED, 0x0356_AECC, 0x20C9_DDFF);
+    }
+
+    fn test_mulh_aux(a: i32, b: i32, expected: i32) {
+        let mut stack = StackTracker::new();
+        let tables = StackTables::new(&mut stack, true, true, 0, 0, 0);
+
+
+        let a = stack.number_u32(a as u32);
+        let b = stack.number_u32(b as u32);
+
+        let result = mulh(&mut stack, &tables, a, b, false);
+
+        let expected = stack.number_u32(expected as u32);
+
+        stack.equals(result, true, expected, true);
+        tables.drop(&mut stack);
+
+        stack.op_true();
+
+        assert!(stack.run().success);
+    }
+
+    #[test]
+    fn test_mulh() {
+        test_mulh_aux(-0x7BDD_925D, -0x7F37_3DED, 0x3D8D_A62D);
+        test_mulh_aux(0x2A37_E15A, -0xC16_20C2, -0x1FE_44C5);
     }
 
     fn test_division_aux(

@@ -1,10 +1,17 @@
 #![allow(dead_code)]
 use bitvmx_cpu_definitions::{memory::SectionDefinition, trace::ProgramCounter};
-use emulator::{executor::{fetcher::{execute_program, FullTrace}, utils::FailConfiguration}, loader::program::{load_elf, Program, Registers, Section}, EmulatorError, ExecutionResult};
+use emulator::{
+    executor::{
+        fetcher::{execute_program, FullTrace},
+        utils::FailConfiguration,
+    },
+    loader::program::{load_elf, Program, Registers, Section},
+    EmulatorError, ExecutionResult,
+};
 use rand::Rng;
 use riscv_decode::types::{BType, IType, JType, RType, SType, ShiftType, UType};
-use tracing::info;
 use std::ops::RangeInclusive;
+use tracing::info;
 
 const PROGRAM_REG_RANGE: RangeInclusive<u32> = 0x1..=0x1F;
 
