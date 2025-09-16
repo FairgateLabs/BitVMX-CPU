@@ -523,30 +523,30 @@ pub fn op_arithmetic(
     let value_2 = program.registers.get(x.rs2());
 
     let witness = match instruction {
-        Rem(_) => match value_2 {
-            0 => Some(0xFFFF_FFFF),
-            0xFFFF_FFFF => Some(value_1),
-            _ => Some((value_1 as i32 / value_2 as i32) as u32),
-        },
-        Div(_) => match value_2 {
-            0 => Some(value_1),
-            0xFFFF_FFFF => Some(0),
-            _ => Some((value_1 as i32 % value_2 as i32) as u32),
-        },
-        Remu(_) => {
+        Rem(_) => Some(match (value_1 as i32, value_2 as i32) {
+            (_, 0) => (-1 as i32) as u32,
+            (std::i32::MIN, -1) => std::i32::MIN as u32,
+            _ => (value_1 as i32 / value_2 as i32) as u32,
+        }),
+        Div(_) => Some(match (value_1 as i32, value_2 as i32) {
+            (_, 0) => value_1,
+            (std::i32::MIN, -1) => 0,
+            _ => (value_1 as i32 % value_2 as i32) as u32,
+        }),
+        Remu(_) => Some({
             if value_2 == 0 {
-                Some(0xFFFFFFFF)
+                std::u32::MAX
             } else {
-                Some(value_1 / value_2)
+                value_1 / value_2
             }
-        }
-        Divu(_) => {
+        }),
+        Divu(_) => Some({
             if value_2 == 0 {
-                Some(value_1)
+                value_1
             } else {
-                Some(value_1 % value_2)
+                value_1 % value_2
             }
-        }
+        }),
         _ => None,
     };
 
@@ -567,21 +567,21 @@ pub fn op_arithmetic(
             let result: u64 = (value_1 as u64) * (value_2 as u64);
             (result >> 32) as u32 // High 32 bits
         }
-        Div(_) => match value_2 {
-            0 => 0xFFFF_FFFF,
-            0xFFFF_FFFF => value_1,
+        Div(_) => match (value_1 as i32, value_2 as i32) {
+            (_, 0) => (-1 as i32) as u32,
+            (std::i32::MIN, -1) => std::i32::MIN as u32,
             _ => (value_1 as i32 / value_2 as i32) as u32,
         },
         Divu(_) => {
             if value_2 == 0 {
-                0xFFFFFFFF
+                std::u32::MAX
             } else {
                 value_1 / value_2
             }
         }
-        Rem(_) => match value_2 {
-            0 => value_1,
-            0xFFFF_FFFF => 0,
+        Rem(_) => match (value_1 as i32, value_2 as i32) {
+            (_, 0) => value_1,
+            (std::i32::MIN, -1) => 0,
             _ => (value_1 as i32 % value_2 as i32) as u32,
         },
         Remu(_) => {

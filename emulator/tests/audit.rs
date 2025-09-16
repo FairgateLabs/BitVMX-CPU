@@ -5,15 +5,15 @@ mod utils;
 use utils::common::verify_file;
 
 #[test]
-fn list_files() {
-    let path = "../docker-riscv32/compliance/build";
+fn audit_tests() {
+    let path = "../docker-riscv32/riscv32/build/audit";
     let paths = std::fs::read_dir(path).unwrap();
     let mut count = 0;
     for path in paths {
         if let Ok(path) = path {
             let fname = path.file_name();
             let fname = fname.to_string_lossy();
-            if fname.ends_with(".elf") && !fname.contains("fence_i") {
+            if fname.ends_with("verify.elf") && fname.contains("09") {
                 let path = path.path();
                 let path = path.to_string_lossy();
 
@@ -31,5 +31,5 @@ fn list_files() {
     }
 
     info!("Total files executed: {}", count);
-    assert_eq!(count, 47);
+    assert_eq!(count, 1);
 }

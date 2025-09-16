@@ -1,8 +1,9 @@
 #![allow(dead_code)]
 use bitvmx_cpu_definitions::{memory::SectionDefinition, trace::ProgramCounter};
-use emulator::loader::program::{Program, Registers, Section};
+use emulator::{executor::{fetcher::{execute_program, FullTrace}, utils::FailConfiguration}, loader::program::{load_elf, Program, Registers, Section}, EmulatorError, ExecutionResult};
 use rand::Rng;
 use riscv_decode::types::{BType, IType, JType, RType, SType, ShiftType, UType};
+use tracing::info;
 use std::ops::RangeInclusive;
 
 const PROGRAM_REG_RANGE: RangeInclusive<u32> = 0x1..=0x1F;
@@ -78,4 +79,31 @@ pub fn get_new_section() -> Section {
 pub fn rnd_range() -> u32 {
     let mut rng = rand::thread_rng();
     rng.gen_range(PROGRAM_REG_RANGE)
+}
+
+pub fn verify_file(
+    fname: &str,
+    verify_on_chain: bool,
+) -> Result<(ExecutionResult, FullTrace), EmulatorError> {
+    let mut program = load_elf(&fname, false)?;
+
+    info!("Execute program {}", fname);
+    Ok(execute_program(
+        &mut program,
+        Vec::new(),
+        ".bss",
+        false,
+        &None,
+        None,
+        false,
+        verify_on_chain,
+        false,
+        false,
+        false,
+        true,
+        None,
+        None,
+        FailConfiguration::default(),
+        false,
+    ))
 }
