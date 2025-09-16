@@ -461,4 +461,69 @@ mod utils_tests {
 
         assert_eq!(program.read_mem(4100).unwrap(), 0);
     }
+
+    #[test]
+    fn test_parse_value_invalid_hex() {
+        let result = std::panic::catch_unwind(|| parse_value::<u32>("0xZZZZ"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_value_invalid_decimal() {
+        let result = std::panic::catch_unwind(|| parse_value::<u32>("not_a_number"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_is_register_address_boundaries() {
+        let mut program = Program::new(0x1000, 0xF000_0000, 0xE000_0000);
+        let base = program.registers.get_base_address();
+        let last = program.registers.get_last_register_address();
+
+        assert!(is_register_address(&program, base));
+        assert!(is_register_address(&program, last));
+        assert!(!is_register_address(&program, base - 1));
+        assert!(!is_register_address(&program, last + 1));
+    }
+
+    #[test]
+    fn test_fail_read_patch_nonexistent_section() {
+        let mut program = Program::new(0x1000, 0xF000_0000, 0xE000_0000);
+        let fail_read_args = vec![
+            "10".to_string(),
+            "5000".to_string(),
+            "5".to_string(),
+            "5000".to_string(),
+            "15".to_string(),
+        ];
+        let fail_read = FailRead::new(&fail_read_args);
+        program.step = 9;
+
+        // Should not panic when section doesn't exist
+        fail_read.patch_mem(&mut program);
+    }
+
+    #[test]
+    fn test_fail_configuration_invalid_json() {
+        let result = FailConfiguration::from_str("{invalid}");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_fail_reads_partial_patch_trace() {
+        let mut trace = TraceRWStep::default();
+        let fail_read_1_args = vec![
+            "10".to_string(),
+            "4026531900".to_string(),
+            "5".to_string(),
+            "4026531900".to_string(),
+            "15".to_string(),
+        ];
+        let fail_reads = FailReads::new(Some(&fail_read_1_args), None);
+
+        fail_reads.patch_trace_reads(&mut trace, (true, false));
+
+        assert_eq!(trace.read_1.address, 4026531900);
+        assert_eq!(trace.read_2.address, 0); // Default value
+    }
 }

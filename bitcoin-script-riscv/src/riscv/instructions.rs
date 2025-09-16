@@ -911,6 +911,7 @@ pub fn verify(
 
     if let Some(mapping) = instruction_mapping {
         let instruction = riscv_decode::decode(opcode).unwrap();
+        println!("instruction to verify: {:?}", instruction);
         let key = get_key_from_instruction_and_micro(&instruction, micro);
         let (verification_script, _requires_witness) = mapping.get(&key).unwrap();
         stack.custom(verification_script.clone(), consumes, false, 0, "verify");
@@ -939,6 +940,8 @@ pub fn verify_execution(
     program: ProgramSpec,
 ) -> Result<(), ScriptValidation> {
     let instruction = riscv_decode::decode(opcode).unwrap();
+    println!("instruction to verify: {:?}", instruction);
+    // println!("instruction to hex: {:2x}", instruction.into());
     let mut result_step = execute_step(
         stack,
         &trace_read,
@@ -1592,5 +1595,207 @@ mod tests {
 
     fn reg_address(addr_num: u32) -> u32 {
         BASE_REGISTER_ADDRESS + addr_num * 4
+    }
+
+    mod fuzz_tests {
+        use super::*;
+        use rand::Rng;
+        use rand_pcg::Pcg32;
+        use std::panic;
+        use std::panic::AssertUnwindSafe;
+        const FUZZ_ITERATIONS: u32 = 100; // Increase for more thorough fuzzing
+
+        fn fuzz_generic_and_catch_panics<T, G, F>(
+            fuzzer_name: &str,
+            mut input_generator: G,
+            mut test_logic: F,
+        ) where
+            F: FnMut(T) -> bool + std::panic::UnwindSafe,
+            G: FnMut(&mut Pcg32) -> T,
+            T: std::fmt::Debug + Clone,
+        {
+            use rand::prelude::*;
+            use rand_pcg::Pcg32;
+            use std::env;
+
+            let seed_str =
+                env::var("FUZZ_SEED").unwrap_or_else(|_| rand::rng().random::<u64>().to_string());
+            let seed = seed_str.parse::<u64>().expect("FUZZ_SEED must be a number");
+            println!("--- Fuzzing {} with seed: {} ---", fuzzer_name, seed);
+            let mut rng = Pcg32::seed_from_u64(seed);
+
+            const ITERATIONS: u32 = FUZZ_ITERATIONS;
+            let mut panics = Vec::with_capacity(ITERATIONS as usize);
+            let mut failures = Vec::with_capacity(ITERATIONS as usize);
+            let mut oks = Vec::with_capacity(ITERATIONS as usize);
+
+            for _ in 0..ITERATIONS {
+                let input = input_generator(&mut rng);
+                let result = panic::catch_unwind(AssertUnwindSafe(|| test_logic(input.clone())));
+
+                match result {
+                    Ok(success) if !success => {
+                        failures.push(input);
+                    }
+                    Ok(success) if success => {
+                        oks.push(input);
+                    }
+                    Err(_) => {
+                        panics.push(input);
+                    }
+                    Ok(_) => unreachable!(),
+                }
+            }
+
+            if !panics.is_empty() || !failures.is_empty() {
+                println!(
+                    "\n--- Found {} OK Inputs for {} (seed: {}) ---",
+                    oks.len(),
+                    fuzzer_name,
+                    seed
+                );
+                println!(
+                    "\n--- Found {} Failing (No Panic) Inputs for {} (seed: {}) ---",
+                    failures.len(),
+                    fuzzer_name,
+                    seed
+                );
+                for input in &failures {
+                    println!("{:?}", input);
+                }
+                println!(
+                    "\n--- Found {} Panicking Inputs for {} (seed: {}) ---",
+                    panics.len(),
+                    fuzzer_name,
+                    seed
+                );
+                for input in &panics {
+                    println!("{:?}", input);
+                }
+                panic!("Fuzzer {} found divergences", fuzzer_name);
+            } else {
+                println!(
+                    "\n✅ Success! No divergences found for {} in {} iterations.",
+                    fuzzer_name, ITERATIONS
+                );
+            }
+        }
+
+        fn conditional_aux(
+            rs1_val: u32,
+            rs2_val: u32,
+            imm_val: u32,
+            funct3: u32,
+            instruction_fn: fn(BType) -> Instruction,
+            condition: fn(u32, u32) -> bool,
+        ) -> bool {
+            let mut stack = StackTracker::new();
+
+            // 1. Encode the instruction with the fuzzed inputs
+            // We use fixed registers (rs1=1, rs2=2) for simplicity in the trace.
+            let opcode = encode_b_type(imm_val, 2, 1, funct3, 0b1100011);
+            let btype = BType(opcode);
+            let instruction = instruction_fn(btype);
+
+            // 2. Determine the correct, expected outcome of the branch
+            let branch_taken = condition(rs1_val, rs2_val);
+            let pc = 0x8000_0000 as u32;
+            let expected_next_pc = if branch_taken {
+                pc.wrapping_add(imm_val)
+            } else {
+                pc.wrapping_add(4)
+            };
+
+            let trace_step = STraceStep::load(&mut stack, 0, 0, expected_next_pc, 0);
+            let mut trace_read = STraceRead::load(
+                &mut stack,
+                MemoryWitness::no_write().byte(),
+                BASE_REGISTER_ADDRESS + 1 * 4, // Virtual address for x1
+                rs1_val,
+                BASE_REGISTER_ADDRESS + 2 * 4, // Virtual address for x2
+                rs2_val,
+                pc,
+                0,
+                opcode,
+            );
+
+            let ret = op_conditional(
+                &instruction,
+                &mut stack,
+                &mut trace_read,
+                BASE_REGISTER_ADDRESS,
+            );
+
+            stack.join_count(ret.write_1_add, 3);
+            stack.join_count(trace_step.write_1_add, 3);
+            stack.equals(trace_step.write_1_add, true, ret.write_1_add, true);
+            stack.op_true();
+
+            stack.run().success
+        }
+
+        // Helper to encode B-type instructions
+        fn encode_b_type(imm: u32, rs2: u32, rs1: u32, funct3: u32, opcode: u32) -> u32 {
+            let imm_12 = (imm >> 12) & 1;
+            let imm_10_5 = (imm >> 5) & 0x3F;
+            let imm_4_1 = (imm >> 1) & 0xF;
+            let imm_11 = (imm >> 11) & 1;
+            (imm_12 << 31)
+                | (imm_10_5 << 25)
+                | (rs2 << 20)
+                | (rs1 << 15)
+                | (funct3 << 12)
+                | (imm_4_1 << 8)
+                | (imm_11 << 7)
+                | opcode
+        }
+
+        // The new fuzz test function that uses your generic harness.
+        #[test]
+        fn fuzz_op_conditional() {
+            // Define all possible branch instructions and their corresponding logic
+            let instructions: &[(
+                u32,
+                fn(BType) -> Instruction,
+                fn(u32, u32) -> bool,
+                &'static str,
+            )] = &[
+                (0b000, Beq, |a, b| a == b, "BEQ"),
+                (0b001, Bne, |a, b| a != b, "BNE"),
+                (0b100, Blt, |a, b| (a as i32) < (b as i32), "BLT"),
+                (0b101, Bge, |a, b| (a as i32) >= (b as i32), "BGE"),
+                (0b110, Bltu, |a, b| a < b, "BLTU"),
+                (0b111, Bgeu, |a, b| a >= b, "BGEU"),
+            ];
+
+            fuzz_generic_and_catch_panics(
+                "op_conditional",
+                // Input Generator: Creates random register values, a random immediate, and picks a random branch instruction
+                |rng| {
+                    let rs1_val: u32 = rng.random();
+                    let rs2_val: u32 = rng.random();
+                    // Ensure the 12-bit immediate is always a multiple of 2
+                    let imm_val: u32 = (rng.random::<u16>() & 0xFFE) as u32;
+                    let (funct3, instruction_fn, condition, name) =
+                        instructions[rng.random_range(0..instructions.len())];
+
+                    (
+                        rs1_val,
+                        rs2_val,
+                        imm_val,
+                        funct3,
+                        instruction_fn,
+                        condition,
+                        name,
+                    )
+                },
+                // Test Logic: Unpacks the random input and calls the auxiliary test function
+                |input| {
+                    let (rs1_val, rs2_val, imm_val, funct3, instruction_fn, condition, _name) =
+                        input;
+                    conditional_aux(rs1_val, rs2_val, imm_val, funct3, instruction_fn, condition)
+                },
+            );
+        }
     }
 }

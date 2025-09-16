@@ -871,3 +871,122 @@ mod tests {
         assert_eq!(chunk_start_index, 0);
     }
 }
+
+#[test]
+fn test_section_contains_boundary() {
+    let section = Section::new("test", 1000, 100, false, false, false);
+    assert!(section.contains(1000));
+    assert!(section.contains(1096)); // last valid address (1000 + 100 - 4)
+    assert!(!section.contains(1097)); // first invalid address
+    assert!(!section.contains(999)); // address before start
+}
+
+
+#[test]
+#[should_panic(expected = "Cannot set register zero")]
+fn test_set_register_zero_panics() {
+    let mut registers = Registers::new(0, 0);
+    registers.set(REGISTER_ZERO as u32, 123, 1);
+}
+
+#[test]
+fn test_read_mem_unaligned() {
+    let mut program = Program::new(0, 0, 0);
+    program.add_section(Section::new("data", 0, 100, false, false, false));
+    assert!(program.read_mem(1).is_err());
+    assert!(program.read_mem(2).is_err());
+    assert!(program.read_mem(3).is_err());
+}
+
+#[test]
+fn test_write_mem_unaligned() {
+    let mut program = Program::new(0, 0, 0);
+    program.add_section(Section::new("data", 0, 100, false, true, false));
+    assert!(program.write_mem(1, 123).is_err());
+    assert!(program.write_mem(2, 123).is_err());
+    assert!(program.write_mem(3, 123).is_err());
+}
+
+#[test]
+fn test_is_valid_mem() {
+    let mut program = Program::new(0, 0, 0);
+    program.add_section(Section::new("registers", 0, 128, false, true, true));
+    program.add_section(Section::new("code", 1000, 100, true, false, false));
+    program.add_section(Section::new("data", 2000, 100, false, true, false));
+    program.generate_sections_definitions();
+
+    // Test register access
+    assert!(program.is_valid_mem(MemoryAccessType::Register, 0, false));
+    assert!(!program.is_valid_mem(MemoryAccessType::Register, 1000, false));
+
+    // Test memory access
+    assert!(program.is_valid_mem(MemoryAccessType::Memory, 2000, false));
+    assert!(!program.is_valid_mem(MemoryAccessType::Memory, 1000, false));
+
+    // Test read-only access
+    assert!(program.is_valid_mem(MemoryAccessType::Memory, 1000, true));
+}
+
+#[test]
+fn test_vec_u8_to_vec_u32() {
+    let input = vec![0x01, 0x02, 0x03, 0x04, 0x05];
+
+    // Test little endian with padding
+    let result = vec_u8_to_vec_u32(&input, true);
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0], 0x04030201);
+    assert_eq!(result[1], 0x00000005);
+
+    // Test big endian with padding
+    let result = vec_u8_to_vec_u32(&input, false);
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0], 0x01020304);
+    assert_eq!(result[1], 0x05000000);
+}
+
+
+#[test]
+fn test_get_chunk_count() {
+    let mut program = Program::new(0, 0, 0);
+    
+    // Empty program
+    assert_eq!(program.get_chunk_count(500), 0);
+    
+    // Add sections with different sizes
+    program.add_section(Section::new("code1", 1000, 500 * 4, true, false, false));
+    assert_eq!(program.get_chunk_count(500), 1);
+    
+    program.add_section(Section::new("code2", 2000, 750 * 4, true, false, false));
+    assert_eq!(program.get_chunk_count(500), 3); // 1 + 2 chunks
+    
+    program.add_section(Section::new("code3", 3000, 499 * 4, true, false, false));
+    assert_eq!(program.get_chunk_count(500), 4); // 1 + 2 + 1 chunks
+}
+
+
+#[test]
+fn test_serialize_deserialize() {
+    let temp_dir = std::env::temp_dir();
+    let path = temp_dir.to_str().unwrap();
+
+    let mut original = Program::new(0x1000, 0x2000, 0x3000);
+    original.add_section(Section::new("code", 0x4000, 100, true, false, false));
+    original.add_section(Section::new("data", 0x5000, 100, false, true, false));
+
+    // Serialize
+    original.serialize_to_file(path);
+
+    // Deserialize
+    let deserialized = Program::deserialize_from_file(path, 0).unwrap();
+
+    // Compare
+    assert_eq!(original.pc.get_address(), deserialized.pc.get_address());
+    assert_eq!(original.sections.len(), deserialized.sections.len());
+    assert_eq!(
+        original.registers.get_base_address(),
+        deserialized.registers.get_base_address()
+    );
+
+    // Clean up
+    std::fs::remove_file(format!("{}/checkpoint.0.json", path)).unwrap();
+}

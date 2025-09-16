@@ -141,6 +141,7 @@ pub fn verifier_check_execution(
     challenge_log.save(checkpoint_path)?;
 
     if !should_challenge {
+        // ! ISSUE: This should not be here in proodcution
         // TODO: Remove
         return Ok(None);
     }

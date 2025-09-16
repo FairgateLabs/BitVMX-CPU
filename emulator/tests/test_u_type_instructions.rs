@@ -44,3 +44,41 @@ fn test_upper_instructions(
     let _ = op_upper(&instruction, &x, &mut program);
     assert_eq!(program.registers.get(rd as u32), expected);
 }
+
+#[test]
+fn test_utype_max_imm() {
+    let max_imm = 0xFFFFF << 12;
+    let utype = create_utype_from(max_imm, 0);
+    assert_eq!(max_imm, utype.imm());
+}
+
+#[test]
+fn test_utype_max_rd() {
+    let utype = create_utype_from(0, 31);
+    assert_eq!(31, utype.rd() as u8);
+}
+
+#[rstest]
+#[case(0x5, 0, 0x1000, "Lui", 0)]
+#[case(0x5, 0, 0x1000, "Auipc", 0x1000)]
+fn test_upper_instructions_zero_imm(
+    #[case] rd: u32,
+    #[case] imm_value: u32,
+    #[case] pc: u32,
+    #[case] instruction: &str,
+    #[case] expected: u32,
+) {
+    let mut program = get_new_program();
+    program.pc.jump(pc);
+
+    let x = create_utype_from(imm_value, rd as u8);
+
+    let instruction = match instruction {
+        "Auipc" => Instruction::Auipc(x),
+        "Lui" => Instruction::Lui(x),
+        _ => panic!("Unreachable"),
+    };
+
+    let _ = op_upper(&instruction, &x, &mut program);
+    assert_eq!(program.registers.get(rd as u32), expected);
+}

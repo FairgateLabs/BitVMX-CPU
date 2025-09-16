@@ -1,0 +1,8 @@
+elf: ../../../docker-riscv32/riscv32/build/coin_reference_tests/ecdsa.elf
+nary_search: 8
+max_steps: 150000
+input_section_name: .input
+inputs:
+  - size: 4
+    owner: prover
+    
