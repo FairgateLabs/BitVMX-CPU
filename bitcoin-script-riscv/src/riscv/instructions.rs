@@ -6,6 +6,8 @@ use bitvmx_cpu_definitions::trace::TraceRWStep;
 use riscv_decode::Instruction;
 use riscv_decode::Instruction::*;
 
+use crate::riscv::memory_alignment::clear_least_significant_bit;
+use crate::riscv::memory_alignment::verify_alignment;
 use crate::ScriptValidation;
 
 use super::decoder::*;
@@ -240,6 +242,7 @@ pub fn op_conditional(
         0,
     );
     let write_pc = ret[0];
+    verify_alignment(stack, write_pc);
 
     let micro = stack.number(0);
     stack.rename(micro, "write_micro");
@@ -341,6 +344,7 @@ pub fn op_jal(
 
     let write_pc = add_with_bit_extension(stack, &tables, pc, imm, StackVariable::null());
     stack.rename(write_pc, "write_pc");
+    verify_alignment(stack, write_pc);
 
     let micro = stack.number(0);
     stack.rename(micro, "write_micro");
@@ -393,7 +397,9 @@ pub fn op_jalr(
 
     let write_pc =
         add_with_bit_extension(stack, &tables, trace_read.read_1_value, imm, bit_extension);
+    let write_pc = clear_least_significant_bit(stack, write_pc);
     stack.rename(write_pc, "write_pc");
+    verify_alignment(stack, write_pc);
 
     let micro = stack.number(0);
     stack.rename(micro, "write_micro");
@@ -793,7 +799,7 @@ pub fn execute_step(
         )),
 
         Lh(x) | Lhu(x) | Lw(x) | Lbu(x) | Lb(x) => {
-            if x.rd() == 0 {
+            if micro > 1 && x.rd() == 0 {
                 Ok(op_nop(stack, trace_read))
             } else {
                 Ok(op_load(

@@ -684,7 +684,7 @@ mod tests {
 
     // A generic test runner that handles the stack setup and assertions.
     fn run_j_type_test(opcode: u32, expected_rd: u32, expected_imm: i32) {
-        use bitcoin_script_stack::{interactive::interactive, stack::StackTracker};
+        use bitcoin_script_stack::stack::StackTracker;
         let mut stack = StackTracker::new();
         let tables = StackTables::new(&mut stack, false, false, 5, 4, 0);
         let opcode_var = stack.number_u32(opcode);

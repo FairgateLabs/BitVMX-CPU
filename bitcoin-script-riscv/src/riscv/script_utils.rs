@@ -3,7 +3,7 @@ use bitcoin_script_stack::stack::{StackTracker, StackVariable};
 pub use bitcoin_script::{define_pushable, script};
 define_pushable!();
 pub use bitcoin::ScriptBuf as Script;
-use bitvmx_cpu_definitions::memory::{MemoryAccessType, SectionDefinition};
+use bitvmx_cpu_definitions::memory::{Chunk, MemoryAccessType, SectionDefinition};
 
 use super::operations::{sort_nibbles, sub};
 
@@ -65,6 +65,34 @@ pub fn nib_to_bin(stack: &mut StackTracker) {
             &format!("bit({})", i),
         );
     }
+}
+
+pub fn static_right_shift_2(
+    stack: &mut StackTracker,
+    tables: &StackTables,
+    number: StackVariable,
+) -> StackVariable {
+    let size = stack.get_size(number);
+    for n in 0..size {
+        stack.move_var_sub_n(number, 0);
+        if n < size - 1 {
+            stack.op_dup();
+            stack.get_value_from_table(tables.lshift.shift_2, None);
+            stack.to_altstack();
+        }
+
+        stack.get_value_from_table(tables.rshift.shift_2, None);
+
+        if n > 0 {
+            stack.op_add();
+        }
+
+        if n < size - 1 {
+            stack.from_altstack();
+        }
+    }
+
+    stack.join_in_stack(size, None, Some("right_shift_2"))
 }
 
 //expects the shift ammount and the number to be shifted on the stack
@@ -636,6 +664,9 @@ pub fn is_lower_than(
     than: StackVariable,
     unsigned: bool,
 ) -> StackVariable {
+    assert_eq!(stack.get_size(value), stack.get_size(than));
+    let size = stack.get_size(value);
+
     if !unsigned {
         stack.copy_var_sub_n(value, 0);
         if_greater(stack, 7, 1, 0); //1 if negative
@@ -643,6 +674,7 @@ pub fn is_lower_than(
         if_greater(stack, 7, 1, 0); //1 if negative
         stack.op_2dup();
         stack.op_equal();
+        let n = 2_i32.pow(size + 1);
         stack
             .custom(
                 script! {
@@ -652,9 +684,9 @@ pub fn is_lower_than(
                     OP_ELSE
                         OP_GREATERTHAN
                         OP_IF
-                            512
+                            { n }
                         OP_ELSE
-                            { -512 }
+                            { -n }
                         OP_ENDIF
                     OP_ENDIF
                 },
@@ -666,8 +698,8 @@ pub fn is_lower_than(
             .unwrap();
     }
 
-    for i in 0..8 {
-        let n: i32 = 2_i32.pow(8 - i);
+    for i in 0..size {
+        let n: i32 = 2_i32.pow(size - i);
         stack.move_var_sub_n(value, 0);
         stack.move_var_sub_n(than, 0);
         stack.op_2dup();
@@ -677,7 +709,7 @@ pub fn is_lower_than(
                 script! {
                     OP_IF
                         OP_2DROP
-                        { n}
+                        { n }
                     OP_ELSE
                         OP_EQUAL
                         OP_IF
@@ -694,7 +726,7 @@ pub fn is_lower_than(
             )
             .unwrap();
     }
-    for _ in 0..7 {
+    for _ in 0..size - 1 {
         stack.op_add();
     }
     if !unsigned {
@@ -917,8 +949,8 @@ pub fn multiply(
 
     logic_table.drop(stack);
 
-    let modulo = modulo_table(stack, 128);
-    let quotient = quotient_table_ex(stack, 128);
+    let modulo = modulo_table(stack, 135);
+    let quotient = quotient_table_ex(stack, 135);
 
     for _ in 0..15 {
         stack.from_altstack();
@@ -1144,7 +1176,7 @@ pub fn sign_check(
     stack_false.op_equalverify();
     stack.end_if(stack_true, stack_false, 2, vec![], 0);
 
-    //then assert sign of divisor and dividen are the same the quotient sign is positive and negative otherwise
+    //then assert that if the sign of divisor and dividen are the same then the quotient sign is positive and negative otherwise
     is_negative(stack, divisor); // divisor_sign | dividend_sign dividend_sign  rem_sign
     stack.op_dup(); // divisor_sign divisor_sign | dividend_sign dividend_sign  rem_sign
     stack.from_altstack(); // divisor_sign divisor_sign dividend_sign | dividend_sign rem_sign
@@ -1178,19 +1210,48 @@ pub fn sign_check(
     (divisor, quotient, dividend, remainder)
 }
 
-pub fn edge_case(
+pub fn div_by_zero_case(
     stack: &mut StackTracker,
     dividend: StackVariable,
     divisor: StackVariable,
     quotient: StackVariable,
     remainder: StackVariable,
-    compare: u32,
     result: Option<u32>,
 ) -> (StackTracker, StackTracker) {
-    let value = stack.number_u32(compare);
-    is_equal_to(stack, &value, &divisor);
+    let zero = stack.number_u32(0);
+    is_equal_to(stack, &zero, &divisor);
     stack.to_altstack();
-    stack.drop(value);
+    stack.drop(zero);
+    stack.from_altstack();
+    let (mut stack_true, stack_false) = stack.open_if();
+
+    stack_true.drop(remainder);
+    stack_true.drop(quotient);
+    stack_true.drop(divisor);
+    if result.is_some() {
+        stack_true.drop(dividend);
+        stack_true.number_u32(result.unwrap());
+    }
+
+    (stack_true, stack_false)
+}
+
+pub fn overflow_case(
+    stack: &mut StackTracker,
+    dividend: StackVariable,
+    divisor: StackVariable,
+    quotient: StackVariable,
+    remainder: StackVariable,
+    result: Option<u32>,
+) -> (StackTracker, StackTracker) {
+    let minus_one = stack.number_u32(-1 as i32 as u32);
+    let min_i32 = stack.number_u32(std::i32::MIN as u32);
+    is_equal_to(stack, &minus_one, &divisor);
+    is_equal_to(stack, &min_i32, &dividend);
+    stack.op_booland();
+    stack.to_altstack();
+    stack.drop(min_i32);
+    stack.drop(minus_one);
     stack.from_altstack();
     let (mut stack_true, stack_false) = stack.open_if();
 
@@ -1212,8 +1273,7 @@ pub fn division_and_remainder(
     divisor: StackVariable,
     quotient: StackVariable,
     remainder: StackVariable,
-    compare: u32,
-    result: Option<u32>,
+    div_by_zero_result: Option<u32>,
     is_rem_check: bool,
 ) -> StackVariable {
     stack.move_var(dividend);
@@ -1221,8 +1281,13 @@ pub fn division_and_remainder(
     stack.move_var(quotient);
     stack.move_var(remainder);
 
-    let (stack_true, mut stack_false) = edge_case(
-        stack, dividend, divisor, quotient, remainder, compare, result,
+    let (stack_true, mut stack_false) = div_by_zero_case(
+        stack,
+        dividend,
+        divisor,
+        quotient,
+        remainder,
+        div_by_zero_result,
     );
 
     if is_rem_check {
@@ -1266,8 +1331,7 @@ pub fn divu(
         divisor,
         quotient,
         remainder,
-        0,
-        Some(0xFFFF_FFFF),
+        Some(std::u32::MAX),
         false,
     )
 }
@@ -1281,7 +1345,7 @@ pub fn remu(
     quotient: StackVariable,
 ) -> StackVariable {
     division_and_remainder(
-        stack, tables, dividend, divisor, quotient, remainder, 0, None, true,
+        stack, tables, dividend, divisor, quotient, remainder, None, true,
     )
 }
 
@@ -1292,10 +1356,8 @@ pub fn division_and_remainder_signed(
     divisor: StackVariable,
     quotient: StackVariable,
     remainder: StackVariable,
-    compare_1: u32,
-    result_1: Option<u32>,
-    compare_2: u32,
-    result_2: Option<u32>,
+    div_by_zero_result: Option<u32>,
+    overflow_result: Option<u32>,
     is_rem_check: bool,
 ) -> StackVariable {
     stack.move_var(dividend);
@@ -1303,18 +1365,22 @@ pub fn division_and_remainder_signed(
     stack.move_var(quotient);
     stack.move_var(remainder);
 
-    let (stack_true, mut stack_false) = edge_case(
-        stack, dividend, divisor, quotient, remainder, compare_1, result_1,
+    let (stack_true, mut stack_false) = div_by_zero_case(
+        stack,
+        dividend,
+        divisor,
+        quotient,
+        remainder,
+        div_by_zero_result,
     );
 
-    let (stack_true_2, mut stack_no_edge) = edge_case(
+    let (stack_true_2, mut stack_no_edge) = overflow_case(
         &mut stack_false,
         dividend,
         divisor,
         quotient,
         remainder,
-        compare_2,
-        result_2,
+        overflow_result,
     );
 
     if is_rem_check {
@@ -1373,10 +1439,8 @@ pub fn div(
         divisor,
         quotient,
         remainder,
-        0,
-        Some(0xFFFF_FFFF),
-        0xFFFF_FFFF,
-        None,
+        Some(-1 as i32 as u32),
+        Some(std::i32::MIN as u32),
         false,
     )
 }
@@ -1396,9 +1460,7 @@ pub fn rem(
         divisor,
         quotient,
         remainder,
-        0,
         None,
-        0xFFFF_FFFF,
         Some(0),
         true,
     )
@@ -1418,30 +1480,113 @@ pub fn witness_equals(
     stack.op_equal();
 }
 
-pub fn address_not_in_sections(
+pub fn verify_wrong_chunk_value(
+    stack: &mut StackTracker,
+    tables: &StackTables,
+    chunk: &Chunk,
+    address: StackVariable,
+    value: StackVariable,
+) {
+    let chunk_table = WordTable::new(stack, chunk.data.clone());
+
+    let base_addr = stack.number_u32(chunk.base_addr);
+    let offset = sub(stack, &tables, address, base_addr);
+
+    let index = static_right_shift_2(stack, tables, offset);
+
+    let index_nibbles = stack.explode(index);
+    nibbles_to_number(stack, index_nibbles);
+
+    let real_opcode = chunk_table.peek(stack);
+
+    stack.equality(real_opcode, true, value, true, false, true);
+    chunk_table.drop(stack);
+}
+
+pub fn get_selected_vars<const N: usize>(
+    stack: &mut StackTracker,
+    vars_1: [StackVariable; N],
+    vars_2: [StackVariable; N],
+    var_selector: StackVariable,
+) -> [StackVariable; N] {
+    assert_eq!(vars_1.len(), vars_2.len());
+    let consumes = vars_1.len() as u32 * 2;
+
+    let output: Vec<_> = vars_1
+        .iter()
+        .enumerate()
+        .map(|(i, var)| (stack.get_size(*var), format!("var_{}", i)))
+        .collect();
+
+    // we need the variables to be on top of the stack, or we will break variables that are higher when merging the branches
+    for (var_1, var_2) in vars_1.iter().zip(vars_2.iter()) {
+        assert_eq!(stack.get_size(*var_1), stack.get_size(*var_2));
+        stack.move_var(*var_1);
+        stack.move_var(*var_2);
+    }
+
+    stack.move_var(var_selector);
+    stack.number(1);
+    stack.op_equal();
+    let (mut chose_var_1, mut chose_var_2) = stack.open_if();
+
+    for (var_1, var_2) in vars_1.into_iter().zip(vars_2.into_iter()) {
+        chose_var_1.move_var(var_2);
+        chose_var_1.drop(var_2);
+        chose_var_1.move_var(var_1);
+
+        chose_var_2.move_var(var_1);
+        chose_var_2.drop(var_1);
+        chose_var_2.move_var(var_2);
+    }
+
+    stack
+        .end_if(chose_var_1, chose_var_2, consumes, output, 0)
+        .try_into()
+        .ok()
+        .expect("Vec length does not match expected array size")
+}
+
+pub fn address_in_range(stack: &mut StackTracker, range: &(u32, u32), address: &StackVariable) {
+    let start = stack.number_u32(range.0);
+    let end = stack.number_u32(range.1);
+    let address_copy = stack.copy_var(*address);
+
+    // start <= address
+    is_equal_to(stack, &start, &address_copy);
+    is_lower_than(stack, start, address_copy, true);
+    stack.op_boolor();
+
+    // address <= end
+    let address_copy = stack.copy_var(*address);
+    is_equal_to(stack, &end, &address_copy);
+    is_lower_than(stack, address_copy, end, true);
+    stack.op_boolor();
+
+    stack.op_booland();
+}
+
+pub fn address_in_sections(
     stack: &mut StackTracker,
     address: &StackVariable,
     sections: &SectionDefinition,
 ) {
     for range in &sections.ranges {
-        assert!(range.0 + 3 <= range.1);
-        let section_start = stack.number_u32(range.0);
-        let address_copy: StackVariable = stack.copy_var(*address);
-
-        is_lower_than(stack, address_copy, section_start, true);
-
-        // when we do a read on an address, we also read the 3 addresses after
-        let section_end = stack.number_u32(range.1 - 3);
-        let address_copy = stack.copy_var(*address);
-
-        is_lower_than(stack, section_end, address_copy, true);
-
-        stack.op_boolor();
+        address_in_range(stack, range, address);
     }
 
     for _ in 0..sections.ranges.len() - 1 {
-        stack.op_booland();
+        stack.op_boolor();
     }
+}
+
+pub fn address_not_in_sections(
+    stack: &mut StackTracker,
+    address: &StackVariable,
+    sections: &SectionDefinition,
+) {
+    address_in_sections(stack, address, sections);
+    stack.op_not();
 }
 
 pub fn nibbles_to_number(stack: &mut StackTracker, nibbles: Vec<StackVariable>) -> StackVariable {
@@ -1605,6 +1750,102 @@ mod tests {
         test_multiply_aux(0x0, 0xFFFF_FFFF, 0, 0);
         test_multiply_aux(0xFFFF_FFFF, 0x1, 0x0, 0xFFFF_FFFF);
         test_multiply_aux(0x0000_0002, 0x0000_0004, 0x0000_0000, 0x0000_0008);
+        test_multiply_aux(0x1B49_F21B, 0x1F51_E1ED, 0x0356_AECC, 0x20C9_DDFF);
+    }
+
+    fn test_mulh_aux(a: i32, b: i32, expected: i32) {
+        let mut stack = StackTracker::new();
+        let tables = StackTables::new(&mut stack, true, true, 0, 0, 0);
+
+        let a = stack.number_u32(a as u32);
+        let b = stack.number_u32(b as u32);
+
+        let result = mulh(&mut stack, &tables, a, b, false);
+
+        let expected = stack.number_u32(expected as u32);
+
+        stack.equals(result, true, expected, true);
+        tables.drop(&mut stack);
+
+        stack.op_true();
+
+        assert!(stack.run().success);
+    }
+
+    #[test]
+    fn test_mulh() {
+        test_mulh_aux(-0x7BDD_925D, -0x7F37_3DED, 0x3D8D_A62D);
+        test_mulh_aux(0x2A37_E15A, -0xC16_20C2, -0x1FE_44C5);
+    }
+
+    fn test_division_aux(dividend: i32, divisor: i32, quotient: i32, remainder: i32, signed: bool) {
+        let mut stack = StackTracker::new();
+        let tables = StackTables::new(&mut stack, true, true, 0, 0, 0);
+
+        let dividend = stack.number_u32(dividend as u32);
+        let dividend_copy = stack.copy_var(dividend);
+
+        let divisor = stack.number_u32(divisor as u32);
+        let divisor_copy = stack.copy_var(divisor);
+
+        let quotient = stack.number_u32(quotient as u32);
+        let quotient_copy = stack.copy_var(quotient);
+
+        let remainder = stack.number_u32(remainder as u32);
+        let remainder_copy = stack.copy_var(remainder);
+
+        let expected_div = stack.copy_var(quotient);
+        let expected_rem = stack.copy_var(remainder);
+
+        let result_div;
+        let result_rem;
+
+        if signed {
+            result_div = div(&mut stack, &tables, dividend, divisor, quotient, remainder);
+            result_rem = rem(
+                &mut stack,
+                &tables,
+                dividend_copy,
+                divisor_copy,
+                remainder_copy,
+                quotient_copy,
+            );
+        } else {
+            result_div = divu(&mut stack, &tables, dividend, divisor, quotient, remainder);
+            result_rem = remu(
+                &mut stack,
+                &tables,
+                dividend_copy,
+                divisor_copy,
+                remainder_copy,
+                quotient_copy,
+            );
+        }
+
+        stack.equals(expected_div, true, result_div, true);
+        stack.equals(expected_rem, true, result_rem, true);
+
+        tables.drop(&mut stack);
+
+        stack.op_true();
+        assert!(stack.run().success);
+    }
+
+    #[test]
+    pub fn test_division() {
+        // signed division by 0
+        test_division_aux(100, 0, -1, 100, true);
+        // unsigned division by 0
+        test_division_aux(100, 0, std::u32::MAX as i32, 100, false);
+        // overflow
+        test_division_aux(std::i32::MIN, -1, std::i32::MIN, 0, true);
+
+        test_division_aux(100, -6, -16, 4, true);
+        test_division_aux(-100, 6, -16, -4, true);
+        test_division_aux(-100, -6, 16, -4, true);
+
+        test_division_aux(100, 6, 16, 4, false);
+        test_division_aux(100, -1, -100, 0, true);
     }
 
     fn test_left_rotate_helper(value: u32, rotate: u32, expected: u32) {
@@ -1755,6 +1996,26 @@ mod tests {
         test_shift_case(0xF100_0013, 13, false, false, 0x0002_6000);
     }
 
+    fn test_static_right_shift_2_case(value: u32, expected: u32) {
+        let mut stack = StackTracker::new();
+        let tables = &StackTables::new(&mut stack, false, false, 2, 2, 0);
+        let number = stack.number_u32(value);
+        let shifted = static_right_shift_2(&mut stack, tables, number);
+        println!("Size:  {} ", stack.get_script().len());
+        let expected = stack.number_u32(expected);
+        stack.equals(shifted, true, expected, true);
+        tables.drop(&mut stack);
+        stack.op_true();
+        assert!(stack.run().success);
+    }
+
+    #[test]
+    fn test_static_right_shift_2() {
+        test_static_right_shift_2_case(0b1101_1011, 0b0011_0110);
+        test_static_right_shift_2_case(0xF100_0013, 0x3C40_0004);
+        test_static_right_shift_2_case(3, 0);
+    }
+
     #[test]
     fn test_nib_to_bin() {
         for i in 0..16 {
@@ -1807,6 +2068,24 @@ mod tests {
         test_lower_helper(0x0000_0000, 0xffff_ffff, 0, false);
         test_lower_helper(0xf000_0000, 0xffff_ffff, 1, false);
         test_lower_helper(0x0000_0000, 0xffff_f800, 0, false);
+    }
+
+    fn test_lower_helper_64bits(value: u64, than: u64, expected: u32, unsigned: bool) {
+        let mut stack = StackTracker::new();
+        let value = stack.number_u64(value);
+        let than = stack.number_u64(than);
+        is_lower_than(&mut stack, value, than, unsigned);
+        stack.number(expected);
+        stack.op_equal();
+        assert!(stack.run().success);
+    }
+
+    #[test]
+    fn test_lower_64bits() {
+        test_lower_helper_64bits(0x0000_0000_0000_0000, 0xffff_ffff_ffff_ffff, 1, true);
+        test_lower_helper_64bits(0x0000_0000_0000_0000, 0xffff_ffff_ffff_ffff, 0, false);
+        test_lower_helper_64bits(0xf000_0000_0000_0000, 0xffff_ffff_ffff_ffff, 1, false);
+        test_lower_helper_64bits(0x0000_0000_0000_0000, 0xffff_f800_0000_0000, 0, false);
     }
 
     #[test]
@@ -2050,12 +2329,12 @@ mod tests {
         stack.op_true();
         stack.run().success
     }
-    fn test_address_not_in_sections_aux(address: u32, sections: &SectionDefinition) -> bool {
+    fn test_address_in_range_aux(address: u32, range: &(u32, u32)) -> bool {
         let mut stack = StackTracker::new();
 
         let address = stack.number_u32(address);
 
-        address_not_in_sections(&mut stack, &address, sections);
+        address_in_range(&mut stack, range, &address);
 
         stack.op_verify();
         stack.drop(address);
@@ -2064,27 +2343,18 @@ mod tests {
     }
 
     #[test]
-    fn test_address_not_in_sections() {
-        const START_1: u32 = 0x0000_00f0;
-        const START_2: u32 = 0x000f_00f0;
-        const END_1: u32 = 0x0000_f003;
-        const END_2: u32 = 0x000f_f003;
+    fn test_address_in_range() {
+        const START: u32 = 0x0000_00f0;
+        const END: u32 = 0x0000_f003;
 
-        let sections = &SectionDefinition {
-            ranges: vec![(START_1, END_1), (START_2, END_2)],
-        };
+        let range = &(START, END);
 
-        assert!(!test_address_not_in_sections_aux(START_1, sections));
-        assert!(!test_address_not_in_sections_aux(0x0000_0f00, sections));
-        assert!(!test_address_not_in_sections_aux(END_1 - 3, sections));
-        assert!(!test_address_not_in_sections_aux(START_2, sections));
-        assert!(!test_address_not_in_sections_aux(0x000f_0f00, sections));
-        assert!(!test_address_not_in_sections_aux(END_2 - 3, sections));
+        assert!(test_address_in_range_aux(START, range));
+        assert!(test_address_in_range_aux((START + END) / 2, range));
+        assert!(test_address_in_range_aux(END, range));
 
-        assert!(test_address_not_in_sections_aux(START_1 - 1, sections));
-        assert!(test_address_not_in_sections_aux(END_1 - 2, sections));
-        assert!(test_address_not_in_sections_aux(START_2 - 1, sections));
-        assert!(test_address_not_in_sections_aux(END_2 - 2, sections));
+        assert!(!test_address_in_range_aux(START - 1, range));
+        assert!(!test_address_in_range_aux(END + 1, range));
     }
 
     #[test]
@@ -2098,6 +2368,88 @@ mod tests {
         stack.equals(expected, true, result, true);
         stack.op_true();
         assert!(stack.run().success);
+    }
+
+    fn test_get_selected_vars_aux(var_selector: u32) {
+        let mut stack = StackTracker::new();
+
+        let previous_var = stack.number_u32(0x3333_3333);
+
+        let var_1 = stack.number_u32(0x1111_1111);
+        let var_2 = stack.number_u32(0x2222_2222);
+        let selector = stack.number(var_selector);
+
+        let next_var = stack.number_u32(0x4444_4444);
+
+        let [chosen_var] = get_selected_vars(&mut stack, [var_1], [var_2], selector);
+
+        // we should get the selected variable
+        let expected_var = if var_selector == 1 {
+            0x1111_1111
+        } else {
+            0x2222_2222
+        };
+        let expected_var = stack.number_u32(expected_var);
+        stack.equality(chosen_var, true, expected_var, true, true, true);
+
+        // previous variable should remain unchanged
+        let expected_var = stack.number_u32(0x3333_3333);
+        stack.equality(previous_var, true, expected_var, true, true, true);
+
+        // next variable should also remain unchanged
+        let expected_var = stack.number_u32(0x4444_4444);
+        stack.equality(next_var, true, expected_var, true, true, true);
+
+        stack.op_true();
+        assert!(stack.run().success);
+    }
+
+    #[test]
+    fn test_get_selected_vars() {
+        test_get_selected_vars_aux(1);
+        test_get_selected_vars_aux(2);
+    }
+
+    fn test_verify_wrong_chunk_value_aux(address: u32, value: u32, chunk: &Chunk) -> bool {
+        let mut stack = StackTracker::new();
+
+        let address = stack.number_u32(address);
+        let value = stack.number_u32(value);
+        let tables = &StackTables::new(&mut stack, true, false, 2, 2, 0);
+
+        verify_wrong_chunk_value(&mut stack, tables, chunk, address, value);
+        tables.drop(&mut stack);
+        stack.op_true();
+        stack.run().success
+    }
+
+    #[test]
+    fn test_verify_wrong_chunk_value() {
+        let chunk = &Chunk {
+            base_addr: 0x1000_0000,
+            data: vec![0x1111_1111, 0x2222_2222],
+        };
+
+        assert!(test_verify_wrong_chunk_value_aux(
+            0x1000_0000,
+            0x1234_5678,
+            chunk
+        ));
+        assert!(test_verify_wrong_chunk_value_aux(
+            0x1000_0004,
+            0x1234_5678,
+            chunk
+        ));
+        assert!(!test_verify_wrong_chunk_value_aux(
+            0x1000_0000,
+            0x1111_1111,
+            chunk
+        ));
+        assert!(!test_verify_wrong_chunk_value_aux(
+            0x1000_0004,
+            0x2222_2222,
+            chunk
+        ));
     }
 
     mod fuzz_tests {
@@ -2232,26 +2584,25 @@ mod tests {
             // ! There are some wrong results and some panics
             fuzz_multiply(); // <- already broken
 
-            // ! ISSUE, HIGH  severity 
+            // ! ISSUE, HIGH  severity
             // ! There's some kind of issue when multiplying
             // ! The inputs that fail are NOT necessarily those
             // ! that make `multiply` fail
             fuzz_mulh();
 
-            // ! ISSUE: INFO severity 
+            // ! ISSUE: INFO severity
             // ! sub_1_if_positive only supports 1 nibble inputs
             // ! ISSUE: INFO severity
             // ! sub_1_if_positive returns zero (!) if input not positive
             fuzz_sub_1_if_positive();
 
-            // ! ISSUE, INFO severity 
+            // ! ISSUE, INFO severity
             // ! The nibbles_to_number method breaks as soon as an input
             // ! of more than 7 nibbles is added, that is: it supports
             // ! at most 32 bits
             fuzz_nibbles_to_number();
 
-
-            // ! ISSUE,  HIGH severity 
+            // ! ISSUE,  HIGH severity
             // ! see test_div_rem_signed_fails_for_certain_inputs
             // ! see: test_mulh_is_wrong
             // ! Maybe related to multiply as it uses the method
@@ -2816,8 +3167,8 @@ mod tests {
                 (0x2a37e15a, 0xf3e9df3e), // product: 0x28efffff28b28d74
                 (0xaf3ef39b, 0xc4dbe6ec), // product: 0x87ffff747a83d414
                 (0xe7a3effb, 0x7b64f3b2), // product: 0x6fffffea41d34c16 (causes panic)
-                (0x1b49f21b, 0x1f51e1ed),  // causes panic
-                (0x6dadedf2, 0x41c64e6d)
+                (0x1b49f21b, 0x1f51e1ed), // causes panic
+                (0x6dadedf2, 0x41c64e6d),
             ];
 
             // // A collection of inputs that should pass, as their products do not have
@@ -2887,8 +3238,8 @@ mod tests {
         #[test]
         #[ignore = "Failing only with numbers of more than a nibble. Caller responsibility."]
         /// `test_big_negative_number_less_than_small_panics`
-        /// This is `#[ignored]` because the contract with the caller 
-        /// is that this function operates on nibbles, not on big numbers 
+        /// This is `#[ignored]` because the contract with the caller
+        /// is that this function operates on nibbles, not on big numbers
         fn test_big_negative_number_less_than_small_panics() {
             let mut stack = StackTracker::new();
             let big_number = 0x7544CA31;

@@ -54,7 +54,7 @@ fn test_jalr() {
 
     let _ = op_jalr(&x, &mut program);
 
-    assert_eq!(program.pc.get_address(), imm + rs1_value);
+    assert_eq!(program.pc.get_address(), (imm + rs1_value) & !1);
     assert_eq!(program.registers.get(rd), 4);
 }
 

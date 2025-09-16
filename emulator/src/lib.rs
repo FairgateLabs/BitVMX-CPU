@@ -52,11 +52,17 @@ pub enum ExecutionResult {
     #[error("Not implemented {0} {1}")]
     InstructionNotImplemented(u32, String),
 
+    #[error("Can't read from non-code section")]
+    ReadFromNonCodeSection,
+
     #[error("Can't write into read-only section")]
     WriteToReadOnlySection,
 
     #[error("Failed to verify the bitcoin script {0}")]
     BitcoinScriptVerification(#[from] ScriptValidation),
+
+    #[error("Tried to jump to unaligned address: {0}")]
+    UnalignedJump(u32),
 }
 
 pub mod constants {

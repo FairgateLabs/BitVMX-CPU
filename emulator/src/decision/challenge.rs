@@ -1,6 +1,7 @@
 use bitvmx_cpu_definitions::{
     challenge::ChallengeType,
-    constants::{CODE_CHUNK_SIZE, LAST_STEP_INIT},
+    constants::{CHUNK_SIZE, LAST_STEP_INIT},
+    memory::Chunk,
     trace::{generate_initial_step_hash, hashvec_to_string, validate_step_hash, TraceRWStep},
 };
 
@@ -12,7 +13,7 @@ use tracing::{error, info, warn};
 use crate::{
     decision::{
         execution_log::VerifierChallengeLog,
-        nary_search::{choose_segment, ExecutionHashes},
+        nary_search::{choose_segment, ExecutionHashes, NArySearchType},
     },
     executor::utils::FailConfiguration,
     loader::program_definition::ProgramDefinition,
@@ -27,10 +28,15 @@ pub fn prover_execute(
     checkpoint_path: &str,
     force: bool,
     fail_config: Option<FailConfiguration>,
+    save_non_checkpoint_steps: bool,
 ) -> Result<(ExecutionResult, u64, String), EmulatorError> {
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
-    let (result, last_step, last_hash) =
-        program_def.get_execution_result(input.clone(), checkpoint_path, fail_config)?;
+    let (result, last_step, last_hash) = program_def.get_execution_result(
+        input.clone(),
+        checkpoint_path,
+        fail_config,
+        save_non_checkpoint_steps,
+    )?;
     if result != ExecutionResult::Halt(0, last_step) {
         error!(
             "The execution of the program {} failed with error: {:?}. The claim should not be commited on-chain.",
@@ -58,28 +64,32 @@ pub fn prover_get_hashes_for_round(
     round: u8,
     verifier_decision: u32,
     fail_config: Option<FailConfiguration>,
+    nary_type: NArySearchType,
 ) -> Result<Vec<String>, EmulatorError> {
     let mut challenge_log = ProverChallengeLog::load(checkpoint_path)?;
-    let base = challenge_log.base_step;
-
+    let input = challenge_log.input.clone();
+    let nary_log = challenge_log.get_nary_log(nary_type);
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
 
     let new_base = match round {
-        1 => base,
-        _ => program_def
-            .nary_def()
-            .step_from_base_and_bits(round - 1, base, verifier_decision),
+        1 => nary_log.base_step,
+        _ => program_def.nary_def().step_from_base_and_bits(
+            round - 1,
+            nary_log.base_step,
+            verifier_decision,
+        ),
     };
 
-    challenge_log.base_step = new_base;
+    nary_log.base_step = new_base;
     let hashes = program_def.get_round_hashes(
         checkpoint_path,
+        input,
         round,
-        challenge_log.base_step,
+        nary_log.base_step,
         fail_config,
     )?;
-    challenge_log.hash_rounds.push(hashes.clone());
-    challenge_log.verifier_decisions.push(verifier_decision);
+    nary_log.hash_rounds.push(hashes.clone());
+    nary_log.verifier_decisions.push(verifier_decision);
     challenge_log.save(checkpoint_path)?;
     Ok(hashes)
 }
@@ -92,33 +102,35 @@ pub fn verifier_check_execution(
     claim_last_hash: &str,
     force_condition: ForceCondition,
     fail_config: Option<FailConfiguration>,
+    save_non_checkpoint_steps: bool,
 ) -> Result<Option<u64>, EmulatorError> {
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
-    let (result, last_step, last_hash) =
-        program_def.get_execution_result(input.clone(), checkpoint_path, fail_config)?;
+    let (result, last_step, last_hash) = program_def.get_execution_result(
+        input.clone(),
+        checkpoint_path,
+        fail_config,
+        save_non_checkpoint_steps,
+    )?;
 
-    let mut should_challenge = true;
+    let input_is_valid = result == ExecutionResult::Halt(0, last_step);
+    let same_step_and_hash = last_step == claim_last_step && last_hash == claim_last_hash;
 
-    if result == ExecutionResult::Halt(0, last_step) {
-        info!("The program executed successfully with the prover input");
-        info!("Do not challenge.");
+    let should_challenge = force_condition == ForceCondition::Always
+        || !input_is_valid
+        || (force_condition == ForceCondition::ValidInputWrongStepOrHash && !same_step_and_hash)
+        || (force_condition == ForceCondition::ValidInputStepAndHash && same_step_and_hash);
 
-        if claim_last_step != last_step || claim_last_hash != last_hash {
-            warn!("The prover provided a valid input, but the last step or hash differs");
-            warn!("Do not challenge (as the challenge is not waranteed to be successful)");
-            warn!("Report this case to be evaluated by the security team");
-            should_challenge = force_condition == ForceCondition::ValidInputWrongStepOrHash
-                || force_condition == ForceCondition::Allways;
+    if !should_challenge {
+        if same_step_and_hash {
+            info!("The program executed successfully with the prover input");
+            info!("Do not challenge.");
         } else {
-            should_challenge = force_condition == ForceCondition::ValidInputStepAndHash
-                || force_condition == ForceCondition::Allways;
+            warn!("The prover provided a valid input, but the last step or hash differs");
+            warn!("Do not challenge (as the challenge is not guaranteed to be successful)");
+            warn!("Report this case to be evaluated by the security team");
         }
+        return Ok(None);
     }
-
-    // if !should_challenge {
-    //     // TODO: Should be removed after here, not creating challenge_log.
-    //     return Ok(None);
-    // }
 
     warn!("There is a discrepancy between the prover and verifier execution");
     warn!("This execution will be challenged");
@@ -140,12 +152,6 @@ pub fn verifier_check_execution(
     );
     challenge_log.save(checkpoint_path)?;
 
-    if !should_challenge {
-        // ! ISSUE: This should not be here in proodcution
-        // TODO: Remove
-        return Ok(None);
-    }
-
     Ok(Some(step_to_challenge))
 }
 
@@ -155,30 +161,39 @@ pub fn verifier_choose_segment(
     round: u8,
     prover_last_hashes: Vec<String>,
     fail_config: Option<FailConfiguration>,
+    nary_type: NArySearchType,
 ) -> Result<u32, EmulatorError> {
     let mut challenge_log = VerifierChallengeLog::load(checkpoint_path)?;
-    let base = challenge_log.base_step;
+    let input = challenge_log.input.clone();
 
+    let nary_log = challenge_log.get_nary_log(nary_type);
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
 
-    let hashes = program_def.get_round_hashes(checkpoint_path, round, base, fail_config)?;
+    let hashes = program_def.get_round_hashes(
+        checkpoint_path,
+        input,
+        round,
+        nary_log.base_step,
+        fail_config,
+    )?;
 
     let claim_hashes = ExecutionHashes::from_hexstr(&prover_last_hashes);
     let my_hashes = ExecutionHashes::from_hexstr(&hashes);
 
     let (bits, base, new_selected) = choose_segment(
         &program_def.nary_def(),
-        base,
-        challenge_log.step_to_challenge,
+        nary_log.base_step,
+        nary_log.step_to_challenge,
         round,
         &claim_hashes,
         &my_hashes,
+        nary_type,
     );
-    challenge_log.base_step = base;
-    challenge_log.step_to_challenge = new_selected;
-    challenge_log.verifier_decisions.push(bits);
-    challenge_log.prover_hash_rounds.push(prover_last_hashes);
-    challenge_log.verifier_hash_rounds.push(hashes);
+    nary_log.base_step = base;
+    nary_log.step_to_challenge = new_selected;
+    nary_log.verifier_decisions.push(bits);
+    nary_log.prover_hash_rounds.push(prover_last_hashes);
+    nary_log.verifier_hash_rounds.push(hashes);
     challenge_log.save(checkpoint_path)?;
 
     info!("Verifier selects bits: {bits} base: {base} selection: {new_selected}");
@@ -193,22 +208,24 @@ pub fn prover_final_trace(
     fail_config: Option<FailConfiguration>,
 ) -> Result<TraceRWStep, EmulatorError> {
     let mut challenge_log = ProverChallengeLog::load(checkpoint_path)?;
-    let base = challenge_log.base_step;
+    let input = challenge_log.input.clone();
+    let nary_log = challenge_log.get_nary_log(NArySearchType::ConflictStep);
 
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
     let nary_def = program_def.nary_def();
 
     let total_rounds = nary_def.total_rounds();
-    let final_step = nary_def.step_from_base_and_bits(total_rounds, base, final_bits);
+    let final_step = nary_def.step_from_base_and_bits(total_rounds, nary_log.base_step, final_bits);
 
-    challenge_log.base_step = final_step;
-    challenge_log.verifier_decisions.push(final_bits);
+    nary_log.base_step = final_step;
+    nary_log.verifier_decisions.push(final_bits);
 
     info!("The prover needs to provide the full trace for the selected step {final_step}");
-    challenge_log.final_trace =
-        program_def.get_trace_step(checkpoint_path, final_step, fail_config)?;
+    let final_trace =
+        program_def.get_trace_step(checkpoint_path, input, final_step, fail_config)?;
+    nary_log.final_trace = final_trace.clone();
     challenge_log.save(checkpoint_path)?;
-    Ok(challenge_log.final_trace)
+    Ok(final_trace)
 }
 
 pub fn get_hashes(
@@ -238,14 +255,18 @@ pub fn get_hashes(
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, EnumString, Display, EnumIter)]
 #[strum(serialize_all = "snake_case")]
 pub enum ForceChallenge {
+    CorrectHash,
     TraceHash,
     TraceHashZero,
     EntryPoint,
     ProgramCounter,
     Opcode,
     InputData,
-    RomData,
+    InitializedData,
+    UninitializedData,
     AddressesSections,
+    ReadValueNArySearch,
+    ReadValue,
     No,
 }
 
@@ -254,8 +275,15 @@ pub enum ForceChallenge {
 pub enum ForceCondition {
     ValidInputStepAndHash,
     ValidInputWrongStepOrHash,
-    Allways,
+    Always,
     No,
+}
+
+fn find_chunk_index(chunks: &[Chunk], address: u32) -> Option<usize> {
+    chunks.iter().position(|Chunk { base_addr, data }| {
+        let chunk_size = data.len();
+        *base_addr <= address && address < *base_addr + chunk_size as u32 * 4
+    })
 }
 
 pub fn verifier_choose_challenge(
@@ -267,14 +295,23 @@ pub fn verifier_choose_challenge(
     return_script_parameters: bool,
 ) -> Result<ChallengeType, EmulatorError> {
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
-    let program = program_def.load_program_from_checkpoint(checkpoint_path, 0)?;
+    let mut program = program_def.load_program()?;
     let nary_def = program_def.nary_def();
-    let verifier_log = VerifierChallengeLog::load(checkpoint_path)?;
+
+    let mut verifier_log = VerifierChallengeLog::load(checkpoint_path)?;
+    let conflict_step_log = &mut verifier_log.conflict_step_log;
+    conflict_step_log.final_trace = trace.clone();
+
+    program.load_input(
+        verifier_log.input.clone(),
+        &program_def.input_section_name,
+        false,
+    )?;
 
     let (step_hash, next_hash) = get_hashes(
-        &nary_def.step_mapping(&verifier_log.verifier_decisions),
-        &verifier_log.prover_hash_rounds,
-        verifier_log.step_to_challenge,
+        &nary_def.step_mapping(&conflict_step_log.verifier_decisions),
+        &conflict_step_log.prover_hash_rounds,
+        conflict_step_log.step_to_challenge,
     );
 
     // check trace_hash
@@ -284,11 +321,11 @@ pub fn verifier_choose_challenge(
         || force == ForceChallenge::TraceHashZero
     {
         if trace.step_number == 1 {
-            info!("Veifier choose to challenge TRACE_HASH_ZERO");
+            info!("Verifier choose to challenge TRACE_HASH_ZERO");
             return Ok(ChallengeType::TraceHashZero(trace.trace_step, next_hash));
         }
 
-        info!("Veifier choose to challenge TRACE_HASH");
+        info!("Verifier choose to challenge TRACE_HASH");
         return Ok(ChallengeType::TraceHash(
             step_hash,
             trace.trace_step,
@@ -296,7 +333,7 @@ pub fn verifier_choose_challenge(
         ));
     }
 
-    let step = verifier_log.step_to_challenge;
+    let step = conflict_step_log.step_to_challenge;
     let mut steps = vec![step, step + 1];
     let mut my_trace_idx = 1;
     if step > 0 {
@@ -306,7 +343,13 @@ pub fn verifier_choose_challenge(
 
     //obtain all the steps needed
     let my_execution = program_def
-        .execute_helper(checkpoint_path, vec![], Some(steps), fail_config)?
+        .execute_helper(
+            checkpoint_path,
+            verifier_log.input.clone(),
+            Some(steps),
+            fail_config,
+            false,
+        )?
         .1;
     info!("execution: {:?}", my_execution);
     let my_trace = my_execution[my_trace_idx].0.clone();
@@ -335,8 +378,7 @@ pub fn verifier_choose_challenge(
         && force == ForceChallenge::No)
         || force == ForceChallenge::AddressesSections
     {
-        info!("Verifier choose to challenge invalid ADDRESS SECTION");
-
+        info!("Verifier choose to challenge invalid ADDRESS_SECTION");
         return Ok(ChallengeType::AddressesSections(
             trace.read_1,
             trace.read_2,
@@ -359,16 +401,17 @@ pub fn verifier_choose_challenge(
         || force == ForceChallenge::ProgramCounter
     {
         if trace.step_number == 1 {
-            info!("Veifier choose to challenge ENTRYPOINT");
+            info!("Verifier choose to challenge ENTRYPOINT");
             return Ok(ChallengeType::EntryPoint(
                 trace.read_pc,
                 trace.step_number,
                 return_script_parameters.then_some(program.pc.get_address()), //this parameter is only used for the test
             ));
         } else {
-            info!("Veifier choose to challenge PROGRAM_COUNTER");
+            info!("Verifier choose to challenge PROGRAM_COUNTER");
             let pre_pre_hash = my_execution[0].1.clone();
             let pre_step = my_execution[1].0.clone();
+
             return Ok(ChallengeType::ProgramCounter(
                 pre_pre_hash,
                 pre_step.trace_step,
@@ -382,66 +425,202 @@ pub fn verifier_choose_challenge(
         || force == ForceChallenge::Opcode
     {
         info!("Verifier choose to challenge invalid OPCODE");
-
         let pc = trace.read_pc.pc.get_address();
-
-        let (chunk_index, chunk_base_addr, chunk_start) = program.get_chunk_info(pc, CODE_CHUNK_SIZE);
-
-        let section = program.find_section(pc).unwrap();
-        let chunk_end = (chunk_start + CODE_CHUNK_SIZE as usize).min(section.data.len());
-
-        let opcodes_chunk: Vec<u32> = section.data[chunk_start..chunk_end]
-            .iter()
-            .map(|opcode| u32::from_be(*opcode))
-            .collect();
+        let code_chunks = program.get_code_chunks(CHUNK_SIZE);
+        let chunk_index = find_chunk_index(&code_chunks, pc).unwrap();
 
         return Ok(ChallengeType::Opcode(
             trace.read_pc,
-            chunk_index,
-            return_script_parameters.then_some(chunk_base_addr),
-            return_script_parameters.then_some(opcodes_chunk),
+            chunk_index as u32,
+            return_script_parameters.then_some(code_chunks[chunk_index].clone()),
         ));
     }
 
+    // TODO: check read_step < current_step
+
     // check const read value
-    let conflict_read_1 =
-        trace.read_1.value != my_trace.read_1.value && trace.read_1.last_step == LAST_STEP_INIT;
-    let conflict_read_2 =
-        trace.read_2.value != my_trace.read_2.value && trace.read_2.last_step == LAST_STEP_INIT;
-    if conflict_read_1 || conflict_read_2 {
-        let conflict_address = if conflict_read_1 {
-            trace.read_1.address
+    let is_read_1_conflict = trace.read_1.value != my_trace.read_1.value;
+    let is_read_2_conflict = trace.read_2.value != my_trace.read_2.value;
+
+    if ((is_read_1_conflict || is_read_2_conflict) && force == ForceChallenge::No)
+        || force == ForceChallenge::InputData
+        || force == ForceChallenge::InitializedData
+        || force == ForceChallenge::UninitializedData
+        || force == ForceChallenge::ReadValueNArySearch
+    {
+        let (conflict_read, my_conflict_read, read_selector) = if is_read_1_conflict {
+            (trace.read_1.clone(), my_trace.read_1.clone(), 1)
         } else {
-            trace.read_2.address
+            (trace.read_2.clone(), my_trace.read_2.clone(), 2)
         };
-        let section = program.find_section(conflict_address)?;
-        //TODO: Check if the address is in the input section rom ram or registers
-        let value = program.read_mem(conflict_address)?;
-        if (section.name == program_def.input_section_name && force == ForceChallenge::No)
+
+        let conflict_address = conflict_read.address;
+        let conflict_last_step = conflict_read.last_step;
+        let my_conflict_last_step = my_conflict_read.last_step;
+
+        let section_idx = program.find_section_idx(conflict_address)?;
+        let section = program.sections.get(section_idx).unwrap();
+
+        if (conflict_last_step == LAST_STEP_INIT
+            && my_conflict_last_step == LAST_STEP_INIT
+            && force == ForceChallenge::No)
             || force == ForceChallenge::InputData
+            || force == ForceChallenge::InitializedData
+            || force == ForceChallenge::UninitializedData
         {
-            info!("Verifier choose to challenge invalid INPUT DATA");
-            return Ok(ChallengeType::InputData(
-                trace.read_1.clone(),
-                trace.read_2.clone(),
-                conflict_address,
-                value,
-            ));
-        } else if (!section.is_write && force == ForceChallenge::No) || force == ForceChallenge::RomData {
-            info!("Verifier choose to challenge invalid ROM DATA");
-            
-            return Ok(ChallengeType::RomData(
-                trace.read_1.clone(),
-                trace.read_2.clone(),
-                conflict_address,
-                value,
-            ));
+            let input_size = program_def
+                .inputs
+                .iter()
+                .fold(0, |acc, input| acc + input.size);
+
+            if (section.name == program_def.input_section_name
+                && conflict_address < section.start + input_size as u32
+                && force == ForceChallenge::No)
+                || force == ForceChallenge::InputData
+            {
+                info!("Verifier choose to challenge invalid INPUT DATA");
+                let value = program.read_mem(conflict_address)?;
+
+                return Ok(ChallengeType::InputData(
+                    trace.read_1,
+                    trace.read_2,
+                    conflict_address,
+                    value,
+                ));
+            } else if (section.initialized && force == ForceChallenge::No)
+                || force == ForceChallenge::InitializedData
+            {
+                info!("Verifier choose to challenge invalid INITIALIZED DATA");
+                let initialized_chunks = program.get_initialized_chunks(CHUNK_SIZE);
+                let chunk_index = find_chunk_index(&initialized_chunks, conflict_address).unwrap();
+
+                return Ok(ChallengeType::InitializedData(
+                    trace.read_1,
+                    trace.read_2,
+                    read_selector,
+                    chunk_index as u32,
+                    return_script_parameters.then_some(initialized_chunks[chunk_index].clone()),
+                ));
+            } else if (!section.initialized && force == ForceChallenge::No)
+                || force == ForceChallenge::UninitializedData
+            {
+                info!("Verifier choose to challenge invalid UNINITIALIZED DATA");
+                let uninitilized_ranges = program.get_uninitialized_ranges(&program_def);
+
+                return Ok(ChallengeType::UninitializedData(
+                    trace.read_1,
+                    trace.read_2,
+                    read_selector,
+                    return_script_parameters.then_some(uninitilized_ranges),
+                ));
+            }
+        } else {
+            let step_to_challenge = if conflict_last_step == LAST_STEP_INIT {
+                my_conflict_last_step
+            } else if my_conflict_last_step == LAST_STEP_INIT {
+                conflict_last_step
+            } else {
+                conflict_last_step.max(my_conflict_last_step)
+            };
+
+            let bits = nary_def.step_bits_for_round(1, step_to_challenge - 1);
+
+            let read_challenge_log = &mut verifier_log.read_challenge_log;
+            read_challenge_log.step_to_challenge = step_to_challenge - 1;
+            read_challenge_log.base_step = nary_def.step_from_base_and_bits(1, 0, bits);
+            read_challenge_log.verifier_decisions.push(bits);
+
+            read_challenge_log
+                .prover_hash_rounds
+                .push(conflict_step_log.prover_hash_rounds[0].clone());
+
+            read_challenge_log
+                .verifier_hash_rounds
+                .push(conflict_step_log.verifier_hash_rounds[0].clone());
+
+            verifier_log.read_step = step_to_challenge - 1;
+            verifier_log.read_selector = read_selector;
+            verifier_log.save(checkpoint_path)?;
+
+            return Ok(ChallengeType::ReadValueNArySearch(bits));
         }
+    }
+    verifier_log.save(checkpoint_path)?;
+    Ok(ChallengeType::No)
+}
+
+pub fn verifier_choose_challenge_for_read_challenge(
+    program_definition_file: &str,
+    checkpoint_path: &str,
+    fail_config: Option<FailConfiguration>,
+    force: ForceChallenge,
+) -> Result<ChallengeType, EmulatorError> {
+    let program_def = ProgramDefinition::from_config(program_definition_file)?;
+    let nary_def = program_def.nary_def();
+    let verifier_log = VerifierChallengeLog::load(checkpoint_path)?;
+
+    let read_challenge_log = verifier_log.read_challenge_log;
+    let challenge_step = read_challenge_log.step_to_challenge;
+
+    let (step_hash, next_hash) = get_hashes(
+        &nary_def.step_mapping(&read_challenge_log.verifier_decisions),
+        &read_challenge_log.prover_hash_rounds,
+        challenge_step,
+    );
+
+    let (my_step_hash, my_next_hash) = get_hashes(
+        &nary_def.step_mapping(&read_challenge_log.verifier_decisions),
+        &read_challenge_log.verifier_hash_rounds,
+        challenge_step,
+    );
+
+    assert_eq!(next_hash, my_next_hash);
+
+    let my_execution = program_def
+        .execute_helper(
+            checkpoint_path,
+            verifier_log.input.clone(),
+            Some(vec![challenge_step + 1]),
+            fail_config,
+            false,
+        )?
+        .1;
+    info!("execution: {:?}", my_execution);
+    let my_trace = my_execution[0].0.clone();
+
+    if (step_hash != my_step_hash && force == ForceChallenge::No)
+        || force == ForceChallenge::CorrectHash
+    {
+        return Ok(ChallengeType::CorrectHash {
+            prover_hash: step_hash,
+            verifier_hash: my_step_hash,
+            trace: my_trace.trace_step,
+            next_hash,
+        });
+    }
+
+    let read_step = verifier_log.read_step;
+    if (read_step == challenge_step && force == ForceChallenge::No)
+        || force == ForceChallenge::ReadValue
+    {
+        let conflict_step_trace = verifier_log.conflict_step_log.final_trace;
+        let read_1 = conflict_step_trace.read_1;
+        let read_2 = conflict_step_trace.read_2;
+        let read_selector = verifier_log.read_selector;
+
+        return Ok(ChallengeType::ReadValue {
+            read_1,
+            read_2,
+            read_selector,
+            step_hash,
+            trace: my_trace.trace_step,
+            next_hash,
+            step: challenge_step + 1,
+        });
     }
 
     Ok(ChallengeType::No)
 }
-
 /*
   TEST CASES
   ----------
@@ -547,10 +726,13 @@ mod tests {
         input: u8,
         execute_err: bool,
         fail_config_prover: Option<FailConfiguration>,
+        fail_config_prover_read_challenge: Option<FailConfiguration>,
         fail_config_verifier: Option<FailConfiguration>,
+        fail_config_verifier_read_challenge: Option<FailConfiguration>,
         challenge_ok: bool,
         force_condition: ForceCondition,
         force: ForceChallenge,
+        force_read_challenge: ForceChallenge,
     ) {
         let pdf = &format!("../docker-riscv32/riscv32/build/{}", pdf);
         let input = vec![17, 17, 17, input];
@@ -567,6 +749,7 @@ mod tests {
             chk_prover_path,
             true,
             fail_config_prover.clone(),
+            false,
         )
         .unwrap();
         info!("{:?}", result_1);
@@ -580,6 +763,7 @@ mod tests {
             &result_1.2,
             force_condition,
             fail_config_verifier.clone(),
+            false,
         )
         .unwrap();
         info!("{:?}", result);
@@ -594,6 +778,7 @@ mod tests {
                 round,
                 v_decision,
                 fail_config_prover.clone(),
+                NArySearchType::ConflictStep,
             )
             .unwrap();
             info!("{:?}", &hashes);
@@ -604,6 +789,7 @@ mod tests {
                 round,
                 hashes,
                 fail_config_verifier.clone(),
+                NArySearchType::ConflictStep,
             )
             .unwrap();
             info!("{:?}", v_decision);
@@ -630,17 +816,55 @@ mod tests {
 
         let challenge = verifier_choose_challenge(
             pdf,
-            &chk_verifier_path,
+            chk_verifier_path,
             final_trace,
             force,
             fail_config_verifier,
             true,
         )
         .unwrap();
-        let result = execute_challenge(&challenge);
-        assert_eq!(result, challenge_ok);
 
+        let challenge = match &challenge {
+            ChallengeType::ReadValueNArySearch(bits) => {
+                let mut v_decision = *bits;
+                for round in 2..nary_def.total_rounds() + 1 {
+                    let hashes = prover_get_hashes_for_round(
+                        pdf,
+                        chk_prover_path,
+                        round,
+                        v_decision,
+                        fail_config_prover_read_challenge.clone(),
+                        NArySearchType::ReadValueChallenge,
+                    )
+                    .unwrap();
+                    info!("{:?}", &hashes);
+
+                    v_decision = verifier_choose_segment(
+                        pdf,
+                        chk_verifier_path,
+                        round,
+                        hashes,
+                        fail_config_verifier_read_challenge.clone(),
+                        NArySearchType::ReadValueChallenge,
+                    )
+                    .unwrap();
+                    info!("{:?}", v_decision);
+                }
+
+                verifier_choose_challenge_for_read_challenge(
+                    pdf,
+                    chk_verifier_path,
+                    fail_config_verifier_read_challenge,
+                    force_read_challenge,
+                )
+                .unwrap()
+            }
+            _ => challenge,
+        };
+
+        let result = execute_challenge(&challenge);
         info!("Challenge: {:?} result: {}", challenge, result);
+        assert_eq!(result, challenge_ok);
     }
 
     #[test]
@@ -654,8 +878,11 @@ mod tests {
             true,
             None,
             None,
+            None,
+            None,
             false,
             ForceCondition::No,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
         //good input: expect execute step to succeed
@@ -666,8 +893,11 @@ mod tests {
             false,
             None,
             None,
+            None,
+            None,
             false,
             ForceCondition::ValidInputStepAndHash,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
     }
@@ -684,8 +914,11 @@ mod tests {
             false,
             fail_hash.clone(),
             None,
+            None,
+            None,
             true,
             ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
         test_challenge_aux(
@@ -694,10 +927,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_hash,
+            None,
             false,
             ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::TraceHash,
+            ForceChallenge::No,
         );
     }
 
@@ -713,8 +949,11 @@ mod tests {
             false,
             fail_hash.clone(),
             None,
+            None,
+            None,
             true,
             ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
         test_challenge_aux(
@@ -723,10 +962,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_hash,
+            None,
             false,
             ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::TraceHashZero,
+            ForceChallenge::No,
         );
     }
 
@@ -741,8 +983,11 @@ mod tests {
             false,
             fail_entrypoint.clone(),
             None,
+            None,
+            None,
             true,
             ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
         test_challenge_aux(
@@ -751,10 +996,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_entrypoint,
+            None,
             false,
             ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::EntryPoint,
+            ForceChallenge::No,
         );
     }
 
@@ -769,8 +1017,11 @@ mod tests {
             false,
             fail_pc.clone(),
             None,
+            None,
+            None,
             true,
             ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
         test_challenge_aux(
@@ -779,10 +1030,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_pc,
+            None,
             false,
             ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::ProgramCounter,
+            ForceChallenge::No,
         );
     }
 
@@ -792,7 +1046,7 @@ mod tests {
         let fail_args = vec![
             "1106",
             "0xaa000000",
-            "0x11111111",
+            "0x11111100",
             "0xaa000000",
             "0xffffffffffffffff",
         ]
@@ -806,33 +1060,17 @@ mod tests {
         test_challenge_aux(
             "11",
             "hello-world.yaml",
-            0,
+            17,
             false,
-            fail_read_2,
+            fail_read_2.clone(),
+            None,
+            None,
             None,
             true,
-            ForceCondition::No,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
-
-        // if we use the same fail_read as before, the prover won't challenge
-        // because there is no hash difference, the previous fail_read reads
-        // the value 0x11111111 and that's what we are already reading
-        // because we pass 17 as input instead of 0
-        let fail_args = vec![
-            "1106",
-            "0xaa000000",
-            "0x11111100", // different input value
-            "0xaa000000",
-            "0xffffffffffffffff",
-        ]
-        .iter()
-        .map(|x| x.to_string())
-        .collect::<Vec<String>>();
-        let fail_read_2 = Some(FailConfiguration::new_fail_reads(FailReads::new(
-            None,
-            Some(&fail_args),
-        )));
 
         test_challenge_aux(
             "12",
@@ -840,10 +1078,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_read_2,
+            None,
             false,
-            ForceCondition::ValidInputStepAndHash,
+            ForceCondition::No,
             ForceChallenge::InputData,
+            ForceChallenge::No,
         );
     }
 
@@ -881,8 +1122,11 @@ mod tests {
             false,
             fail_execute,
             None,
+            None,
+            None,
             true,
             ForceCondition::No,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
 
@@ -907,10 +1151,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_read_2,
+            None,
             false,
             ForceCondition::No,
             ForceChallenge::AddressesSections,
+            ForceChallenge::No,
         );
     }
 
@@ -948,8 +1195,11 @@ mod tests {
             false,
             fail_execute,
             None,
+            None,
+            None,
             true,
             ForceCondition::No,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
 
@@ -974,10 +1224,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_read_2,
+            None,
             false,
             ForceCondition::No,
             ForceChallenge::AddressesSections,
+            ForceChallenge::No,
         );
     }
 
@@ -1012,8 +1265,11 @@ mod tests {
             false,
             fail_execute,
             None,
+            None,
+            None,
             true,
             ForceCondition::No,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
 
@@ -1031,10 +1287,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_write,
+            None,
             false,
-            ForceCondition::No,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::AddressesSections,
+            ForceChallenge::No,
         );
     }
 
@@ -1072,8 +1331,11 @@ mod tests {
             false,
             fail_execute,
             None,
+            None,
+            None,
             true,
             ForceCondition::No,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
         let fail_args = vec!["1106", "0xaa000000", "0x11111100", "0xf0000004"]
@@ -1090,10 +1352,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_write,
+            None,
             false,
-            ForceCondition::No,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::AddressesSections,
+            ForceChallenge::No,
         );
     }
 
@@ -1131,8 +1396,11 @@ mod tests {
             false,
             fail_execute,
             None,
+            None,
+            None,
             true,
             ForceCondition::No,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
 
@@ -1150,10 +1418,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_write,
+            None,
             false,
-            ForceCondition::No,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::AddressesSections,
+            ForceChallenge::No,
         );
     }
 
@@ -1188,8 +1459,11 @@ mod tests {
             false,
             fail_execute.clone(),
             None,
+            None,
+            None,
             true,
             ForceCondition::No,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
 
@@ -1199,10 +1473,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_execute,
+            None,
             false,
-            ForceCondition::ValidInputWrongStepOrHash,
+            ForceCondition::No,
             ForceChallenge::AddressesSections,
+            ForceChallenge::No,
         );
     }
 
@@ -1237,8 +1514,11 @@ mod tests {
             false,
             fail_execute.clone(),
             None,
+            None,
+            None,
             true,
             ForceCondition::No,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
 
@@ -1248,10 +1528,13 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_execute,
+            None,
             false,
-            ForceCondition::ValidInputWrongStepOrHash,
+            ForceCondition::No,
             ForceChallenge::AddressesSections,
+            ForceChallenge::No,
         );
     }
 
@@ -1274,8 +1557,11 @@ mod tests {
             false,
             fail_opcode.clone(),
             None,
+            None,
+            None,
             true,
             ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
 
@@ -1285,15 +1571,18 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_opcode,
+            None,
             false,
             ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::Opcode,
+            ForceChallenge::No,
         );
     }
 
     #[test]
-    fn test_challenge_rom() {
+    fn test_challenge_initialized() {
         init_trace();
         let fail_execute = FailExecute {
             step: 32,
@@ -1302,7 +1591,10 @@ mod tests {
                 TraceRead::new(4026531900, 2952790016, 31),
                 TraceRead::new(2952790016, 0, LAST_STEP_INIT), // read a different value from ROM
                 TraceReadPC::new(ProgramCounter::new(2147483708, 0), 509699),
-                TraceStep::new(TraceWrite::new(4026531896, 0), ProgramCounter::new(2147483712, 0)),
+                TraceStep::new(
+                    TraceWrite::new(4026531896, 0),
+                    ProgramCounter::new(2147483712, 0),
+                ),
                 None,
                 MemoryWitness::new(
                     MemoryAccessType::Register,
@@ -1321,8 +1613,11 @@ mod tests {
             false,
             fail_execute.clone(),
             None,
+            None,
+            None,
             true,
             ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
             ForceChallenge::No,
         );
 
@@ -1332,10 +1627,327 @@ mod tests {
             17,
             false,
             None,
+            None,
             fail_execute,
+            None,
             false,
             ForceCondition::ValidInputWrongStepOrHash,
-            ForceChallenge::RomData,
+            ForceChallenge::InitializedData,
+            ForceChallenge::No,
+        );
+    }
+
+    #[test]
+    fn test_challenge_uninitialized() {
+        init_trace();
+
+        let fail_args = vec![
+            "9",
+            "0xa0001004",
+            "0x11111100",
+            "0xa0001004",
+            "0xffffffffffffffff",
+        ]
+        .iter()
+        .map(|x| x.to_string())
+        .collect::<Vec<String>>();
+        let fail_read_2 = Some(FailConfiguration::new_fail_reads(FailReads::new(
+            None,
+            Some(&fail_args),
+        )));
+
+        test_challenge_aux(
+            "31",
+            "hello-world-uninitialized.yaml",
+            0,
+            false,
+            fail_read_2.clone(),
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "32",
+            "hello-world-uninitialized.yaml",
+            17,
+            false,
+            None,
+            None,
+            fail_read_2,
+            None,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::UninitializedData,
+            ForceChallenge::No,
+        );
+    }
+
+    #[test]
+    fn test_challenge_modified_value_lies_all_hashes_from_write_step() {
+        init_trace();
+        let fail_read_args = vec!["1106", "0xaa000000", "0x11111100", "0xaa000000", "600"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+
+        let fail_read_2 = Some(FailConfiguration::new_fail_reads(FailReads::new(
+            None,
+            Some(&fail_read_args),
+        )));
+
+        let fail_write_args = vec!["600", "0xaa000000", "0x11111100", "0xaa000000"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+        let fail_write = Some(FailConfiguration::new_fail_write(FailWrite::new(
+            &fail_write_args,
+        )));
+
+        test_challenge_aux(
+            "35",
+            "hello-world.yaml",
+            17,
+            false,
+            fail_read_2.clone(),
+            fail_write.clone(),
+            None,
+            None,
+            true,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "36",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            None,
+            fail_read_2,
+            fail_write,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::ReadValueNArySearch,
+            ForceChallenge::TraceHash,
+        );
+    }
+    #[test]
+    fn test_challenge_modified_value_lies_hashes_until_step() {
+        init_trace();
+        let fail_read_args = vec!["1106", "0xaa000000", "0x11111100", "0xaa000000", "600"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+
+        let fail_read_2 = Some(FailConfiguration::new_fail_reads(FailReads::new(
+            None,
+            Some(&fail_read_args),
+        )));
+
+        let fail_hash_until = Some(FailConfiguration::new_fail_hash_until(700));
+
+        test_challenge_aux(
+            "37",
+            "hello-world.yaml",
+            17,
+            false,
+            fail_read_2.clone(),
+            fail_hash_until.clone(),
+            None,
+            None,
+            true,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "38",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            None,
+            fail_read_2,
+            fail_hash_until,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::ReadValueNArySearch,
+            ForceChallenge::TraceHash,
+        );
+    }
+
+    // TODO: add case for write to the same address and different value
+    #[test]
+    fn test_challenge_modified_value_doesnt_lie() {
+        init_trace();
+        let fail_read_args = vec!["1106", "0xaa000000", "0x11111100", "0xaa000000", "600"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+
+        let fail_read_2 = Some(FailConfiguration::new_fail_reads(FailReads::new(
+            None,
+            Some(&fail_read_args),
+        )));
+
+        test_challenge_aux(
+            "39",
+            "hello-world.yaml",
+            17,
+            false,
+            fail_read_2.clone(),
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "40",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            None,
+            fail_read_2,
+            None,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::ReadValueNArySearch,
+            ForceChallenge::ReadValue,
+        );
+    }
+
+    #[test]
+    fn test_challenge_pc_read_from_non_code() {
+        init_trace();
+
+        let fail_mem_protection = FailConfiguration::new_fail_memory_protection();
+
+        test_challenge_aux(
+            "audit_01",
+            "audit_01.yaml",
+            0,
+            false,
+            Some(fail_mem_protection),
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+    }
+
+    #[test]
+    fn test_challenge_load_to_x0_aligned() {
+        init_trace();
+
+        let fail_execute = FailExecute {
+            step: 9,
+            fake_trace: TraceRWStep::new(
+                9,
+                TraceRead::new(4026531900, 2852134912, 8),
+                TraceRead::new(2852134912, 0, LAST_STEP_INIT),
+                TraceReadPC::new(ProgramCounter::new(2147483796, 0), 499715),
+                TraceStep::new(TraceWrite::default(), ProgramCounter::new(2147483800, 0)),
+                None,
+                MemoryWitness::new(
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Memory,
+                    MemoryAccessType::Unused,
+                ),
+            ),
+        };
+
+        let fail_execute = Some(FailConfiguration::new_fail_execute(fail_execute));
+
+        test_challenge_aux(
+            "audit_02_aligned",
+            "audit_02_aligned.yaml",
+            0,
+            false,
+            fail_execute,
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+    }
+
+    #[test]
+    fn test_challenge_load_to_x0_unaligned() {
+        init_trace();
+
+        let fail_execute = FailExecute {
+            step: 10,
+            fake_trace: TraceRWStep::new(
+                10,
+                TraceRead::new(4026531900, 2852134912, 8),
+                TraceRead::new(2852134912, 0, LAST_STEP_INIT),
+                TraceReadPC::new(ProgramCounter::new(2147483796, 1), 4292321283),
+                TraceStep::new(TraceWrite::new(4026531972, 0), ProgramCounter::new(2147483796, 2)),
+                None,
+                MemoryWitness::new(
+                    MemoryAccessType::Register,
+                    MemoryAccessType::Memory,
+                    MemoryAccessType::Register,
+                ),
+            ),
+        };
+
+        let fail_execute = Some(FailConfiguration::new_fail_execute(fail_execute));
+
+        test_challenge_aux(
+            "audit_02_unaligned",
+            "audit_02_unaligned.yaml",
+            0,
+            false,
+            fail_execute,
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+    }
+
+    #[test]
+    fn test_challenge_non_aligned_jump() {
+        init_trace();
+
+        let fail_mem_protection = FailConfiguration::new_fail_memory_protection();
+
+        test_challenge_aux(
+            "audit_15",
+            "audit_15.yaml",
+            0,
+            true,
+            Some(fail_mem_protection),
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+            ForceChallenge::No,
         );
     }
 }

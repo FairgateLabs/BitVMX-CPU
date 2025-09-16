@@ -49,6 +49,14 @@ fn name_or_nop<X: RdZero>(x: &X, name: &str) -> String {
     }
 }
 
+fn name_or_nop_with_micro<X: RdZero>(x: &X, name: &str, micro: u8) -> String {
+    if micro > 1 && x.is_rd_zero() {
+        "nop".to_string()
+    } else {
+        format!("{}_{}", name, micro)
+    }
+}
+
 pub fn requires_witness(instruction: &Instruction) -> bool {
     match instruction {
         Div(_) | Divu(_) | Rem(_) | Remu(_) => true,
@@ -65,11 +73,11 @@ pub fn get_key_from_instruction_and_micro(instruction: &Instruction, micro: u8) 
         Bltu(_) => "bltu".to_string(),
         Bgeu(_) => "bgeu".to_string(),
 
-        Lh(_) => format!("lh_{}", micro),
-        Lhu(_) => format!("lhu_{}", micro),
-        Lw(_) => format!("lhw_{}", micro),
-        Lb(_) => format!("lb_{}", micro),
-        Lbu(_) => format!("lbu_{}", micro),
+        Lh(x) => name_or_nop_with_micro(x, "lh", micro),
+        Lhu(x) => name_or_nop_with_micro(x, "lhu", micro),
+        Lw(x) => name_or_nop_with_micro(x, "lw", micro),
+        Lb(x) => name_or_nop_with_micro(x, "lb", micro),
+        Lbu(x) => name_or_nop_with_micro(x, "lbu", micro),
 
         Sb(_) => format!("sb_{}", micro),
         Sh(_) => format!("sh_{}", micro),

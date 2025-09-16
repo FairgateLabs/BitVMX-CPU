@@ -32,24 +32,17 @@ pub fn execute_program(
     trace_list: Option<Vec<u64>>,
     mem_dump: Option<u64>,
     fail_config: FailConfiguration,
+    save_non_checkpoint_steps: bool,
 ) -> (ExecutionResult, FullTrace) {
     let trace_set: Option<HashSet<u64>> = trace_list.map(|vec| vec.into_iter().collect());
 
     let mut traces = Vec::new();
 
-    if !input.is_empty() {
-        if let Some(section) = program.find_section_by_name(input_section_name) {
-            let input_as_u32 = vec_u8_to_vec_u32(&input, little_endian);
-            for (i, byte) in input_as_u32.iter().enumerate() {
-                section.data[i] = *byte;
-            }
-        } else {
-            return (
-                ExecutionResult::SectionNotFound(input_section_name.to_string()),
-                traces,
-            );
-        }
+    let load_input_result = program.load_input(input.clone(), input_section_name, little_endian);
+    if load_input_result.is_err() {
+        return (load_input_result.err().unwrap(), traces);
     }
+
     let instruction_mapping = match verify_on_chain && use_instruction_mapping {
         true => Some(create_verification_script_mapping(
             program.registers.get_base_address(),
@@ -64,7 +57,9 @@ pub fn execute_program(
     if let Some(path) = &checkpoint_path {
         //create path if it does not exist
         std::fs::create_dir_all(path).unwrap();
-        program.serialize_to_file(path);
+        if save_non_checkpoint_steps {
+            program.serialize_to_file(path);
+        }
     }
 
     if print_trace && (trace_set.is_none() || trace_set.as_ref().unwrap().contains(&program.step)) {
@@ -181,7 +176,9 @@ pub fn execute_program(
         }
 
         if let Some(path) = &checkpoint_path {
-            if program.step % CHECKPOINT_SIZE == 0 || trace.is_err() || program.halt {
+            if program.step % CHECKPOINT_SIZE == 0
+                || ((trace.is_err() || program.halt) && save_non_checkpoint_steps)
+            {
                 program.serialize_to_file(path);
             }
         }
@@ -257,7 +254,13 @@ pub fn execute_step(
 
     let opcode = match fail_config.fail_opcode {
         Some(fo) if fo.step == program.step => fo.opcode,
-        _ => program.read_mem(pc.get_address())?,
+        _ => {
+            if fail_config.fail_memory_protection {
+                program.read_mem(pc.get_address())?
+            } else {
+                program.read_instruction(pc.get_address())?
+            }
+        }
     };
 
     let instruction = riscv_decode::decode(opcode).unwrap();
@@ -311,6 +314,11 @@ pub fn execute_step(
             ));
         }
     };
+
+    let new_pc = program.pc.get_address();
+    if !fail_config.fail_memory_protection && new_pc % 4 != 0 {
+        return Err(ExecutionResult::UnalignedJump(new_pc));
+    }
 
     let trace = TraceRWStep::new(
         program.step,
@@ -488,7 +496,7 @@ pub fn op_jalr(
         )
     };
 
-    program.pc.jump(wrapping_add_itype(src_value, x));
+    program.pc.jump(wrapping_add_itype(src_value, x) & !1);
 
     (read_1, TraceRead::default(), write_1, mem_witness)
 }
@@ -520,30 +528,30 @@ pub fn op_arithmetic(
     let value_2 = program.registers.get(x.rs2());
 
     let witness = match instruction {
-        Rem(_) => match value_2 {
-            0 => Some(0xFFFF_FFFF),
-            0xFFFF_FFFF => Some(value_1),
-            _ => Some((value_1 as i32 / value_2 as i32) as u32),
-        },
-        Div(_) => match value_2 {
-            0 => Some(value_1),
-            0xFFFF_FFFF => Some(0),
-            _ => Some((value_1 as i32 % value_2 as i32) as u32),
-        },
-        Remu(_) => {
+        Rem(_) => Some(match (value_1 as i32, value_2 as i32) {
+            (_, 0) => (-1 as i32) as u32,
+            (std::i32::MIN, -1) => std::i32::MIN as u32,
+            _ => (value_1 as i32 / value_2 as i32) as u32,
+        }),
+        Div(_) => Some(match (value_1 as i32, value_2 as i32) {
+            (_, 0) => value_1,
+            (std::i32::MIN, -1) => 0,
+            _ => (value_1 as i32 % value_2 as i32) as u32,
+        }),
+        Remu(_) => Some({
             if value_2 == 0 {
-                Some(0xFFFFFFFF)
+                std::u32::MAX
             } else {
-                Some(value_1 / value_2)
+                value_1 / value_2
             }
-        }
-        Divu(_) => {
+        }),
+        Divu(_) => Some({
             if value_2 == 0 {
-                Some(value_1)
+                value_1
             } else {
-                Some(value_1 % value_2)
+                value_1 % value_2
             }
-        }
+        }),
         _ => None,
     };
 
@@ -564,21 +572,21 @@ pub fn op_arithmetic(
             let result: u64 = (value_1 as u64) * (value_2 as u64);
             (result >> 32) as u32 // High 32 bits
         }
-        Div(_) => match value_2 {
-            0 => 0xFFFF_FFFF,
-            0xFFFF_FFFF => value_1,
+        Div(_) => match (value_1 as i32, value_2 as i32) {
+            (_, 0) => (-1 as i32) as u32,
+            (std::i32::MIN, -1) => std::i32::MIN as u32,
             _ => (value_1 as i32 / value_2 as i32) as u32,
         },
         Divu(_) => {
             if value_2 == 0 {
-                0xFFFFFFFF
+                std::u32::MAX
             } else {
                 value_1 / value_2
             }
         }
-        Rem(_) => match value_2 {
-            0 => value_1,
-            0xFFFF_FFFF => 0,
+        Rem(_) => match (value_1 as i32, value_2 as i32) {
+            (_, 0) => value_1,
+            (std::i32::MIN, -1) => 0,
             _ => (value_1 as i32 % value_2 as i32) as u32,
         },
         Remu(_) => {
@@ -974,7 +982,9 @@ pub fn op_load(
     x: &IType,
     program: &mut Program,
 ) -> Result<(TraceRead, TraceRead, TraceWrite, MemoryWitness), ExecutionResult> {
-    if x.rd() == REGISTER_ZERO as u32 {
+    let micro = program.pc.get_micro();
+
+    if micro > 1 && x.rd() == REGISTER_ZERO as u32 {
         program.pc.next_address();
         return Ok((
             TraceRead::default(),
@@ -983,8 +993,6 @@ pub fn op_load(
             MemoryWitness::default(),
         ));
     }
-
-    let micro = program.pc.get_micro();
 
     let (read_1, mut src_mem, alignment) = get_src_mem(&program.registers, x);
     let (_word, _half, _byte, reads) = get_type_and_read_from_instruction(instruction, alignment);
@@ -1023,6 +1031,18 @@ pub fn op_load(
 
             let write_1 = if reads == 1 {
                 program.pc.next_address();
+                if x.rd() == REGISTER_ZERO as u32 {
+                    return Ok((
+                        read_1,
+                        read_2,
+                        TraceWrite::default(),
+                        MemoryWitness::new(
+                            MemoryAccessType::Register,
+                            MemoryAccessType::Memory,
+                            MemoryAccessType::Unused,
+                        ),
+                    ));
+                }
                 program.registers.set(x.rd(), shifted, program.step);
                 program.registers.to_trace_write(x.rd())
             } else {

@@ -6,6 +6,13 @@ use super::{
     script_utils::{number_u32_partial, WordTable},
 };
 
+pub fn load_clear_lsb_table(stack: &mut StackTracker) -> StackVariable {
+    for i in (0..16).rev() {
+        stack.number(i & !1);
+    }
+    stack.join_in_stack(16, None, Some("clear_lsb_table"))
+}
+
 pub fn load_modulo_4_table(stack: &mut StackTracker) -> StackVariable {
     for i in (0..16).rev() {
         stack.number(i % 4);
@@ -45,6 +52,26 @@ pub fn is_aligned(
     }
 
     result
+}
+
+pub fn verify_alignment(stack: &mut StackTracker, mem_address: StackVariable) {
+    let lower_half_nibble_table = load_lower_half_nibble_table(stack);
+    is_aligned(stack, mem_address, false, &lower_half_nibble_table);
+    stack.op_verify();
+    stack.drop(lower_half_nibble_table);
+}
+
+pub fn clear_least_significant_bit(stack: &mut StackTracker, mem_address: StackVariable) -> StackVariable {
+    let parts = stack.explode(mem_address);
+    let table = load_clear_lsb_table(stack);
+
+    stack.move_var(parts[7]);
+    stack.get_value_from_table(table, None);
+    stack.to_altstack();
+    stack.drop(table);
+
+    stack.from_altstack();
+    stack.join_count(parts[0], 7)
 }
 
 //get's the memory address to be read, and returns the aligned memory address and the alignment delta

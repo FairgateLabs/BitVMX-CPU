@@ -1,7 +1,7 @@
 use bitvmx_cpu_definitions::trace::TraceRWStep;
 use serde::{Deserialize, Serialize};
 
-use crate::{EmulatorError, ExecutionResult};
+use crate::{decision::nary_search::NArySearchType, EmulatorError, ExecutionResult};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ExecutionLog {
@@ -20,14 +20,20 @@ impl ExecutionLog {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ProverChallengeLog {
-    pub execution: ExecutionLog,
-    pub input: Vec<u8>,
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct ProverNAryLog {
     pub base_step: u64,
     pub verifier_decisions: Vec<u32>,
     pub hash_rounds: Vec<Vec<String>>,
     pub final_trace: TraceRWStep,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProverChallengeLog {
+    pub execution: ExecutionLog,
+    pub input: Vec<u8>,
+    pub conflict_step_log: ProverNAryLog,
+    pub read_challenge_log: ProverNAryLog,
 }
 
 impl ProverChallengeLog {
@@ -35,10 +41,8 @@ impl ProverChallengeLog {
         Self {
             execution,
             input,
-            base_step: 0,
-            verifier_decisions: Vec::new(),
-            hash_rounds: Vec::new(),
-            final_trace: TraceRWStep::default(),
+            conflict_step_log: ProverNAryLog::default(),
+            read_challenge_log: ProverNAryLog::default(),
         }
     }
 
@@ -49,6 +53,32 @@ impl ProverChallengeLog {
     pub fn load(path: &str) -> Result<Self, EmulatorError> {
         deserialize_challenge_log(path)
     }
+
+    pub fn get_nary_log(&mut self, nary_search: NArySearchType) -> &mut ProverNAryLog {
+        match nary_search {
+            NArySearchType::ConflictStep => &mut self.conflict_step_log,
+            NArySearchType::ReadValueChallenge => &mut self.read_challenge_log,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct VerifierNAryLog {
+    pub base_step: u64,
+    pub step_to_challenge: u64,
+    pub verifier_decisions: Vec<u32>,
+    pub prover_hash_rounds: Vec<Vec<String>>,
+    pub verifier_hash_rounds: Vec<Vec<String>>,
+    pub final_trace: TraceRWStep,
+}
+
+impl VerifierNAryLog {
+    pub fn new(step_to_challenge: u64) -> Self {
+        Self {
+            step_to_challenge,
+            ..Default::default()
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -56,12 +86,10 @@ pub struct VerifierChallengeLog {
     pub prover_claim_execution: ExecutionLog,
     pub execution: ExecutionLog,
     pub input: Vec<u8>,
-    pub base_step: u64,
-    pub step_to_challenge: u64,
-    pub verifier_decisions: Vec<u32>,
-    pub prover_hash_rounds: Vec<Vec<String>>,
-    pub verifier_hash_rounds: Vec<Vec<String>>,
-    pub final_trace: TraceRWStep,
+    pub conflict_step_log: VerifierNAryLog,
+    pub read_challenge_log: VerifierNAryLog,
+    pub read_selector: u32,
+    pub read_step: u64,
 }
 
 impl VerifierChallengeLog {
@@ -75,12 +103,10 @@ impl VerifierChallengeLog {
             prover_claim_execution: prover_execution,
             execution,
             input,
-            base_step: 0,
-            step_to_challenge,
-            verifier_decisions: Vec::new(),
-            prover_hash_rounds: Vec::new(),
-            verifier_hash_rounds: Vec::new(),
-            final_trace: TraceRWStep::default(),
+            conflict_step_log: VerifierNAryLog::new(step_to_challenge),
+            read_challenge_log: VerifierNAryLog::default(),
+            read_selector: 0,
+            read_step: 0,
         }
     }
 
@@ -90,6 +116,13 @@ impl VerifierChallengeLog {
 
     pub fn load(path: &str) -> Result<Self, EmulatorError> {
         deserialize_challenge_log(path)
+    }
+
+    pub fn get_nary_log(&mut self, nary_search: NArySearchType) -> &mut VerifierNAryLog {
+        match nary_search {
+            NArySearchType::ConflictStep => &mut self.conflict_step_log,
+            NArySearchType::ReadValueChallenge => &mut self.read_challenge_log,
+        }
     }
 }
 

@@ -3,9 +3,14 @@ use bitvmx_cpu_definitions::{challenge::EmulatorResultType, trace::TraceRWStep};
 use clap::{Parser, Subcommand};
 use emulator::{
     constants::REGISTERS_BASE_ADDRESS,
-    decision::challenge::{
-        prover_execute, prover_final_trace, prover_get_hashes_for_round, verifier_check_execution,
-        verifier_choose_challenge, verifier_choose_segment, ForceChallenge, ForceCondition,
+    decision::{
+        challenge::{
+            prover_execute, prover_final_trace, prover_get_hashes_for_round,
+            verifier_check_execution, verifier_choose_challenge,
+            verifier_choose_challenge_for_read_challenge, verifier_choose_segment, ForceChallenge,
+            ForceCondition,
+        },
+        nary_search::NArySearchType,
     },
     executor::{
         fetcher::execute_program,
@@ -52,6 +57,10 @@ enum Commands {
         /// Command File to write the result
         #[arg(short, long, value_name = "COMMAND_PATH")]
         command_file: String,
+
+        /// Should we save steps that are not checkpoints (like first, error and halt steps)
+        #[arg(short, long, default_value = "true")]
+        save_non_checkpoint_steps: bool,
     },
 
     VerifierCheckExecution {
@@ -86,6 +95,10 @@ enum Commands {
         /// Command File to write the result
         #[arg(short, long, value_name = "COMMAND_PATH")]
         command_file: String,
+
+        /// Should we save steps that are not checkpoints (like first, error and halt steps)
+        #[arg(short, long, default_value = "true")]
+        save_non_checkpoint_steps: bool,
     },
 
     ProverGetHashesForRound {
@@ -112,6 +125,10 @@ enum Commands {
         /// Command File to write the result
         #[arg(short, long, value_name = "COMMAND_PATH")]
         command_file: String,
+
+        /// Nary Search type
+        #[arg(short, long, value_name = "NARY_TYPE")]
+        nary_type: NArySearchType,
     },
 
     VerifierChooseSegment {
@@ -138,6 +155,10 @@ enum Commands {
         /// Command File to write the result
         #[arg(short, long, value_name = "COMMAND_PATH")]
         command_file: String,
+
+        /// Nary Search type
+        #[arg(short, long, value_name = "NARY_TYPE")]
+        nary_type: NArySearchType,
     },
 
     ProverFinalTrace {
@@ -182,6 +203,28 @@ enum Commands {
         /// Fail Configuration
         #[arg(short, long, value_name = "FailConfigVerifier")]
         fail_config_verifier: Option<FailConfiguration>,
+
+        /// Command File to write the result
+        #[arg(short, long, value_name = "COMMAND_PATH")]
+        command_file: String,
+    },
+
+    VerifierChooseChallengeForReadChallenge {
+        /// Yaml file to load
+        #[arg(short, long, value_name = "FILE")]
+        pdf: String,
+
+        /// Checkpoint verifier path
+        #[arg(short, long, value_name = "CHECKPOINT_VERIFIER_PATH")]
+        checkpoint_verifier_path: String,
+
+        /// Fail Configuration
+        #[arg(short, long, value_name = "FailConfigVerifier")]
+        fail_config_verifier: Option<FailConfiguration>,
+
+        /// Force
+        #[arg(short, long, default_value = "no")]
+        force: ForceChallenge,
 
         /// Command File to write the result
         #[arg(short, long, value_name = "COMMAND_PATH")]
@@ -265,6 +308,12 @@ enum Commands {
         #[arg(long)]
         fail_hash: Option<u64>,
 
+        /// Fail producing hash but only for steps until a specific one.
+        /// fail_hash will propagate the error to the next steps due to the hash of a step depending on the previous hash.
+        /// this one doesn't since we modify the hash after all the hashes have been calculated in get_round_hashes
+        #[arg(long)]
+        fail_hash_until: Option<u64>,
+
         /// Fail producing the write value for a specific step
         #[arg(long, value_names = &["step", "fake_trace"], num_args = 2)]
         fail_execute: Option<Vec<String>>,
@@ -296,6 +345,10 @@ enum Commands {
         /// Memory dump at given step
         #[arg(short, long)]
         dump_mem: Option<u64>,
+
+        /// Should we save steps that are not checkpoints (like first, error and halt steps)
+        #[arg(short, long, default_value = "true")]
+        save_non_checkpoint_steps: bool,
     },
 }
 
@@ -340,6 +393,7 @@ fn main() -> Result<(), EmulatorError> {
             sections,
             checkpoint_path,
             fail_hash,
+            fail_hash_until,
             fail_execute: fail_execute_args,
             list,
             fail_read_1: fail_read_1_args,
@@ -348,6 +402,7 @@ fn main() -> Result<(), EmulatorError> {
             fail_opcode: fail_opcode_args,
             dump_mem,
             fail_pc,
+            save_non_checkpoint_steps,
         }) => {
             if elf.is_none() && step.is_none() {
                 error!("To execute an elf file or a checkpoint step is required");
@@ -409,11 +464,13 @@ fn main() -> Result<(), EmulatorError> {
             let debugvar = *debug;
             let fail_config = FailConfiguration {
                 fail_hash: *fail_hash,
+                fail_hash_until: *fail_hash_until,
                 fail_execute,
                 fail_reads,
                 fail_write,
                 fail_pc: *fail_pc,
                 fail_opcode,
+                fail_memory_protection: false,
             };
             let result = execute_program(
                 &mut program,
@@ -431,6 +488,7 @@ fn main() -> Result<(), EmulatorError> {
                 numbers,
                 *dump_mem,
                 fail_config,
+                *save_non_checkpoint_steps,
             )
             .0;
             info!("Execution result: {:?}", result);
@@ -442,6 +500,7 @@ fn main() -> Result<(), EmulatorError> {
             force,
             fail_config_prover,
             command_file,
+            save_non_checkpoint_steps,
         }) => {
             let input_bytes = hex::decode(input).expect("Invalid hex string");
             let result = prover_execute(
@@ -450,6 +509,7 @@ fn main() -> Result<(), EmulatorError> {
                 checkpoint_prover_path,
                 *force,
                 fail_config_prover.clone(),
+                *save_non_checkpoint_steps,
             )?;
             info!("Prover execute: {:?}", result);
 
@@ -478,6 +538,7 @@ fn main() -> Result<(), EmulatorError> {
             force,
             fail_config_verifier,
             command_file,
+            save_non_checkpoint_steps,
         }) => {
             let input_bytes = hex::decode(input).expect("Invalid hex string");
             let result = verifier_check_execution(
@@ -488,6 +549,7 @@ fn main() -> Result<(), EmulatorError> {
                 claim_last_hash,
                 force.clone(),
                 fail_config_verifier.clone(),
+                *save_non_checkpoint_steps,
             )?;
             info!("Verifier checks execution: {:?}", result);
 
@@ -504,6 +566,7 @@ fn main() -> Result<(), EmulatorError> {
             v_decision,
             fail_config_prover,
             command_file,
+            nary_type,
         }) => {
             let result = prover_get_hashes_for_round(
                 pdf,
@@ -511,6 +574,7 @@ fn main() -> Result<(), EmulatorError> {
                 *round_number,
                 *v_decision,
                 fail_config_prover.clone(),
+                *nary_type,
             )?;
             info!("Prover get hashes for round: {:?}", result);
 
@@ -530,6 +594,7 @@ fn main() -> Result<(), EmulatorError> {
             hashes,
             fail_config_verifier,
             command_file,
+            nary_type,
         }) => {
             let result = verifier_choose_segment(
                 pdf,
@@ -537,6 +602,7 @@ fn main() -> Result<(), EmulatorError> {
                 *round_number,
                 hashes.clone(),
                 fail_config_verifier.clone(),
+                *nary_type,
             )?;
             info!("Verifier choose segment: {:?}", result);
 
@@ -587,6 +653,29 @@ fn main() -> Result<(), EmulatorError> {
                 force.clone(),
                 fail_config_verifier.clone(),
                 false,
+            )?;
+            info!("Verifier choose challenge: {:?}", result);
+
+            let result = EmulatorResultType::VerifierChooseChallengeResult {
+                challenge: result.clone(),
+            }
+            .to_value()?;
+            let mut file = create_or_open_file(command_file);
+            file.write_all(result.to_string().as_bytes())
+                .expect("Failed to write JSON to file");
+        }
+        Some(Commands::VerifierChooseChallengeForReadChallenge {
+            pdf,
+            checkpoint_verifier_path,
+            fail_config_verifier,
+            force,
+            command_file,
+        }) => {
+            let result = verifier_choose_challenge_for_read_challenge(
+                pdf,
+                checkpoint_verifier_path,
+                fail_config_verifier.clone(),
+                force.clone(),
             )?;
             info!("Verifier choose challenge: {:?}", result);
 

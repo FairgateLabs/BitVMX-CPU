@@ -110,6 +110,21 @@ impl MemoryWitness {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Chunk {
+    pub base_addr: u32,
+    pub data: Vec<u32>,
+}
+
+impl Chunk {
+    pub fn range(&self) -> (u32, u32) {
+        (
+            self.base_addr,
+            self.base_addr + self.data.len() as u32 * 4 - 1,
+        )
+    }
+}
+
 //create tests for the functions
 #[cfg(test)]
 mod tests {
