@@ -746,6 +746,8 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Result<Program, EmulatorErr
         }
         let start = start.unwrap();
         let size = size.unwrap();
+        assert!(start % 4 == 0, "Start address must be a multiple of 4");
+        let padded_size = (size + 3) & !0b11;
 
         let initialized = phdr.sh_type == elf::abi::SHT_PROGBITS;
         if size == 0 {
@@ -758,8 +760,7 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Result<Program, EmulatorErr
         let data = if initialized {
             vec_u8_to_vec_u32(&slice[phdr.sh_offset as usize..(phdr.sh_offset + size as u64) as usize], false)
         } else {
-            assert!(size % 4 == 0, "Number of bytes must be a multiple of 4");
-            let num_u32 = size / 4;
+            let num_u32 = padded_size / 4;
             vec![0; num_u32 as usize]
         };
 
@@ -771,7 +772,7 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Result<Program, EmulatorErr
         let is_write = phdr.sh_flags as u32 & SHF_WRITE == SHF_WRITE;
         assert!(!(is_code && is_write), "We don't allow writable code sections");
 
-        program.add_section(Section::new_with_data(&name, data, start, size, is_code, is_write, initialized));
+        program.add_section(Section::new_with_data(&name, data, start, padded_size, is_code, is_write, initialized));
     });
 
     program.sanity_check(Some(STACK_BASE_ADDRESS))?;
