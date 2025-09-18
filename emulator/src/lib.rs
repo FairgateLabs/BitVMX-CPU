@@ -63,6 +63,12 @@ pub enum ExecutionResult {
 
     #[error("Tried to jump to unaligned address: {0}")]
     UnalignedJump(u32),
+
+    #[error("Tried to read unaligned address: {0}")]
+    UnalignedRead(u32),
+
+    #[error("Tried to write unaligned address: {0}")]
+    UnalignedWrite(u32),
 }
 
 pub mod constants {

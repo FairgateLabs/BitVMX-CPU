@@ -497,6 +497,9 @@ impl Program {
         if cfg!(target_endian = "big") {
             panic!("Big endian machine not supported");
         }
+        if address % 4 != 0 {
+            return Err(ExecutionResult::UnalignedRead(address));
+        }
         let section = self.find_section(address)?;
         Ok(u32::from_be(
             section.data[(address - section.start) as usize / 4],
@@ -509,6 +512,10 @@ impl Program {
     }
 
     pub fn write_mem(&mut self, address: u32, value: u32) -> Result<(), ExecutionResult> {
+        if address % 4 != 0 {
+            return Err(ExecutionResult::UnalignedWrite(address));
+        }
+
         let step = self.step;
         let section = self.find_section_mut(address)?;
         if !section.is_write || section.is_code {
