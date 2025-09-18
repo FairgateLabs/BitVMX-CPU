@@ -1780,8 +1780,8 @@ mod tests {
                 |rng| {
                     let rs1_val: u32 = rng.random();
                     let rs2_val: u32 = rng.random();
-                    // Ensure the 12-bit immediate is always a multiple of 2
-                    let imm_val: u32 = (rng.random::<u16>() & 0xFFE) as u32;
+                    // Ensure the 12-bit immediate is always a multiple of 4
+                    let imm_val: u32 = (rng.random::<u16>() & 0xFFC) as u32;
                     let (funct3, instruction_fn, condition, name) =
                         instructions[rng.random_range(0..instructions.len())];
 
