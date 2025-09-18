@@ -3070,8 +3070,8 @@ mod tests {
             // Re-push variables for the next operation
             let dividend_var = push_i32_as_nibbles(&mut stack, dividend);
             let divisor_var = push_i32_as_nibbles(&mut stack, divisor);
-            let quotient_var = push_i32_as_nibbles(&mut stack, 0x41 as i32);
-            let remainder_var = push_i32_as_nibbles(&mut stack, 0x0dfb996b as i32);
+            let quotient_var = push_i32_as_nibbles(&mut stack, expected_quotient as i32);
+            let remainder_var = push_i32_as_nibbles(&mut stack, expected_remainder as i32);
 
             let result_rem = rem(
                 &mut stack,
