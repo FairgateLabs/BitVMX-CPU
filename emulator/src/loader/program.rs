@@ -294,8 +294,7 @@ impl Program {
         }
     }
 
-    pub fn sanity_check(&self, sp_base_address: Option<u32>) -> Result<(), EmulatorError> {
-        //check overlapping sections
+    pub fn check_no_overlaping_sections(&self) -> Result<(), EmulatorError> {
         for i in 0..self.sections.len() {
             for j in i + 1..self.sections.len() {
                 let section1 = &self.sections[i];
@@ -311,15 +310,28 @@ impl Program {
             }
         }
 
-        let low_section = self.sections.iter().find(|section| section.start < 0x1000);
-        if let Some(low_section) = low_section {
-            return Err(EmulatorError::CantLoadPorgram(format!(
-                "Cannot load program: section '{}' starts at a low memory address (0x{:X}), which is below the allowed threshold of 0x1000.",
-                low_section.name,
-                low_section.start,
-            )));
-        }
+        Ok(())
+    }
 
+    pub fn check_no_overflowing_sections(&self) -> Result<(), EmulatorError> {
+        let overflowing_section = self
+            .sections
+            .iter()
+            .find(|section| section.start > section.start.wrapping_add(section.size - 1));
+
+        if let Some(overflowing_section) = overflowing_section {
+            return Err(EmulatorError::CantLoadPorgram(format!(
+                "Cannot load program: section '{}' overflows, start: {}, size: {}",
+                overflowing_section.name, overflowing_section.start, overflowing_section.size,
+            )));
+        };
+
+        Ok(())
+    }
+    pub fn check_no_section_next_to_stack(
+        &self,
+        sp_base_address: Option<u32>,
+    ) -> Result<(), EmulatorError> {
         if sp_base_address.is_none() {
             return Ok(());
         }
@@ -351,6 +363,55 @@ impl Program {
         Ok(())
     }
 
+    pub fn check_no_low_sections(&self) -> Result<(), EmulatorError> {
+        let low_section = self.sections.iter().find(|section| section.start < 0x1000);
+        if let Some(low_section) = low_section {
+            return Err(EmulatorError::CantLoadPorgram(format!(
+                "Cannot load program: section '{}' starts at a low memory address (0x{:X}), which is below the allowed threshold of 0x1000.",
+                low_section.name,
+                low_section.start,
+            )));
+        }
+
+        Ok(())
+    }
+
+    pub fn check_no_section_with_invalid_opcode(&self) -> Result<(), EmulatorError> {
+        let section_with_invalid_opcode = self.sections.iter().find(|section| {
+            section.is_code
+                && section
+                    .data
+                    .iter()
+                    .find(|opcode| riscv_decode::decode(u32::from_be(**opcode)).is_err())
+                    .is_some()
+        });
+
+        if let Some(section_with_invalid_opcode) = section_with_invalid_opcode {
+            return Err(EmulatorError::CantLoadPorgram(format!(
+                "Cannot load program: code section '{}' has invalid opcode '{}'",
+                section_with_invalid_opcode.name,
+                section_with_invalid_opcode
+                    .data
+                    .iter()
+                    .find(|opcode| riscv_decode::decode(u32::from_be(**opcode)).is_err())
+                    .map(|opcode| u32::from_be(*opcode))
+                    .unwrap()
+            )));
+        }
+
+        Ok(())
+    }
+
+    pub fn sanity_check(&self, sp_base_address: Option<u32>) -> Result<(), EmulatorError> {
+        self.check_no_overflowing_sections()?;
+        self.check_no_overlaping_sections()?;
+        self.check_no_low_sections()?;
+        self.check_no_section_next_to_stack(sp_base_address)?;
+        self.check_no_section_with_invalid_opcode()?;
+
+        Ok(())
+    }
+
     pub fn add_section(&mut self, section: Section) {
         let pos = self
             .sections
@@ -365,7 +426,7 @@ impl Program {
             .binary_search_by(|section| {
                 if address < section.start {
                     Ordering::Greater
-                } else if address >= section.start + section.size {
+                } else if address > section.start + section.size - 1 {
                     Ordering::Less
                 } else {
                     Ordering::Equal
@@ -807,7 +868,40 @@ mod tests {
         let mut program = Program::new(0, 0, 0);
         program.add_section(Section::new("test_1", 0, 10, false, true, false));
         program.add_section(Section::new("test_2", 9, 5, false, true, false));
-        assert!(program.sanity_check(None).is_err());
+        assert!(program.check_no_overlaping_sections().is_err());
+    }
+
+    #[test]
+    fn test_overflowing_section() {
+        let mut program = Program::new(0, 0, 0);
+        program.add_section(Section::new("test_1", 0xffff_fff2, 0xf, false, true, false));
+        assert!(program.check_no_overflowing_sections().is_err());
+
+        let mut program = Program::new(0, 0, 0);
+        program.add_section(Section::new("test_2", 0xffff_ffff, 0x1, false, true, false));
+        assert!(program.check_no_overflowing_sections().is_ok());
+    }
+
+    #[test]
+    fn test_section_next_to_stack() {
+        let mut program = Program::new(0, 0, 0);
+        program.add_section(Section::new("test_1", 0, 10, false, true, false));
+        program.add_section(Section::new("stack", 10, 5, false, true, false));
+        assert!(program.check_no_section_next_to_stack(Some(14)).is_err());
+    }
+
+    #[test]
+    fn test_low_section() {
+        let mut program = Program::new(0, 0, 0);
+        program.add_section(Section::new("test_1", 0, 10, false, true, false));
+        assert!(program.check_no_low_sections().is_err());
+    }
+
+    #[test]
+    fn test_invalid_opcode() {
+        let mut program = Program::new(0, 0, 0);
+        program.add_section(Section::new_with_data("code", vec![30], 0, 4, true, false, true));
+        assert!(program.check_no_section_with_invalid_opcode().is_err());
     }
 
     #[test]
