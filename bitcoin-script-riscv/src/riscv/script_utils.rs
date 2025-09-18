@@ -1187,7 +1187,16 @@ pub fn sign_check(
     stack.op_dup(); // divisor_sign ~( divisor and dividend same sign) quotient_sign quotient_sign | dividend_sign rem_sign
     stack.to_altstack(); // divisor_sign ~( divisor and dividend same sign) quotient_sign | quotient_sign  dividend_sign rem_sign
 
-    stack.op_equalverify(); // divisor_sign | quotient_sign  dividend_sign rem_sign
+    let zero = stack.number_u32(0);
+    is_equal_to(stack, &quotient, &zero);
+    stack.to_altstack();
+    stack.drop(zero);
+    stack.from_altstack();
+
+    let (mut stack_true, mut stack_false) = stack.open_if();
+    stack_true.op_2drop();
+    stack_false.op_equalverify();
+    stack.end_if(stack_true, stack_false, 2, vec![], 0);
 
     stack.to_altstack(); // | divisor_sign  quotient_sign  dividend_sign rem_sign
 
