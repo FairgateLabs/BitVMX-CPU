@@ -949,8 +949,8 @@ pub fn multiply(
 
     logic_table.drop(stack);
 
-    let modulo = modulo_table(stack, 135);
-    let quotient = quotient_table_ex(stack, 135);
+    let modulo = modulo_table(stack, 197);
+    let quotient = quotient_table_ex(stack, 197);
 
     for _ in 0..15 {
         stack.from_altstack();
@@ -1671,7 +1671,6 @@ mod tests {
         let tables = StackTables::new(&mut stack, true, true, 0, 0, 0);
 
         let value = stack.number_u32(0xaaaa_aaab);
-        let size = stack.get_script().len();
         let result = twos_complement(&mut stack, &tables, value, 8);
         stack.to_altstack();
         tables.drop(&mut stack);
@@ -1704,8 +1703,6 @@ mod tests {
 
         let a = stack.number_u32(a);
         let b = stack.number_u32(b);
-
-        let start = stack.get_script().len();
 
         let mult = multiply(&mut stack, a, b, false, false);
 
@@ -1751,6 +1748,7 @@ mod tests {
         test_multiply_aux(0xFFFF_FFFF, 0x1, 0x0, 0xFFFF_FFFF);
         test_multiply_aux(0x0000_0002, 0x0000_0004, 0x0000_0000, 0x0000_0008);
         test_multiply_aux(0x1B49_F21B, 0x1F51_E1ED, 0x0356_AECC, 0x20C9_DDFF);
+        test_multiply_aux(0x1DBD_BDBF, 0x1DBD_BDBF, 0x0374_899E, 0xFEA9_9481);
     }
 
     fn test_mulh_aux(a: i32, b: i32, expected: i32) {
