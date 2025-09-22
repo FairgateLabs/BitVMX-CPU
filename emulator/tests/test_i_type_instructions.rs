@@ -418,7 +418,7 @@ mod tests {
 
         assert_eq!(
             program.pc.get_address(),
-            (imm as i32 + rs1_value as i32) as u32
+            (imm as i32 + rs1_value as i32) as u32 & !1
         );
         assert_eq!(program.registers.get(rd), 4);
     }
