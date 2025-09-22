@@ -2274,21 +2274,20 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Test likely buggy. Fix."]
     fn test_witness_equals() {
-        // let memory_witness = &MemoryWitness::new(
-        //     MemoryAccessType::Memory,
-        //     MemoryAccessType::Register,
-        //     MemoryAccessType::Unused,
-        // );
-        // test_witness_equals_aux(memory_witness, 0, false, MemoryAccessType::Memory);
-        // test_witness_equals_aux(memory_witness, 1, true, MemoryAccessType::Register);
-        // test_witness_equals_aux(memory_witness, 1, false, MemoryAccessType::Unused);
+        let memory_witness = &MemoryWitness::new(
+            MemoryAccessType::Memory,
+            MemoryAccessType::Register,
+            MemoryAccessType::Unused,
+        );
+        test_witness_equals_aux(memory_witness, 0, false, MemoryAccessType::Memory);
+        test_witness_equals_aux(memory_witness, 1, true, MemoryAccessType::Register);
+        test_witness_equals_aux(memory_witness, 1, false, MemoryAccessType::Unused);
         test_witness_equals_aux(
             &MemoryWitness::from_byte(172),
             0,
             false,
-            MemoryAccessType::Register,
+            MemoryAccessType::Unused,
         );
     }
 
@@ -2298,7 +2297,7 @@ mod tests {
         is_upper_table: bool,
     ) -> bool {
         // 1. Calculate the ground truth in pure Rust.
-        let nibble = if witness_nibble_idx == 0 {
+        let nibble = if witness_nibble_idx == 1 {
             witness_byte & 0xF
         } else {
             witness_byte >> 4
@@ -2309,6 +2308,11 @@ mod tests {
         } else {
             nibble & 0x3 // Lower 2 bits of the nibble
         };
+
+        // 3 is an invalid MemoryAccessType, just ignore the test
+        if expected_2bit_value == 3 {
+            return true;
+        }
 
         // Convert the 2-bit number into the MemoryAccessType enum.
         let expected_access_type = MemoryAccessType::from(expected_2bit_value);
@@ -2332,7 +2336,8 @@ mod tests {
             expected_access_type,
         );
         stack.op_verify(); // Assert that the op_equal call returned TRUE.
-
+        stack.drop(memory_witness_var);
+        stack.drop(half_nibble_table);
         stack.op_true();
         stack.run().success
     }
@@ -2802,7 +2807,6 @@ mod tests {
         }
 
         #[test]
-        #[ignore = "Fuzz likely buggy. Fix."]
         fn fuzz_witness_equals() {
             fuzz_generic_and_catch_panics(
                 "witness_equals",
