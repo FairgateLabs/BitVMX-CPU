@@ -519,7 +519,7 @@ mod tests {
                 boundary_address + imm_value + mem_aux_2_byte_offset,
                 set_mem_aux_2,
             )
-            .unwrap();
+            .expect_err("This write should fail, it lands outside the section");
         program.registers.set(idx_rs1, boundary_address, 0);
 
         let x = create_itype_from(imm_value, idx_rs1 as u8, rd as u8);
