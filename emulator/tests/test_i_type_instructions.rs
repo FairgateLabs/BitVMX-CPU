@@ -152,7 +152,7 @@ fn test_load_byte(
     let start_address = program.find_section_by_name("test_data").unwrap().start;
 
     program
-        .write_mem(start_address + imm_value, set_mem)
+        .write_mem(start_address + imm_value - imm_value % 4, set_mem)
         .unwrap();
     program.registers.set(idx_rs1, start_address, 0);
 
@@ -247,11 +247,11 @@ fn test_load_half_word(
     let start_address = program.find_section_by_name("test_data").unwrap().start;
 
     program
-        .write_mem(start_address + imm_value, set_mem_aux_1)
+        .write_mem(start_address + imm_value - imm_value % 4, set_mem_aux_1)
         .unwrap();
     program
         .write_mem(
-            start_address + imm_value + mem_aux_2_byte_offset,
+            start_address + imm_value - imm_value % 4 + mem_aux_2_byte_offset,
             set_mem_aux_2,
         )
         .unwrap();
@@ -340,11 +340,11 @@ fn test_load_word(
     let start_address = program.find_section_by_name("test_data").unwrap().start;
 
     program
-        .write_mem(start_address + imm_value, set_mem_aux_1)
+        .write_mem(start_address + imm_value - imm_value % 4, set_mem_aux_1)
         .unwrap();
     program
         .write_mem(
-            start_address + imm_value + mem_aux_2_byte_offset,
+            start_address + imm_value - imm_value % 4 + mem_aux_2_byte_offset,
             set_mem_aux_2,
         )
         .unwrap();
@@ -450,7 +450,7 @@ mod tests {
     }
 
     #[rstest]
-    #[case(rnd_range(), 0x15, rnd_range(), "lb", 0x123456FD, 0xFFFFFFFD)]
+    #[case(rnd_range(), 0x17, rnd_range(), "lb", 0xFD563412, 0xFFFFFFFD)] // unaligned immediate
     fn test_load_byte_unaligned(
         #[case] rd: u32,
         #[case] imm_value: u32,
@@ -462,10 +462,10 @@ mod tests {
         let mut program = get_new_program();
         program.add_section(get_new_section());
 
-        let start_address = program.find_section_by_name("test_data").unwrap().start + 1; // Unaligned address
+        let start_address = program.find_section_by_name("test_data").unwrap().start;
 
         program
-            .write_mem(start_address + imm_value, set_mem)
+            .write_mem(start_address + imm_value - imm_value % 4, set_mem)
             .unwrap();
         program.registers.set(idx_rs1, start_address, 0);
 
