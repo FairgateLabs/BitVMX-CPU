@@ -1,40 +1,8 @@
+use emulator::ExecutionResult;
 use std::collections::HashMap;
 
-use emulator::{
-    executor::{
-        fetcher::{execute_program, FullTrace},
-        utils::FailConfiguration,
-    },
-    loader::program::load_elf,
-    EmulatorError, ExecutionResult,
-};
-use tracing::info;
-
-fn verify_file(
-    fname: &str,
-    verify_on_chain: bool,
-) -> Result<(ExecutionResult, FullTrace), EmulatorError> {
-    let mut program = load_elf(&fname, false)?;
-    info!("Execute program {}", fname);
-    Ok(execute_program(
-        &mut program,
-        Vec::new(),
-        ".bss",
-        false,
-        &None,
-        Some(1000),
-        false,
-        verify_on_chain,
-        false,
-        false,
-        false,
-        true,
-        None,
-        None,
-        FailConfiguration::default(),
-        false,
-    ))
-}
+mod utils;
+use utils::common::verify_file;
 
 #[test]
 fn exception_cases() {
@@ -71,7 +39,7 @@ fn exception_cases() {
                 let path = path.path();
                 let path = path.to_string_lossy();
 
-                let (result, _) = verify_file(&format!("{}", path), true).unwrap();
+                let (result, _) = verify_file(&format!("{}", path)).unwrap();
                 assert_eq!(
                     test_cases.get(fname.into_owned().as_str()).unwrap(),
                     &result

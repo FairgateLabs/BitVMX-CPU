@@ -88,10 +88,7 @@ pub fn rnd_range() -> u32 {
     rng.gen_range(PROGRAM_REG_RANGE)
 }
 
-pub fn verify_file(
-    fname: &str,
-    verify_on_chain: bool,
-) -> Result<(ExecutionResult, FullTrace), EmulatorError> {
+pub fn verify_file(fname: &str) -> Result<(ExecutionResult, FullTrace), EmulatorError> {
     let mut program = load_elf(&fname, false)?;
 
     info!("Execute program {}", fname);
@@ -101,9 +98,9 @@ pub fn verify_file(
         ".bss",
         false,
         &None,
-        None,
+        Some(1000),
         false,
-        verify_on_chain,
+        true,
         false,
         false,
         false,
