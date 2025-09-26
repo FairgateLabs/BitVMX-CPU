@@ -40,7 +40,7 @@ for c_file in "$@"; do
 
     TARGET_DIR="riscv32/build/coin_reference_tests/"
     docker exec --workdir /data "$CONTAINER_ID" mkdir -p "$TARGET_DIR"
-    build_output=$(docker exec -it --workdir /data "$CONTAINER_ID" ./riscv32/build.sh "/tests/$c_file" --output coin_reference_tests/ --with-mul --no-qemu 2>&1)
+    build_output=$(docker exec -it --workdir /data "$CONTAINER_ID" ./riscv32/build.sh "/tests/$c_file" --output coin_reference_tests/ --with-mul --with-stdlib --optimized --no-qemu 2>&1)
 
     # Store the exit code immediately after the command runs.
     exit_code=$?
