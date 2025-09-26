@@ -28,7 +28,6 @@ use crate::riscv::{
 // [WOTS_INPUT_DATA[address]|WOTS_PROVER_READ_ADD_1|WOTS_PROVER_READ_VALUE_1|WOTS_PROVER_LAST_STEP_1|WOTS_PROVER_READ_ADD_2|WOTS_PROVER_READ_VALUE_2|WOTS_PROVER_LAST_STEP_2]
 // If STEP_1 == INIT && ADD_1 == const_address && VALUE_1 != [WOTS_INPUT_DATA[address] || STEP_2 == INIT && ADD_2 == const_address && VALUE_2 != [WOTS_INPUT_DATA[address]  => verifier wins
 pub fn input_challenge(stack: &mut StackTracker, address: u32) {
-    assert_ne!(address, 0x0000_0000);
     stack.clear_definitions();
 
     let input = stack.define(8, "prover_input");
@@ -71,7 +70,6 @@ pub fn input_challenge(stack: &mut StackTracker, address: u32) {
 // [WOTS_PROVER_READ_ADD_1|WOTS_PROVER_READ_VALUE_1|WOTS_PROVER_LAST_STEP_1|WOTS_PROVER_READ_ADD_2|WOTS_PROVER_READ_VALUE_2|WOTS_PROVER_LAST_STEP_2]
 // If STEP_1 == INIT && ADD_1 == const_address && VALUE_1 != const_value || STEP_2 == INIT && ADD_2 == const_address && VALUE_2 != const_value  => verifier wins
 pub fn rom_challenge(stack: &mut StackTracker, address: u32, value: u32) {
-    assert_ne!(address, 0x0000_0000);
     stack.clear_definitions();
     let add_1 = stack.define(8, "prover_read_add_1");
     let read_1 = stack.define(8, "prover_read_value_1");
@@ -2992,75 +2990,73 @@ mod tests {
                 }
 
                 let test_cases = [
-            // --- Success Scenarios (Challenge should succeed) ---
-            TestCase {
-                description: "read_1 is fraudulent, read_2 is irrelevant.",
-                read_1: TraceRead::new(0x1000, 0xAAAA, LAST_STEP_INIT),
-                read_2: TraceRead::new(0x2000, 0, 0),
-                address: 0x1000,
-                input_for_address: 0xBBBB,
-                expected_to_succeed: true,
-            },
-            TestCase {
-                description: "read_2 is fraudulent, read_1 is irrelevant.",
-                read_1: TraceRead::new(0x2000, 0, 0),
-                read_2: TraceRead::new(0x1000, 0xAAAA, LAST_STEP_INIT),
-                address: 0x1000,
-                input_for_address: 0xBBBB,
-                expected_to_succeed: true,
-            },
-            TestCase {
-                description: "Both reads are fraudulent for the same address.",
-                read_1: TraceRead::new(0x1000, 0xAAAA, LAST_STEP_INIT),
-                read_2: TraceRead::new(0x1000, 0xCCCC, LAST_STEP_INIT),
-                address: 0x1000,
-                input_for_address: 0xBBBB,
-                expected_to_succeed: true,
-            },
-            // ! IGNORED due to VMX-CPU-006
-            // TestCase {
-            //     description: "Border case: Fraudulent read at address 0.",
-            //     read_1: TraceRead::new(0, 0xAAAA, LAST_STEP_INIT),
-            //     read_2: TraceRead::new(0x2000, 0, 0),
-            //     address: 0,
-            //     input_for_address: 0xBBBB,
-            //     expected_to_succeed: true,
-            // },
-            // --- Failure Scenarios (Challenge should fail) ---
-            TestCase {
-                description: "Prover is honest. Both reads are uninitialized and have the correct value.",
-                read_1: TraceRead::new(0x1000, 0xBBBB, LAST_STEP_INIT),
-                read_2: TraceRead::new(0x1000, 0xBBBB, LAST_STEP_INIT),
-                address: 0x1000,
-                input_for_address: 0xBBBB,
-                expected_to_succeed: false,
-            },
-            TestCase {
-                description: "The address being challenged doesn't match either read.",
-                read_1: TraceRead::new(0x1000, 0xAAAA, LAST_STEP_INIT),
-                read_2: TraceRead::new(0x2000, 0xCCCC, LAST_STEP_INIT),
-                address: 0x3000,
-                input_for_address: 0xBBBB,
-                expected_to_succeed: false,
-            },
-            TestCase {
-                description: "The reads were not uninitialized (last_step != INIT).",
-                read_1: TraceRead::new(0x1000, 0xAAAA, 1),
-                read_2: TraceRead::new(0x1000, 0xAAAA, 2),
-                address: 0x1000,
-                input_for_address: 0xBBBB,
-                expected_to_succeed: false,
-            },
-            // ! IGNORED due to issue VMX-CPU-006
-            // TestCase {
-            //     description: "Prover is honest at address 0 with value 0.",
-            //     read_1: TraceRead::new(0, 0, LAST_STEP_INIT),
-            //     read_2: TraceRead::new(0, 0, LAST_STEP_INIT),
-            //     address: 0,
-            //     input_for_address: 0,
-            //     expected_to_succeed: false,
-            // },
-        ];
+                    // --- Success Scenarios (Challenge should succeed) ---
+                    TestCase {
+                        description: "read_1 is fraudulent, read_2 is irrelevant.",
+                        read_1: TraceRead::new(0x1000, 0xAAAA, LAST_STEP_INIT),
+                        read_2: TraceRead::new(0x2000, 0, 0),
+                        address: 0x1000,
+                        input_for_address: 0xBBBB,
+                        expected_to_succeed: true,
+                    },
+                    TestCase {
+                        description: "read_2 is fraudulent, read_1 is irrelevant.",
+                        read_1: TraceRead::new(0x2000, 0, 0),
+                        read_2: TraceRead::new(0x1000, 0xAAAA, LAST_STEP_INIT),
+                        address: 0x1000,
+                        input_for_address: 0xBBBB,
+                        expected_to_succeed: true,
+                    },
+                    TestCase {
+                        description: "Both reads are fraudulent for the same address.",
+                        read_1: TraceRead::new(0x1000, 0xAAAA, LAST_STEP_INIT),
+                        read_2: TraceRead::new(0x1000, 0xCCCC, LAST_STEP_INIT),
+                        address: 0x1000,
+                        input_for_address: 0xBBBB,
+                        expected_to_succeed: true,
+                    },
+                    TestCase {
+                        description: "Border case: Fraudulent read at address 0.",
+                        read_1: TraceRead::new(0, 0xAAAA, LAST_STEP_INIT),
+                        read_2: TraceRead::new(0x2000, 0, 0),
+                        address: 0,
+                        input_for_address: 0xBBBB,
+                        expected_to_succeed: true,
+                    },
+                    // --- Failure Scenarios (Challenge should fail) ---
+                    TestCase {
+                        description: "Prover is honest. Both reads are uninitialized and have the correct value.",
+                        read_1: TraceRead::new(0x1000, 0xBBBB, LAST_STEP_INIT),
+                        read_2: TraceRead::new(0x1000, 0xBBBB, LAST_STEP_INIT),
+                        address: 0x1000,
+                        input_for_address: 0xBBBB,
+                        expected_to_succeed: false,
+                    },
+                    TestCase {
+                        description: "The address being challenged doesn't match either read.",
+                        read_1: TraceRead::new(0x1000, 0xAAAA, LAST_STEP_INIT),
+                        read_2: TraceRead::new(0x2000, 0xCCCC, LAST_STEP_INIT),
+                        address: 0x3000,
+                        input_for_address: 0xBBBB,
+                        expected_to_succeed: false,
+                    },
+                    TestCase {
+                        description: "The reads were not uninitialized (last_step != INIT).",
+                        read_1: TraceRead::new(0x1000, 0xAAAA, 1),
+                        read_2: TraceRead::new(0x1000, 0xAAAA, 2),
+                        address: 0x1000,
+                        input_for_address: 0xBBBB,
+                        expected_to_succeed: false,
+                    },
+                    TestCase {
+                        description: "Prover is honest at address 0 with value 0.",
+                        read_1: TraceRead::new(0, 0, LAST_STEP_INIT),
+                        read_2: TraceRead::new(0, 0, LAST_STEP_INIT),
+                        address: 0,
+                        input_for_address: 0,
+                        expected_to_succeed: false,
+                    },
+                ];
 
                 for case in test_cases.iter() {
                     let result = input_challenge_aux(InputFuzzInput {
