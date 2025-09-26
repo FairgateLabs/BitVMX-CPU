@@ -21,23 +21,22 @@ test_1:
   li  TESTNUM, 1
 
   la   t0, target_1          # Load target address
-  ori  t0, t0, 1             # Set LSB (force misalignment bit)
-  la   t1, after_jalr_1      # Expected link address
+  ori  t1, t0, 1             # Set LSB (force misalignment bit)
 
-  jalr t2, t0, 0             # Jump to t0 (LSB set), link in t2
-  j    fail                  # Should never execute this if jalr works
+  jalr x1, t1, 0             # Jump to t1 (LSB set), link in x1
+
+  # Verify return address
+  auipc t2, 0
+  bne t2, x1, fail
+
+  TEST_PASSFAIL
 
 target_1:
   # Verify we landed here with LSB cleared
-  la   t3, target_1
+  auipc t3, 0
   bne  t3, t0, fail          # This confirms t0 had correct aligned target
 
-  # Verify return address
-  bne  t2, t1, fail
-
-after_jalr_1:
-
-  TEST_PASSFAIL
+  ret
 
 RVTEST_CODE_END
 
