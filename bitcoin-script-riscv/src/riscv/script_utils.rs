@@ -1542,11 +1542,9 @@ pub fn get_selected_vars<const N: usize>(
     for (var_1, var_2) in vars_1.into_iter().zip(vars_2.into_iter()) {
         chose_var_1.move_var(var_2);
         chose_var_1.drop(var_2);
-        chose_var_1.move_var(var_1);
 
         chose_var_2.move_var(var_1);
         chose_var_2.drop(var_1);
-        chose_var_2.move_var(var_2);
     }
 
     stack
