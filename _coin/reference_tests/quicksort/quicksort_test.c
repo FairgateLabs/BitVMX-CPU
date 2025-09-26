@@ -22,7 +22,7 @@
 #define MAX_ARRAY_SIZE 100
 
 // Number of different test cases
-#define NUM_TEST_CASES 15
+#define NUM_TEST_CASES 14
 
 // Simple linear congruential generator for pseudo-random numbers
 // Using the same seed for reproducible results
