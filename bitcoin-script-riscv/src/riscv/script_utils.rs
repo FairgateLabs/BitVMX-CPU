@@ -1578,11 +1578,13 @@ pub fn address_in_sections(
     address: &StackVariable,
     sections: &SectionDefinition,
 ) {
+    stack.number(0); // op_false
+
     for range in &sections.ranges {
         address_in_range(stack, range, address);
     }
 
-    for _ in 0..sections.ranges.len() - 1 {
+    for _ in 0..sections.ranges.len() {
         stack.op_boolor();
     }
 }
