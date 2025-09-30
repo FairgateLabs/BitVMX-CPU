@@ -40,7 +40,7 @@ pub struct NArySearchDefinition {
 
 impl NArySearchDefinition {
     pub fn new(aprox_max_steps: u64, nary: u8) -> NArySearchDefinition {
-        assert!(nary > 1);
+        assert!(nary > 1 && nary.count_ones() == 1);
         let max_bits = f64::ceil(f64::log2(aprox_max_steps as f64));
         let max_steps = 2f64.powi(max_bits as i32) as u64;
         let nary_bits = f64::log2(nary as f64);
