@@ -109,12 +109,14 @@ fn test_store_word(
     }
 
     assert_eq!(
-        program.read_mem(start_address + imm_value - imm_value % 4).unwrap(),
+        program
+            .read_mem(start_address + imm_value - imm_value % 4, false)
+            .unwrap(),
         expected_reg_aux_1
     );
     assert_eq!(
         program
-            .read_mem(start_address + imm_value - imm_value % 4 + mem_aux_2_byte_offset)
+            .read_mem(start_address + imm_value - imm_value % 4 + mem_aux_2_byte_offset, false)
             .unwrap(),
         expected_reg_aux_2
     );
@@ -159,12 +161,14 @@ fn test_store_half_word(
     }
 
     assert_eq!(
-        program.read_mem(start_address + imm_value - imm_value % 4).unwrap(),
+        program
+            .read_mem(start_address + imm_value - imm_value % 4, false)
+            .unwrap(),
         expected_reg_aux_1
     );
     assert_eq!(
         program
-            .read_mem(start_address + imm_value - imm_value % 4 + mem_aux_2_byte_offset)
+            .read_mem(start_address + imm_value - imm_value % 4 + mem_aux_2_byte_offset, false)
             .unwrap(),
         expected_reg_aux_2
     );
@@ -208,7 +212,9 @@ fn test_store_byte(
     }
 
     assert_eq!(
-        program.read_mem(start_address + imm_value - imm_value % 4).unwrap(),
+        program
+            .read_mem(start_address + imm_value - imm_value % 4, false)
+            .unwrap(),
         expected
     );
 }

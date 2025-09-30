@@ -52,8 +52,8 @@ pub enum ExecutionResult {
     #[error("Not implemented {0} {1}")]
     InstructionNotImplemented(u32, String),
 
-    #[error("Can't read from non-code section")]
-    ReadFromNonCodeSection,
+    #[error("Can't execute from non-code section")]
+    ExecuteFromNonCodeSection,
 
     #[error("Can't write into read-only section")]
     WriteToReadOnlySection,
@@ -69,6 +69,9 @@ pub enum ExecutionResult {
 
     #[error("Tried to write unaligned address: {0}")]
     UnalignedWrite(u32),
+
+    #[error("Can't read from execute only section")]
+    ReadFromExecuteOnlySection,
 }
 
 pub mod constants {

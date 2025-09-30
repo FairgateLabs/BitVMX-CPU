@@ -17,7 +17,7 @@ fn list_files() {
                 let path = path.path();
                 let path = path.to_string_lossy();
 
-                let (result, _) = verify_file(&format!("{}", path)).unwrap();
+                let (result, _) = verify_file(&format!("{}", path), false).unwrap();
                 match result {
                     ExecutionResult::Halt(exit_code, _) => {
                         assert!(exit_code == 0, "Error executing file {}", path);

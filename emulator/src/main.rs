@@ -471,6 +471,7 @@ fn main() -> Result<(), EmulatorError> {
                 fail_pc: *fail_pc,
                 fail_opcode,
                 fail_memory_protection: false,
+                fail_execute_only_protection: false,
             };
             let result = execute_program(
                 &mut program,

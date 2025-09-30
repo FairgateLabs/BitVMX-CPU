@@ -479,7 +479,7 @@ pub fn verifier_choose_challenge(
                 || force == ForceChallenge::InputData
             {
                 info!("Verifier choose to challenge invalid INPUT DATA");
-                let value = program.read_mem(conflict_address)?;
+                let value = program.read_mem(conflict_address, false)?;
 
                 return Ok(ChallengeType::InputData(
                     trace.read_1,
@@ -1924,6 +1924,28 @@ mod tests {
             None,
             true,
             ForceCondition::No,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+    }
+
+    #[test]
+    fn test_read_to_execute_only_section() {
+        init_trace();
+
+        let fail_config = Some(FailConfiguration::new_fail_execute_only_protection());
+
+        test_challenge_aux(
+            "audit_10",
+            "audit_10.yaml",
+            0,
+            false,
+            fail_config.clone(),
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::No,
             ForceChallenge::No,
         );

@@ -226,6 +226,7 @@ pub struct FailConfiguration {
     pub fail_pc: Option<u64>,
     pub fail_opcode: Option<FailOpcode>,
     pub fail_memory_protection: bool,
+    pub fail_execute_only_protection: bool,
 }
 
 impl FailConfiguration {
@@ -274,6 +275,11 @@ impl FailConfiguration {
     pub fn new_fail_memory_protection() -> Self {
         Self {
             fail_memory_protection: true,
+            ..Default::default()
+        }
+    }pub fn new_fail_execute_only_protection() -> Self {
+        Self {
+            fail_execute_only_protection: true,
             ..Default::default()
         }
     }
@@ -359,7 +365,7 @@ mod utils_tests {
         program.step = 9;
         fail_reads.patch_mem(&mut program);
 
-        assert_eq!(program.read_mem(4096).unwrap(), 10);
+        assert_eq!(program.read_mem(4096, false).unwrap(), 10);
     }
 
     #[test]
@@ -387,7 +393,7 @@ mod utils_tests {
         program.step = 9;
         fail_reads.patch_mem(&mut program);
 
-        assert_eq!(program.read_mem(4100).unwrap(), 11);
+        assert_eq!(program.read_mem(4100, false).unwrap(), 11);
     }
 
     #[test]
@@ -408,7 +414,7 @@ mod utils_tests {
         program.step = 10;
         fail_reads.patch_mem(&mut program);
 
-        assert_eq!(program.read_mem(4100).unwrap(), 0);
+        assert_eq!(program.read_mem(4100, false).unwrap(), 0);
     }
 
     #[test]
@@ -452,7 +458,7 @@ mod utils_tests {
         program.step = 10;
         fail_write.patch_mem(&mut program);
 
-        assert_eq!(program.read_mem(4096).unwrap(), 10);
+        assert_eq!(program.read_mem(4096, false).unwrap(), 10);
     }
 
     #[test]
@@ -473,7 +479,7 @@ mod utils_tests {
         program.step = 10;
         fail_write.patch_mem(&mut program);
 
-        assert_eq!(program.read_mem(4100).unwrap(), 0);
+        assert_eq!(program.read_mem(4100, false).unwrap(), 0);
     }
 
     #[test]

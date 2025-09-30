@@ -256,7 +256,7 @@ pub fn execute_step(
         Some(fo) if fo.step == program.step => fo.opcode,
         _ => {
             if fail_config.fail_memory_protection {
-                program.read_mem(pc.get_address())?
+                program.read_mem(pc.get_address(), true)?
             } else {
                 program.read_instruction(pc.get_address())?
             }
@@ -301,7 +301,9 @@ pub fn execute_step(
         Slli(x) | Srli(x) | Srai(x) => op_shift_imm(&instruction, &x, program),
         Slti(x) | Sltiu(x) => op_sl_imm(&instruction, &x, program),
         Sb(x) | Sh(x) | Sw(x) => op_store(&instruction, &x, program)?,
-        Lbu(x) | Lb(x) | Lh(x) | Lhu(x) | Lw(x) => op_load(&instruction, &x, program)?,
+        Lbu(x) | Lb(x) | Lh(x) | Lhu(x) | Lw(x) => {
+            op_load(&instruction, &x, program, fail_config.fail_execute_only_protection)?
+        }
         Auipc(x) | Lui(x) => op_upper(&instruction, &x, program),
         Beq(x) | Bne(x) | Blt(x) | Bge(x) | Bltu(x) | Bgeu(x) => {
             op_conditional(&instruction, &x, program)
@@ -348,7 +350,7 @@ pub fn op_ecall(
     match syscall {
         116 => {
             if print_program_stdout {
-                let x = program.read_mem(0xA000_1000).unwrap_or(0) >> 24;
+                let x = program.read_mem(0xA000_1000, false).unwrap_or(0) >> 24;
                 print!("{}", x as u8 as char);
             }
             program.pc.next_address();
@@ -869,7 +871,7 @@ pub fn op_store(
             if micro == 4 {
                 dest_mem += 4;
             }
-            let value = program.read_mem(dest_mem)?;
+            let value = program.read_mem(dest_mem, false)?;
             let read_2 = TraceRead::new(dest_mem, value, program.get_last_step(dest_mem));
 
             let masked = mask_dst & value;
@@ -981,6 +983,7 @@ pub fn op_load(
     instruction: &Instruction,
     x: &IType,
     program: &mut Program,
+    fail_execute_only_protection: bool,
 ) -> Result<(TraceRead, TraceRead, TraceWrite, MemoryWitness), ExecutionResult> {
     let micro = program.pc.get_micro();
 
@@ -1011,7 +1014,7 @@ pub fn op_load(
                 src_mem += 4;
             }
 
-            let value = program.read_mem(src_mem)?;
+            let value = program.read_mem(src_mem, fail_execute_only_protection)?;
             let last_step = program.get_last_step(src_mem);
             let read_2 = TraceRead::new(src_mem, value, last_step);
 

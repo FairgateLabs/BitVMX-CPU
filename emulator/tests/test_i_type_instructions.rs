@@ -164,7 +164,7 @@ fn test_load_byte(
         _ => panic!("Unreachable"),
     };
 
-    let _ = op_load(&instruction, &x, &mut program);
+    let _ = op_load(&instruction, &x, &mut program, false);
 
     assert_eq!(program.registers.get(rd as u32), expected);
 }
@@ -266,7 +266,7 @@ fn test_load_half_word(
     };
 
     for _ in 0..micros {
-        let _ = op_load(&instruction, &x, &mut program);
+        let _ = op_load(&instruction, &x, &mut program, false);
     }
 
     assert_eq!(program.registers.get(rd), expected);
@@ -358,7 +358,7 @@ fn test_load_word(
     };
 
     for _ in 0..micros {
-        let _ = op_load(&instruction, &x, &mut program);
+        let _ = op_load(&instruction, &x, &mut program, false);
     }
 
     assert_eq!(program.registers.get(rd), expected);
@@ -477,7 +477,7 @@ mod tests {
             _ => panic!("Unreachable"),
         };
 
-        let _ = op_load(&instruction, &x, &mut program);
+        let _ = op_load(&instruction, &x, &mut program, false);
 
         assert_eq!(program.registers.get(rd as u32), expected);
     }
@@ -530,7 +530,7 @@ mod tests {
         };
 
         for _ in 0..micros {
-            let _ = op_load(&instruction, &x, &mut program);
+            let _ = op_load(&instruction, &x, &mut program, false);
         }
 
         assert_eq!(program.registers.get(rd), expected);

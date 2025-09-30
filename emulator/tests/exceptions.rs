@@ -39,7 +39,7 @@ fn exception_cases() {
                 let path = path.path();
                 let path = path.to_string_lossy();
 
-                let (result, _) = verify_file(&format!("{}", path)).unwrap();
+                let (result, _) = verify_file(&format!("{}", path), false).unwrap();
                 assert_eq!(
                     test_cases.get(fname.into_owned().as_str()).unwrap(),
                     &result

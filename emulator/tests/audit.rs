@@ -16,13 +16,14 @@ fn audit_tests() {
             if fname.ends_with("verify.elf") {
                 let path = path.path();
                 let path = path.to_string_lossy();
-                let (result, _) = verify_file(&format!("{}", path)).unwrap();
+                let (result, _) =
+                    verify_file(&format!("{}", path), fname.starts_with("audit_14_")).unwrap();
                 match result {
                     ExecutionResult::Halt(0, _) => {
                         info!("File {} executed successfully", path);
                         count += 1;
                     }
-                    _ => panic!("Error executing file {}", path),
+                    _ => panic!("Error executing file {}, {}", path, result),
                 }
             }
         }

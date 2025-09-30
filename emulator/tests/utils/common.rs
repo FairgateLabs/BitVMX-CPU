@@ -88,7 +88,10 @@ pub fn rnd_range() -> u32 {
     rng.gen_range(PROGRAM_REG_RANGE)
 }
 
-pub fn verify_file(fname: &str) -> Result<(ExecutionResult, FullTrace), EmulatorError> {
+pub fn verify_file(
+    fname: &str,
+    ignore_execute_only_protection: bool,
+) -> Result<(ExecutionResult, FullTrace), EmulatorError> {
     let mut program = load_elf(&fname, false)?;
 
     info!("Execute program {}", fname);
@@ -107,7 +110,9 @@ pub fn verify_file(fname: &str) -> Result<(ExecutionResult, FullTrace), Emulator
         true,
         None,
         None,
-        FailConfiguration::default(),
+        ignore_execute_only_protection
+            .then(|| FailConfiguration::new_fail_execute_only_protection())
+            .unwrap_or_default(),
         false,
     ))
 }

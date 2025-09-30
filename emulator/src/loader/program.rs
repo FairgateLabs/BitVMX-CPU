@@ -287,7 +287,6 @@ impl Program {
                 self.read_write_sections.ranges.push(section_range);
             } else if section.is_code {
                 self.code_sections.ranges.push(section_range);
-                self.read_only_sections.ranges.push(section_range);
             } else {
                 self.read_only_sections.ranges.push(section_range);
             }
@@ -486,14 +485,14 @@ impl Program {
         }
         let section = self.find_section(address)?;
         if !section.is_code {
-            return Err(ExecutionResult::ReadFromNonCodeSection);
+            return Err(ExecutionResult::ExecuteFromNonCodeSection);
         }
         Ok(u32::from_be(
             section.data[(address - section.start) as usize / 4],
         ))
     }
 
-    pub fn read_mem(&self, address: u32) -> Result<u32, ExecutionResult> {
+    pub fn read_mem(&self, address: u32, fail_execute_only_protection: bool) -> Result<u32, ExecutionResult> {
         if cfg!(target_endian = "big") {
             panic!("Big endian machine not supported");
         }
@@ -501,6 +500,11 @@ impl Program {
             return Err(ExecutionResult::UnalignedRead(address));
         }
         let section = self.find_section(address)?;
+
+        if section.is_code && !fail_execute_only_protection {
+            return Err(ExecutionResult::ReadFromExecuteOnlySection)
+        };
+
         Ok(u32::from_be(
             section.data[(address - section.start) as usize / 4],
         ))
@@ -817,7 +821,7 @@ pub fn generate_rom_commitment(program: &Program) -> Result<RomCommitment, Emula
         if section.is_code {
             for i in 0..section.size / 4 {
                 let position = section.start + i * 4;
-                let data = program.read_mem(position)?;
+                let data = program.read_mem(position, false)?;
 
                 let instruction = riscv_decode::decode(data).expect(&format!(
                     "code section with undecodeable instruction: 0x{:08x} at position: 0x{:08x}",
@@ -844,7 +848,7 @@ pub fn generate_rom_commitment(program: &Program) -> Result<RomCommitment, Emula
         if !section.is_code && section.initialized {
             for i in 0..section.size / 4 {
                 let position = section.start + i * 4;
-                let data = program.read_mem(position)?;
+                let data = program.read_mem(position, false)?;
                 info!("Address: 0x{:08x} value: 0x{:08x}", position, data);
                 rom_commitment.constants.push((position, data));
             }
@@ -995,9 +999,9 @@ fn test_set_register_zero_panics() {
 fn test_read_mem_unaligned() {
     let mut program = Program::new(0, 0, 0);
     program.add_section(Section::new("data", 0, 100, false, false, false));
-    assert!(program.read_mem(1).is_err());
-    assert!(program.read_mem(2).is_err());
-    assert!(program.read_mem(3).is_err());
+    assert!(program.read_mem(1, false).is_err());
+    assert!(program.read_mem(2, false).is_err());
+    assert!(program.read_mem(3, false).is_err());
 }
 
 #[test]
@@ -1015,6 +1019,7 @@ fn test_is_valid_mem() {
     program.add_section(Section::new("registers", 0, 128, false, true, true));
     program.add_section(Section::new("code", 1000, 100, true, false, false));
     program.add_section(Section::new("data", 2000, 100, false, true, false));
+    program.add_section(Section::new("rodata", 3000, 100, false, false, false));
     program.generate_sections_definitions();
 
     // Test register access
@@ -1023,10 +1028,13 @@ fn test_is_valid_mem() {
 
     // Test memory access
     assert!(program.is_valid_mem(MemoryAccessType::Memory, 2000, false));
-    assert!(!program.is_valid_mem(MemoryAccessType::Memory, 1000, false));
-
+    
     // Test read-only access
-    assert!(program.is_valid_mem(MemoryAccessType::Memory, 1000, true));
+    assert!(program.is_valid_mem(MemoryAccessType::Memory, 3000, true));
+
+    // Test can't read from code
+    assert!(!program.is_valid_mem(MemoryAccessType::Memory, 1000, false));
+    assert!(!program.is_valid_mem(MemoryAccessType::Memory, 1000, true));
 }
 
 #[test]
