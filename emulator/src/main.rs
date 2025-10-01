@@ -59,7 +59,7 @@ enum Commands {
         command_file: String,
 
         /// Should we save steps that are not checkpoints (like first, error and halt steps)
-        #[arg(short, long, default_value = "true")]
+        #[arg(short, long, action = clap::ArgAction::Set, default_value_t = true)]
         save_non_checkpoint_steps: bool,
     },
 
@@ -97,7 +97,7 @@ enum Commands {
         command_file: String,
 
         /// Should we save steps that are not checkpoints (like first, error and halt steps)
-        #[arg(short, long, default_value = "true")]
+        #[arg(short, long, action = clap::ArgAction::Set, default_value_t = true)]
         save_non_checkpoint_steps: bool,
     },
 
@@ -347,7 +347,7 @@ enum Commands {
         dump_mem: Option<u64>,
 
         /// Should we save steps that are not checkpoints (like first, error and halt steps)
-        #[arg(short, long, default_value = "true")]
+        #[arg(short, long, action = clap::ArgAction::Set, default_value_t = true)]
         save_non_checkpoint_steps: bool,
     },
 }

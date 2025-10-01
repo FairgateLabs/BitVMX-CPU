@@ -28,6 +28,7 @@ run_prove_verify_test() {
     prover_output=$(RUST_BACKTRACE=full "$CPU/target/release/emulator" prover-execute \
         --pdf "$PDF_PATH" \
         --input "$hex_input" \
+        --save-non-checkpoint-steps=false \
         --checkpoint-prover-path "$PROVER_CHECKPOINT_PATH" \
         --command-file "$PROVER_EXECUTE_OUT" 2>&1)
     prover_exit_code=$?
@@ -70,6 +71,7 @@ run_prove_verify_test() {
         --checkpoint-verifier-path "$VERIFIER_CHECKPOINT_PATH" \
         --claim-last-step "$LAST_STEP" \
         --claim-last-hash "$LAST_HASH" \
+        --save-non-checkpoint-steps=false \
         --force no \
         --command-file "$VERIFIER_CHECK_OUT" 2>&1)
     verifier_exit_code=$?
