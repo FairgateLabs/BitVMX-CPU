@@ -2580,47 +2580,11 @@ mod tests {
             fuzz_address_not_in_sections();
             fuzz_is_equal_to();
             fuzz_mask();
-
-            // ! ISSUE: INFO severity
-            // if_less only works with a number that can
-            // be pushed with `number`, that is, numbers
-            // that have at most 7 nibbles
-            // This is more of an issue with `number()`
-            // than with if_less
-            // patched the test so it runs
             fuzz_if_less();
-
-            // ! ISSUE: HIGH severity
-            // ! The root cause of the issue is unknown
-            // ! There are some wrong results and some panics
-            fuzz_multiply(); // <- already broken
-
-            // ! ISSUE, HIGH  severity
-            // ! There's some kind of issue when multiplying
-            // ! The inputs that fail are NOT necessarily those
-            // ! that make `multiply` fail
+            fuzz_multiply();
             fuzz_mulh();
-
-            // ! ISSUE: INFO severity
-            // ! sub_1_if_positive only supports 1 nibble inputs
-            // ! ISSUE: INFO severity
-            // ! sub_1_if_positive returns zero (!) if input not positive
             fuzz_sub_1_if_positive();
-
-            // ! ISSUE, INFO severity
-            // ! The nibbles_to_number method breaks as soon as an input
-            // ! of more than 7 nibbles is added, that is: it supports
-            // ! at most 32 bits
             fuzz_nibbles_to_number();
-
-            // ! ISSUE,  HIGH severity
-            // ! see test_div_rem_signed_fails_for_certain_inputs
-            // ! see: test_mulh_is_wrong
-            // ! Maybe related to multiply as it uses the method
-            // ! Some inputs are failing, in fact, several inputs are failing
-            // ! All failing inputs are in the form `(x, -y)` or `(-x, y)`.
-            // ! This seems to be necessary but not sufficient.
-            // ! Root cause unknown.
             fuzz_div_rem();
 
             // ! Choose method is not used so we ignore it.
