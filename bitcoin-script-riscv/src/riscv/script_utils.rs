@@ -1970,7 +1970,6 @@ mod tests {
         test_mask_helper(0x1234_5678, 0x1100_0000, 0x1200_0000);
         test_mask_helper(0x1234_5678, 0x1100_0011, 0x1200_0078);
         test_mask_helper(0x1234_5678, 0x1100_0011, 0x1200_0078);
-        // test_mask_helper(2627175993, 336827062, 0x9c978639); <-- failing input
     }
 
     fn test_shift_case(value: u32, shift: u32, right: bool, msb: bool, expected: u32) {
