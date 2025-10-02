@@ -277,7 +277,8 @@ impl FailConfiguration {
             fail_memory_protection: true,
             ..Default::default()
         }
-    }pub fn new_fail_execute_only_protection() -> Self {
+    }
+    pub fn new_fail_execute_only_protection() -> Self {
         Self {
             fail_execute_only_protection: true,
             ..Default::default()
