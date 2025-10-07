@@ -293,7 +293,7 @@ impl Program {
         }
     }
 
-    pub fn check_no_overlaping_sections(&self) -> Result<(), EmulatorError> {
+    pub fn check_overlaping_sections(&self) -> Result<(), EmulatorError> {
         for i in 0..self.sections.len() {
             for j in i + 1..self.sections.len() {
                 let section1 = &self.sections[i];
@@ -312,7 +312,7 @@ impl Program {
         Ok(())
     }
 
-    pub fn check_no_overflowing_sections(&self) -> Result<(), EmulatorError> {
+    pub fn check_overflowing_sections(&self) -> Result<(), EmulatorError> {
         let overflowing_section = self
             .sections
             .iter()
@@ -327,7 +327,8 @@ impl Program {
 
         Ok(())
     }
-    pub fn check_no_section_next_to_stack(
+
+    pub fn check_sections_next_to_stack(
         &self,
         sp_base_address: Option<u32>,
     ) -> Result<(), EmulatorError> {
@@ -362,7 +363,7 @@ impl Program {
         Ok(())
     }
 
-    pub fn check_no_low_sections(&self) -> Result<(), EmulatorError> {
+    pub fn check_low_sections(&self) -> Result<(), EmulatorError> {
         let low_section = self.sections.iter().find(|section| section.start < 0x1000);
         if let Some(low_section) = low_section {
             return Err(EmulatorError::CantLoadPorgram(format!(
@@ -375,7 +376,7 @@ impl Program {
         Ok(())
     }
 
-    pub fn check_no_section_with_invalid_opcode(&self) -> Result<(), EmulatorError> {
+    pub fn check_sections_with_invalid_opcode(&self) -> Result<(), EmulatorError> {
         let section_with_invalid_opcode = self.sections.iter().find(|section| {
             section.is_code
                 && section
@@ -401,12 +402,25 @@ impl Program {
         Ok(())
     }
 
+    pub fn check_too_many_sections(&self) -> Result<(), EmulatorError> {
+        let sections_count = self.sections.len();
+        if sections_count > MAX_SECTIONS {
+            Err(EmulatorError::CantLoadPorgram(format!(
+                "Too many sections: {:?}",
+                sections_count
+            )))
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn sanity_check(&self, sp_base_address: Option<u32>) -> Result<(), EmulatorError> {
-        self.check_no_overflowing_sections()?;
-        self.check_no_overlaping_sections()?;
-        self.check_no_low_sections()?;
-        self.check_no_section_next_to_stack(sp_base_address)?;
-        self.check_no_section_with_invalid_opcode()?;
+        self.check_overflowing_sections()?;
+        self.check_overlaping_sections()?;
+        self.check_low_sections()?;
+        self.check_sections_next_to_stack(sp_base_address)?;
+        self.check_sections_with_invalid_opcode()?;
+        self.check_too_many_sections()?;
 
         Ok(())
     }
@@ -492,7 +506,11 @@ impl Program {
         ))
     }
 
-    pub fn read_mem(&self, address: u32, fail_execute_only_protection: bool) -> Result<u32, ExecutionResult> {
+    pub fn read_mem(
+        &self,
+        address: u32,
+        fail_execute_only_protection: bool,
+    ) -> Result<u32, ExecutionResult> {
         if cfg!(target_endian = "big") {
             panic!("Big endian machine not supported");
         }
@@ -502,7 +520,7 @@ impl Program {
         let section = self.find_section(address)?;
 
         if section.is_code && !fail_execute_only_protection {
-            return Err(ExecutionResult::ReadFromExecuteOnlySection)
+            return Err(ExecutionResult::ReadFromExecuteOnlySection);
         };
 
         Ok(u32::from_be(
@@ -880,18 +898,18 @@ mod tests {
         let mut program = Program::new(0, 0, 0);
         program.add_section(Section::new("test_1", 0, 10, false, true, false));
         program.add_section(Section::new("test_2", 9, 5, false, true, false));
-        assert!(program.check_no_overlaping_sections().is_err());
+        assert!(program.check_overlaping_sections().is_err());
     }
 
     #[test]
     fn test_overflowing_section() {
         let mut program = Program::new(0, 0, 0);
         program.add_section(Section::new("test_1", 0xffff_fff2, 0xf, false, true, false));
-        assert!(program.check_no_overflowing_sections().is_err());
+        assert!(program.check_overflowing_sections().is_err());
 
         let mut program = Program::new(0, 0, 0);
         program.add_section(Section::new("test_2", 0xffff_ffff, 0x1, false, true, false));
-        assert!(program.check_no_overflowing_sections().is_ok());
+        assert!(program.check_overflowing_sections().is_ok());
     }
 
     #[test]
@@ -899,21 +917,46 @@ mod tests {
         let mut program = Program::new(0, 0, 0);
         program.add_section(Section::new("test_1", 0, 10, false, true, false));
         program.add_section(Section::new("stack", 10, 5, false, true, false));
-        assert!(program.check_no_section_next_to_stack(Some(14)).is_err());
+        assert!(program.check_sections_next_to_stack(Some(14)).is_err());
     }
 
     #[test]
     fn test_low_section() {
         let mut program = Program::new(0, 0, 0);
         program.add_section(Section::new("test_1", 0, 10, false, true, false));
-        assert!(program.check_no_low_sections().is_err());
+        assert!(program.check_low_sections().is_err());
     }
 
     #[test]
     fn test_invalid_opcode() {
         let mut program = Program::new(0, 0, 0);
-        program.add_section(Section::new_with_data("code", vec![30], 0, 4, true, false, true));
-        assert!(program.check_no_section_with_invalid_opcode().is_err());
+        program.add_section(Section::new_with_data(
+            "code",
+            vec![30],
+            0,
+            4,
+            true,
+            false,
+            true,
+        ));
+        assert!(program.check_sections_with_invalid_opcode().is_err());
+    }
+
+    #[test]
+    fn test_too_many_sections() {
+        let mut program = Program::new(0, 0, 0);
+        for _ in 0..=MAX_SECTIONS {
+            program.add_section(Section::new_with_data(
+                "code",
+                vec![30],
+                0,
+                4,
+                true,
+                false,
+                true,
+            ));
+        }
+        assert!(program.check_too_many_sections().is_err());
     }
 
     #[test]
@@ -1028,7 +1071,7 @@ fn test_is_valid_mem() {
 
     // Test memory access
     assert!(program.is_valid_mem(MemoryAccessType::Memory, 2000, false));
-    
+
     // Test read-only access
     assert!(program.is_valid_mem(MemoryAccessType::Memory, 3000, true));
 

@@ -78,4 +78,5 @@ pub mod constants {
     pub const REGISTERS_BASE_ADDRESS: u32 = 0xF000_0000; //CHECK: this can be parameterized
     pub const STACK_BASE_ADDRESS: u32 = 0xE000_0000; //CHECK: this can be parameterized
     pub const STACK_SIZE: u32 = 0x80_0000; //QEMU Default stack size
+    pub const MAX_SECTIONS: usize = 900; // Having too many sections can break some challenges due to max script size
 }
