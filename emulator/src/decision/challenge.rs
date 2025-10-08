@@ -265,6 +265,7 @@ pub enum ForceChallenge {
     InitializedData,
     UninitializedData,
     AddressesSections,
+    FutureRead,
     ReadValueNArySearch,
     ReadValue,
     No,
@@ -436,7 +437,24 @@ pub fn verifier_choose_challenge(
         ));
     }
 
-    // TODO: check read_step < current_step
+    let read_step_1 = trace.read_1.last_step;
+    let read_step_2 = trace.read_2.last_step;
+
+    let is_read_1_future = read_step_1 > step && read_step_1 != LAST_STEP_INIT;
+    let is_read_2_future = read_step_2 > step && read_step_2 != LAST_STEP_INIT;
+
+    if ((is_read_1_future || is_read_2_future) && force == ForceChallenge::No)
+        || force == ForceChallenge::FutureRead
+    {
+        let read_selector = if is_read_1_future { 1 } else { 2 };
+
+        return Ok(ChallengeType::FutureRead {
+            step: step + 1,
+            read_step_1,
+            read_step_2,
+            read_selector,
+        });
+    }
 
     // check const read value
     let is_read_1_conflict = trace.read_1.value != my_trace.read_1.value;
@@ -1826,6 +1844,49 @@ mod tests {
             ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::ReadValueNArySearch,
             ForceChallenge::ReadValue,
+        );
+    }
+    #[test]
+    fn test_challenge_future_read() {
+        init_trace();
+        let fail_read_args = vec!["1106", "0xf000003c", "0xaa000004", "0xf000003c", "1107"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+
+        let fail_read_1 = Some(FailConfiguration::new_fail_reads(FailReads::new(
+            Some(&fail_read_args),
+            None,
+        )));
+
+        test_challenge_aux(
+            "43",
+            "hello-world.yaml",
+            17,
+            false,
+            fail_read_1.clone(),
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "44",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            None,
+            fail_read_1,
+            None,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::FutureRead,
+            ForceChallenge::No,
         );
     }
 

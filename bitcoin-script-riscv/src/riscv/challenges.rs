@@ -595,6 +595,24 @@ pub fn correct_hash_challenge(stack: &mut StackTracker) {
     stack.equals(result, true, next_hash, true);
 }
 
+pub fn future_read_challenge(stack: &mut StackTracker) {
+    let step = stack.define(16, "prover_step");
+    let read_step_1 = stack.define(16, "prover_read_step_1");
+    let read_step_2 = stack.define(16, "prover_read_step_2");
+
+    let read_selector = stack.define(1, "read_selector");
+
+    let [read_step] = get_selected_vars(stack, [read_step_1], [read_step_2], read_selector);
+
+    // read_step != LAST_STEP_INIT 
+    let init = stack.number_u64(LAST_STEP_INIT);
+    stack.equality(read_step, false, init, true, false, true);
+
+    is_lower_than(stack, read_step, step, true);
+    stack.op_not();
+    stack.op_verify();
+}
+
 //TODO: memory section challenge
 //TODO: program crash challenge - this might be more about finding the right place to challenge that a challenge itself
 
@@ -714,6 +732,19 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
                 register_sections.as_ref().unwrap(),
                 code_sections.as_ref().unwrap(),
             );
+        }
+        ChallengeType::FutureRead {
+            step,
+            read_step_1,
+            read_step_2,
+            read_selector,
+        } => {
+            stack.number_u64(*step);
+            stack.number_u64(*read_step_1);
+            stack.number_u64(*read_step_2);
+            stack.number(*read_selector);
+
+            future_read_challenge(&mut stack);
         }
         ChallengeType::ReadValue {
             read_1,
@@ -1752,6 +1783,36 @@ mod tests {
             2,
             uninitialized_sections
         ));
+    }
+
+    fn test_future_read_aux(step: u64, read_step: u64) -> bool {
+        let stack = &mut StackTracker::new();
+
+        stack.number_u64(step);
+        stack.number_u64(read_step); // read_1_step
+        stack.number_u64(read_step); // read_2_step
+        stack.number(1); // read_selector
+
+        future_read_challenge(stack);
+
+        stack.op_true();
+        stack.run().success
+    }
+
+    #[test]
+    fn test_future_read() {
+        let step = 100;
+        // can't challenge old read
+        assert!(!test_future_read_aux(step, 99));
+
+        // can't challenge initial value read
+        assert!(!test_future_read_aux(step, LAST_STEP_INIT));
+
+        // challenge is valid if read from same step
+        assert!(test_future_read_aux(step, step));
+
+        // challenge is valid if read after current step
+        assert!(test_future_read_aux(step, step + 1));
     }
 
     fn test_read_value_aux(
