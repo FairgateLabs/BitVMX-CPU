@@ -10,8 +10,8 @@ use bitvmx_cpu_definitions::{
 use crate::riscv::{
     memory_alignment::{is_aligned, load_lower_half_nibble_table, load_upper_half_nibble_table},
     script_utils::{
-        address_in_range, address_in_sections, address_not_in_sections, get_selected_vars,
-        is_lower_than, verify_wrong_chunk_value, witness_equals, StackTables,
+        address_in_sections, address_not_in_sections, get_selected_vars, is_lower_than,
+        verify_wrong_chunk_value, witness_equals, StackTables,
     },
 };
 
@@ -424,9 +424,6 @@ pub fn opcode_challenge(stack: &mut StackTracker, chunk: &Chunk) {
     let opcode = stack.define(8, "prover_opcode");
     let tables = StackTables::new(stack, true, false, 2, 2, 0);
 
-    address_in_range(stack, &chunk.range(), &pc);
-    stack.op_verify();
-
     verify_wrong_chunk_value(stack, &tables, chunk, pc, opcode);
     tables.drop(stack);
 }
@@ -450,9 +447,6 @@ pub fn initialized_challenge(stack: &mut StackTracker, chunk: &Chunk) {
         [read_addr_2, read_value_2, read_step_2],
         read_selector,
     );
-
-    address_in_range(stack, &chunk.range(), &read_addr);
-    stack.op_verify();
 
     let init = stack.number_u64(LAST_STEP_INIT);
     stack.equality(read_step, true, init, true, true, true);

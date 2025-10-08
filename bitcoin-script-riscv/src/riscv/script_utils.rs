@@ -1496,6 +1496,9 @@ pub fn verify_wrong_chunk_value(
     address: StackVariable,
     value: StackVariable,
 ) {
+    address_in_range(stack, &chunk.range(), &address);
+    stack.op_verify();
+    
     let chunk_table = WordTable::new(stack, chunk.data.clone());
 
     let base_addr = stack.number_u32(chunk.base_addr);
