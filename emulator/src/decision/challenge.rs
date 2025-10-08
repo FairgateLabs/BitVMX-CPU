@@ -1802,9 +1802,8 @@ mod tests {
         );
     }
 
-    // TODO: add case for write to the same address and different value
     #[test]
-    fn test_challenge_modified_value_doesnt_lie() {
+    fn test_challenge_read_different_address() {
         init_trace();
         let fail_read_args = vec!["1106", "0xaa000000", "0x11111100", "0xaa000000", "600"]
             .iter()
@@ -1846,6 +1845,51 @@ mod tests {
             ForceChallenge::ReadValue,
         );
     }
+
+    #[test]
+    fn test_challenge_read_different_value() {
+        init_trace();
+        let fail_read_args = vec!["1106", "0xf000003c", "0xaa000004", "0xf000003c", "1105"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+
+        let fail_read_1 = Some(FailConfiguration::new_fail_reads(FailReads::new(
+            Some(&fail_read_args),
+            None,
+        )));
+
+        test_challenge_aux(
+            "41",
+            "hello-world.yaml",
+            17,
+            false,
+            fail_read_1.clone(),
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "42",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            None,
+            fail_read_1,
+            None,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::ReadValueNArySearch,
+            ForceChallenge::ReadValue,
+        );
+    }
+
     #[test]
     fn test_challenge_future_read() {
         init_trace();
