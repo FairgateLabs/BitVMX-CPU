@@ -1237,323 +1237,371 @@ mod tests {
         stack.run().success
     }
 
+    fn setup_sections() -> (
+        SectionDefinition,
+        SectionDefinition,
+        SectionDefinition,
+        SectionDefinition,
+    ) {
+        (
+            SectionDefinition {
+                ranges: vec![(0x0000_00f0, 0x0000_0103)],
+            },
+            SectionDefinition {
+                ranges: vec![(0x0000_0f00, 0x0000_1003)],
+            },
+            SectionDefinition {
+                ranges: vec![(0x0000_f000, 0x0001_0003)],
+            },
+            SectionDefinition {
+                ranges: vec![(0x000f_0000, 0x0010_0003)],
+            },
+        )
+    }
+
     #[test]
-    fn test_addresses_sections() {
-        let read_write_sections = &SectionDefinition {
-            ranges: vec![(0x0000_00f0, 0x0000_0103)],
-        };
-        let read_only_sections = &SectionDefinition {
-            ranges: vec![(0x0000_0f00, 0x0000_1003)],
-        };
-        let registers = &SectionDefinition {
-            ranges: vec![(0x0000_f000, 0x0001_0003)],
-        };
-        let code_sections = &SectionDefinition {
-            ranges: vec![(0x000f_0000, 0x0010_0003)],
-        };
+    fn test_valid_register_access() {
+        let (rw, ro, reg, code) = setup_sections();
+        let witness = MemoryWitness::registers();
 
-        // can't challenge valid addresses (register section reads and write)
-        let memory_witness = MemoryWitness::registers();
         assert!(!test_addresses_sections_aux(
             0x0000_f000,
             0x0000_f000,
             0x0000_f000,
-            memory_witness,
+            witness,
             0x000f_0000,
-            read_write_sections,
-            read_only_sections,
-            registers,
-            code_sections
+            &rw,
+            &ro,
+            &reg,
+            &code
         ));
+    }
 
-        // can't challenge valid addresses (read_write section reads and write)
-        let memory_witness = MemoryWitness::new(
+    #[test]
+    fn test_valid_read_write_access() {
+        let (rw, ro, reg, code) = setup_sections();
+        let witness = MemoryWitness::new(
             MemoryAccessType::Memory,
             MemoryAccessType::Memory,
             MemoryAccessType::Memory,
         );
+
         assert!(!test_addresses_sections_aux(
             0x0000_00f0,
             0x0000_00f0,
             0x0000_00f0,
-            memory_witness,
+            witness,
             0x000f_0000,
-            read_write_sections,
-            read_only_sections,
-            registers,
-            code_sections
+            &rw,
+            &ro,
+            &reg,
+            &code
         ));
+    }
 
-        // can't challenge valid addresses (read_only section reads and read_write write)
-        let memory_witness = MemoryWitness::new(
+    #[test]
+    fn test_valid_read_only_access() {
+        let (rw, ro, reg, code) = setup_sections();
+        let witness = MemoryWitness::new(
             MemoryAccessType::Memory,
             MemoryAccessType::Memory,
             MemoryAccessType::Memory,
         );
+
         assert!(!test_addresses_sections_aux(
             0x0000_0f00,
             0x0000_0f00,
             0x0000_00f0,
-            memory_witness,
+            witness,
             0x000f_0000,
-            read_write_sections,
-            read_only_sections,
-            registers,
-            code_sections
+            &rw,
+            &ro,
+            &reg,
+            &code
         ));
+    }
 
-        // can't challenge valid addresses (unused reads and write)
-        let memory_witness = MemoryWitness::default();
+    #[test]
+    fn test_unused_addresses() {
+        let (rw, ro, reg, code) = setup_sections();
+        let witness = MemoryWitness::default();
+
         assert!(!test_addresses_sections_aux(
             0,
             0,
             0,
-            memory_witness,
+            witness,
             0x000f_0000,
-            read_write_sections,
-            read_only_sections,
-            registers,
-            code_sections
+            &rw,
+            &ro,
+            &reg,
+            &code
         ));
+    }
 
-        // can challenge invalid read_1 to unmaped address
-        let memory_witness = MemoryWitness::new(
+    #[test]
+    fn test_invalid_read_unmapped() {
+        let (rw, ro, reg, code) = setup_sections();
+        let witness = MemoryWitness::new(
             MemoryAccessType::Memory,
             MemoryAccessType::Memory,
             MemoryAccessType::Memory,
         );
+
         assert!(test_addresses_sections_aux(
-            0xDEAD_DEAD,
+            0xDEAD_DEAD, // unmapped
             0x0000_0f00,
             0x0000_00f0,
-            memory_witness,
+            witness.clone(),
             0x000f_0000,
-            read_write_sections,
-            read_only_sections,
-            registers,
-            code_sections
+            &rw,
+            &ro,
+            &reg,
+            &code
         ));
 
-        // can challenge unaligned read_1
-        let memory_witness = MemoryWitness::new(
+        assert!(test_addresses_sections_aux(
+            0x0000_0f00,
+            0xDEAD_DEAD, // unmapped
+            0x0000_00f0,
+            witness,
+            0x000f_0000,
+            &rw,
+            &ro,
+            &reg,
+            &code
+        ));
+    }
+
+    #[test]
+    fn test_unaligned_read() {
+        let (rw, ro, reg, code) = setup_sections();
+        let witness = MemoryWitness::new(
             MemoryAccessType::Memory,
             MemoryAccessType::Memory,
             MemoryAccessType::Memory,
         );
+
         assert!(test_addresses_sections_aux(
-            0x0000_0f01,
+            0x0000_0f01, // unaligned
             0x0000_0f00,
             0x0000_00f0,
-            memory_witness,
+            witness.clone(),
             0x000f_0000,
-            read_write_sections,
-            read_only_sections,
-            registers,
-            code_sections
+            &rw,
+            &ro,
+            &reg,
+            &code
         ));
 
-        // can challenge read_1 with wrong witness (register witness but address is not in registers)
-        let memory_witness = MemoryWitness::new(
+        assert!(test_addresses_sections_aux(
+            0x0000_0f00,
+            0x0000_0f01, // unaligned
+            0x0000_00f0,
+            witness,
+            0x000f_0000,
+            &rw,
+            &ro,
+            &reg,
+            &code
+        ));
+    }
+
+    #[test]
+    fn test_wrong_witness_for_read() {
+        let (rw, ro, reg, code) = setup_sections();
+        let witness = MemoryWitness::new(
             MemoryAccessType::Register, // says it's a register read
-            MemoryAccessType::Memory,
-            MemoryAccessType::Memory,
-        );
-        assert!(test_addresses_sections_aux(
-            0x0000_0f00, // not in registers
-            0x0000_0f00,
-            0x0000_00f0,
-            memory_witness,
-            0x000f_0000,
-            read_write_sections,
-            read_only_sections,
-            registers,
-            code_sections
-        ));
-
-        // can challenge invalid read_2 to unmaped address
-        let memory_witness = MemoryWitness::new(
-            MemoryAccessType::Memory,
-            MemoryAccessType::Memory,
-            MemoryAccessType::Memory,
-        );
-        assert!(test_addresses_sections_aux(
-            0x0000_0f00,
-            0xDEAD_DEAD,
-            0x0000_00f0,
-            memory_witness,
-            0x000f_0000,
-            read_write_sections,
-            read_only_sections,
-            registers,
-            code_sections
-        ));
-
-        // can challenge unaligned read_2
-        let memory_witness = MemoryWitness::new(
-            MemoryAccessType::Memory,
-            MemoryAccessType::Memory,
-            MemoryAccessType::Memory,
-        );
-        assert!(test_addresses_sections_aux(
-            0x0000_0f00,
-            0x0000_0f02,
-            0x0000_00f0,
-            memory_witness,
-            0x000f_0000,
-            read_write_sections,
-            read_only_sections,
-            registers,
-            code_sections
-        ));
-
-        // can challenge read_2 with wrong witness (register witness but address is not in registers)
-        let memory_witness = MemoryWitness::new(
-            MemoryAccessType::Memory,
             MemoryAccessType::Register, // says it's a register read
             MemoryAccessType::Memory,
         );
+
         assert!(test_addresses_sections_aux(
-            0x0000_0f00,
+            0x0000_0f00, // not in registers
+            0x0000_f000,
+            0x0000_00f0,
+            witness.clone(),
+            0x000f_0000,
+            &rw,
+            &ro,
+            &reg,
+            &code
+        ));
+
+        assert!(test_addresses_sections_aux(
+            0x0000_f000,
             0x0000_0f00, // not in registers
             0x0000_00f0,
-            memory_witness,
+            witness,
             0x000f_0000,
-            read_write_sections,
-            read_only_sections,
-            registers,
-            code_sections
+            &rw,
+            &ro,
+            &reg,
+            &code
         ));
+    }
 
-        // can challenge invalid write to read_only address
-        let memory_witness = MemoryWitness::new(
+    #[test]
+    fn test_invalid_write_read_only() {
+        let (rw, ro, reg, code) = setup_sections();
+        let witness = MemoryWitness::new(
             MemoryAccessType::Memory,
             MemoryAccessType::Memory,
             MemoryAccessType::Memory,
         );
+
         assert!(test_addresses_sections_aux(
             0x0000_0f00,
             0x0000_00f0,
-            0x0000_0f00,
-            memory_witness,
+            0x0000_0f00, //read only address
+            witness,
             0x000f_0000,
-            read_write_sections,
-            read_only_sections,
-            registers,
-            code_sections
+            &rw,
+            &ro,
+            &reg,
+            &code
         ));
+    }
 
-        // can challenge invalid write to unmaped address
-        let memory_witness = MemoryWitness::new(
+    #[test]
+    fn test_invalid_write_unaligned() {
+        let (rw, ro, reg, code) = setup_sections();
+        let witness = MemoryWitness::new(
             MemoryAccessType::Memory,
             MemoryAccessType::Memory,
             MemoryAccessType::Memory,
         );
+
+        assert!(test_addresses_sections_aux(
+            0x0000_0f00,
+            0x0000_0f00,
+            0x0000_00f3, // unaligned
+            witness,
+            0x000f_0000,
+            &rw,
+            &ro,
+            &reg,
+            &code
+        ));
+    }
+
+    #[test]
+    fn test_invalid_write_unmapped() {
+        let (rw, ro, reg, code) = setup_sections();
+        let witness = MemoryWitness::new(
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+            MemoryAccessType::Memory,
+        );
+
         assert!(test_addresses_sections_aux(
             0x0000_0f00,
             0x0000_00f0,
             0xDEAD_DEAD,
-            memory_witness,
+            witness,
             0x000f_0000,
-            read_write_sections,
-            read_only_sections,
-            registers,
-            code_sections
+            &rw,
+            &ro,
+            &reg,
+            &code
         ));
+    }
 
-        // can challenge unaligned write
-        let memory_witness = MemoryWitness::new(
-            MemoryAccessType::Memory,
-            MemoryAccessType::Memory,
-            MemoryAccessType::Memory,
-        );
-        assert!(test_addresses_sections_aux(
-            0x0000_0f00,
-            0x0000_0f00,
-            0x0000_00f3,
-            memory_witness,
-            0x000f_0000,
-            read_write_sections,
-            read_only_sections,
-            registers,
-            code_sections
-        ));
-
-        // can challenge write with wrong witness (register witness but address not in registers)
-        let memory_witness = MemoryWitness::new(
+    #[test]
+    fn test_invalid_write_wrong_witness() {
+        let (rw, ro, reg, code) = setup_sections();
+        let witness = MemoryWitness::new(
             MemoryAccessType::Memory,
             MemoryAccessType::Memory,
             MemoryAccessType::Register, // says it's a register write
         );
+
         assert!(test_addresses_sections_aux(
             0x0000_0f00,
             0x0000_0f00,
             0x0000_00f0, // not in registers
-            memory_witness,
+            witness,
             0x000f_0000,
-            read_write_sections,
-            read_only_sections,
-            registers,
-            code_sections
+            &rw,
+            &ro,
+            &reg,
+            &code
         ));
+    }
 
-        // can challenge invalid pc in register address
-        let memory_witness = MemoryWitness::registers();
+    #[test]
+    fn test_register_pc() {
+        let (rw, ro, reg, code) = setup_sections();
+        let witness = MemoryWitness::registers();
+
         assert!(test_addresses_sections_aux(
             0x0000_f000,
             0x0000_f000,
             0x0000_f000,
-            memory_witness,
+            witness,
             0x0000_f000,
-            read_write_sections,
-            read_only_sections,
-            registers,
-            code_sections
+            &rw,
+            &ro,
+            &reg,
+            &code
         ));
+    }
 
-        // can challenge invalid pc in unmaped address
-        let memory_witness = MemoryWitness::registers();
+    #[test]
+    fn test_invalid_pc_unmapped() {
+        let (rw, ro, reg, code) = setup_sections();
+        let witness = MemoryWitness::registers();
+
         assert!(test_addresses_sections_aux(
             0x0000_f000,
             0x0000_f000,
             0x0000_f000,
-            memory_witness,
+            witness,
             0xDEAD_C0DE,
-            read_write_sections,
-            read_only_sections,
-            registers,
-            code_sections
+            &rw,
+            &ro,
+            &reg,
+            &code
         ));
+    }
 
-        // can challenge unaligned pc
-        let memory_witness = MemoryWitness::registers();
+    #[test]
+    fn test_unaligned_pc() {
+        let (rw, ro, reg, code) = setup_sections();
+        let witness = MemoryWitness::registers();
+
         assert!(test_addresses_sections_aux(
             0x0000_f000,
             0x0000_f000,
             0x0000_f000,
-            memory_witness,
+            witness,
             0x0000_f002,
-            read_write_sections,
-            read_only_sections,
-            registers,
-            code_sections
+            &rw,
+            &ro,
+            &reg,
+            &code
         ));
+    }
 
-        // can challenge multiple errors
-        let memory_witness = MemoryWitness::new(
+    #[test]
+    fn test_multiple_errors() {
+        let (rw, ro, reg, code) = setup_sections();
+        let witness = MemoryWitness::new(
             MemoryAccessType::Memory,
             MemoryAccessType::Memory,
             MemoryAccessType::Register,
         );
+
         assert!(test_addresses_sections_aux(
             0xDEAD_DEAD, // unmaped
             0x0000_f000, // register but witness says memory
             0x0000_00f0, // read only
-            memory_witness,
+            witness,
             0x000f_0002, // unaligned
-            read_write_sections,
-            read_only_sections,
-            registers,
-            code_sections
+            &rw,
+            &ro,
+            &reg,
+            &code
         ));
     }
 
