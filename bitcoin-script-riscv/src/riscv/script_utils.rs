@@ -1506,9 +1506,7 @@ pub fn verify_wrong_chunk_value(
 
     let index = static_right_shift_2(stack, tables, offset);
 
-    let index_nibbles = stack.explode(index);
-    nibbles_to_number(stack, index_nibbles);
-
+    var_to_number(stack, index);
     let real_opcode = chunk_table.peek(stack);
 
     stack.equality(real_opcode, true, value, true, false, true);
@@ -1601,12 +1599,14 @@ pub fn address_not_in_sections(
     stack.op_not();
 }
 
-pub fn nibbles_to_number(stack: &mut StackTracker, nibbles: Vec<StackVariable>) -> StackVariable {
-    let mut result = stack.number(0);
+// var should be smaller than std::i32::MAX
+pub fn var_to_number(stack: &mut StackTracker, var: StackVariable) -> StackVariable {
+    let size = stack.get_size(var);
+    let mut result = stack.move_var_sub_n(var, 0);
 
-    for nibble in nibbles.iter() {
+    for _ in 0..size - 1 {
         multiply_by_16(stack);
-        stack.move_var(*nibble);
+        stack.move_var_sub_n(var, 0);
         result = stack.op_add();
     }
 
@@ -2372,13 +2372,24 @@ mod tests {
     }
 
     #[test]
-    fn test_nibbles_to_number() {
+    fn test_var_to_number() {
         let mut stack = StackTracker::new();
 
         let expected = stack.number(0x1234_5678);
         let n = stack.number_u32(0x1234_5678);
-        let nibbles = stack.explode(n);
-        let result = nibbles_to_number(&mut stack, nibbles);
+        let result = var_to_number(&mut stack, n);
+        stack.equals(expected, true, result, true);
+        stack.op_true();
+        assert!(stack.run().success);
+    }
+
+    #[test]
+    fn test_number_to_number() {
+        let mut stack = StackTracker::new();
+
+        let expected = stack.number(0x1234_5678);
+        let n = stack.number(0x1234_5678);
+        let result = var_to_number(&mut stack, n);
         stack.equals(expected, true, result, true);
         stack.op_true();
         assert!(stack.run().success);
@@ -2587,7 +2598,7 @@ mod tests {
             fuzz_multiply();
             fuzz_mulh();
             fuzz_sub_1_if_positive();
-            fuzz_nibbles_to_number();
+            fuzz_var_to_number();
             fuzz_div_rem();
 
             // ! Choose method is not used so we ignore it.
@@ -2864,25 +2875,19 @@ mod tests {
                 |input| -> bool { is_negative_aux(input) },
             );
         }
-        fn nibbles_to_number_aux(nibbles: Vec<u32>) -> bool {
+        fn var_to_number_aux(number: u32) -> bool {
             let mut stack = StackTracker::new();
 
-            let mut expected_result: u32 = 0;
-            for &nibble in nibbles.iter() {
-                expected_result = expected_result.wrapping_mul(16).wrapping_add(nibble);
-            }
-
-            let nibble_vars: Vec<StackVariable> =
-                nibbles.iter().map(|n| stack.number(*n)).collect();
-            let result_var = nibbles_to_number(&mut stack, nibble_vars);
+            let var = stack.number_u32(number);
+            let result_var = var_to_number(&mut stack, var);
 
             // Use stack.number() to get a size-1 variable for the expected result.
-            let expected_var = stack.number(expected_result);
+            let expected_number = stack.number(number);
 
             // Now that both are size-1 scalars and we've limited the input range,
             // we can use a direct op_equalverify.
             stack.move_var(result_var);
-            stack.move_var(expected_var);
+            stack.move_var(expected_number);
             stack.op_equalverify();
 
             stack.op_true();
@@ -2890,14 +2895,11 @@ mod tests {
         }
 
         #[test]
-        fn fuzz_nibbles_to_number() {
+        fn fuzz_var_to_number() {
             fuzz_generic_and_catch_panics(
-                "nibbles_to_number",
-                |rng| -> Vec<u32> {
-                    let len = rng.random_range(1..8);
-                    (0..len).map(|_| rng.random_range(0..16)).collect()
-                },
-                |input| -> bool { nibbles_to_number_aux(input) },
+                "var_to_number",
+                |rng| -> u32 { rng.random_range(0..std::i32::MAX as u32) },
+                |input| -> bool { var_to_number_aux(input) },
             );
         }
 
