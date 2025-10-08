@@ -42,7 +42,8 @@ pub enum ChallengeType {
         step_hash: String,
         trace: TraceStep,
         next_hash: String,
-        step: u64,
+        write_step: u64,
+        conflict_step: u64,
     },
     CorrectHash {
         prover_hash: String,

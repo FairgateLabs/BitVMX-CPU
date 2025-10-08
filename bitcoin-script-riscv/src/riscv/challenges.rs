@@ -522,6 +522,11 @@ pub fn read_value_challenge(stack: &mut StackTracker) {
     let next_hash = stack.define(40, "next_hash");
 
     let write_step = stack.define(16, "write_step");
+    let conflict_step = stack.define(16, "conflict_step");
+
+    let write_step_copy = stack.copy_var(write_step);
+    is_lower_than(stack, write_step_copy, conflict_step, true);
+    stack.op_verify();
 
     let [read_addr, read_value, read_step] = get_selected_vars(
         stack,
@@ -753,7 +758,8 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             step_hash,
             trace,
             next_hash,
-            step,
+            write_step,
+            conflict_step,
         } => {
             stack.number_u32(read_1.address);
             stack.number_u32(read_1.value);
@@ -774,7 +780,8 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
 
             stack.hexstr_as_nibbles(next_hash);
 
-            stack.number_u64(*step);
+            stack.number_u64(*write_step);
+            stack.number_u64(*conflict_step);
 
             read_value_challenge(&mut stack);
         }
@@ -1821,6 +1828,7 @@ mod tests {
         step_hash: &str,
         next_hash: &str,
         write_step: u64,
+        conflict_step: u64,
     ) -> bool {
         let stack = &mut StackTracker::new();
 
@@ -1844,12 +1852,14 @@ mod tests {
         stack.hexstr_as_nibbles(&next_hash);
 
         stack.number_u64(write_step);
+        stack.number_u64(conflict_step);
 
         read_value_challenge(stack);
 
         stack.op_true();
         stack.run().success
     }
+
     #[test]
     fn test_read_value() {
         let hash = "e2f115006467b4b1b2b27612bbfd40ed3bc8299b";
@@ -1859,44 +1869,113 @@ mod tests {
         let write_pc = ProgramCounter::new(0x8000010c, 0x00);
         let write = TraceWrite::new(0xf0000028, 1);
         let trace = &TraceStep::new(write, write_pc);
+        let conflict_step = 1000;
 
         // can't challenge if read is correct
         let read = TraceRead::new(0xf0000028, 1, 100);
-        let step = 100;
-        assert!(!test_read_value_aux(read, trace, hash, next_hash, step));
+        let write_step = 100;
+        assert!(!test_read_value_aux(
+            read,
+            trace,
+            hash,
+            next_hash,
+            write_step,
+            conflict_step
+        ));
 
         // can't challenge if write is older
         let read = TraceRead::new(0xf0000028, 0, 100);
-        let step = 50;
-        assert!(!test_read_value_aux(read, trace, hash, next_hash, step));
+        let write_step = 50;
+        assert!(!test_read_value_aux(
+            read,
+            trace,
+            hash,
+            next_hash,
+            write_step,
+            conflict_step
+        ));
 
         // can't challenge if write is newer but for different address
         let read = TraceRead::new(0x1000_0000, 0, 100);
-        let step = 200;
-        assert!(!test_read_value_aux(read, trace, hash, next_hash, step));
+        let write_step = 200;
+        assert!(!test_read_value_aux(
+            read,
+            trace,
+            hash,
+            next_hash,
+            write_step,
+            conflict_step
+        ));
 
         // challenge is valid if write is newer for the same address and has correct hash
         let read = TraceRead::new(0xf0000028, 0, 100);
-        let step = 200;
+        let write_step = 200;
         assert!(test_read_value_aux(
             read.clone(),
             trace,
             hash,
             next_hash,
-            step
+            write_step,
+            conflict_step
         ));
         // can't challenge if hash is wrong
-        assert!(!test_read_value_aux(read, trace, hash, wrong_hash, step));
+        assert!(!test_read_value_aux(
+            read,
+            trace,
+            hash,
+            wrong_hash,
+            write_step,
+            conflict_step
+        ));
 
         // challenge is valid if write is at the same step but for different address
         let read = TraceRead::new(0x1000_0000, 0, 100);
-        let step = 100;
-        assert!(test_read_value_aux(read, trace, hash, next_hash, step));
+        let write_step = 100;
+        assert!(test_read_value_aux(
+            read,
+            trace,
+            hash,
+            next_hash,
+            write_step,
+            conflict_step
+        ));
 
         // challenge is valid if write is at the same step for different address but different value
         let read = TraceRead::new(0xf0000028, 0, 100);
-        let step = 100;
-        assert!(test_read_value_aux(read, trace, hash, next_hash, step));
+        let write_step = 100;
+        assert!(test_read_value_aux(
+            read,
+            trace,
+            hash,
+            next_hash,
+            write_step,
+            conflict_step
+        ));
+
+        // can't challenge if step is equal to conflict step
+        let read = TraceRead::new(0x1000_0000, 0, 100);
+        let write_step = conflict_step;
+        assert!(!test_read_value_aux(
+            read,
+            trace,
+            hash,
+            next_hash,
+            write_step,
+            conflict_step
+        ));
+
+        // can't challenge if step is ahead of conflict step
+        let read = TraceRead::new(0x1000_0000, 0, 100);
+        let write_step = conflict_step + 1;
+        assert!(!test_read_value_aux(
+            read,
+            trace,
+            hash,
+            next_hash,
+            write_step,
+            conflict_step
+        ));
+
     }
 
     mod coin_tests {

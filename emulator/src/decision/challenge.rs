@@ -578,6 +578,7 @@ pub fn verifier_choose_challenge_for_read_challenge(
     let verifier_log = VerifierChallengeLog::load(checkpoint_path)?;
 
     let read_challenge_log = verifier_log.read_challenge_log;
+    let conflict_step = verifier_log.conflict_step_log.step_to_challenge;
     let challenge_step = read_challenge_log.step_to_challenge;
 
     let (step_hash, next_hash) = get_hashes(
@@ -633,7 +634,8 @@ pub fn verifier_choose_challenge_for_read_challenge(
             step_hash,
             trace: my_trace.trace_step,
             next_hash,
-            step: challenge_step + 1,
+            write_step: challenge_step + 1,
+            conflict_step: conflict_step + 1,
         });
     }
 
@@ -2006,7 +2008,10 @@ mod tests {
                 TraceRead::new(4026531900, 2852134912, 8),
                 TraceRead::new(2852134912, 0, LAST_STEP_INIT),
                 TraceReadPC::new(ProgramCounter::new(2147483796, 1), 4292321283),
-                TraceStep::new(TraceWrite::new(4026531972, 0), ProgramCounter::new(2147483796, 2)),
+                TraceStep::new(
+                    TraceWrite::new(4026531972, 0),
+                    ProgramCounter::new(2147483796, 2),
+                ),
                 None,
                 MemoryWitness::new(
                     MemoryAccessType::Register,
