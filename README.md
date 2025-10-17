@@ -89,3 +89,16 @@ To emulate an error in the read value 1 or 2 `--fail-read-1/2 [step addr_origina
 
 ## Building a program
 To build your own programs follow the instructions in the [docker folder](https://github.com/FairgateLabs/bitvmx-docker-riscv32/blob/main/README.md)
+
+## License
+
+This project is licensed under the MIT License - see [LICENSE](LICENSE) file for details.
+
+---
+
+## 🧩 Part of the BitVMX Ecosystem
+
+This repository is a component of the **BitVMX Ecosystem**, an open platform for disputable computation secured by Bitcoin.  
+You can find the index of all BitVMX open-source components at [**FairgateLabs/BitVMX**](https://github.com/FairgateLabs/BitVMX).
+
+---
