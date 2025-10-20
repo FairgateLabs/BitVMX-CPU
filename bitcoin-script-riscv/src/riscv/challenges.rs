@@ -603,7 +603,7 @@ pub fn future_read_challenge(stack: &mut StackTracker) {
 
     let [read_step] = get_selected_vars(stack, [read_step_1], [read_step_2], read_selector);
 
-    // read_step != LAST_STEP_INIT 
+    // read_step != LAST_STEP_INIT
     let init = stack.number_u64(LAST_STEP_INIT);
     stack.equality(read_step, false, init, true, false, true);
 
@@ -618,35 +618,51 @@ pub fn future_read_challenge(stack: &mut StackTracker) {
 pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
     let mut stack = StackTracker::new();
     match challege_type {
-        ChallengeType::TraceHash(pre_hash, trace_step, hash) => {
-            stack.hexstr_as_nibbles(pre_hash);
-            stack.number_u32(trace_step.get_write().address);
-            stack.number_u32(trace_step.get_write().value);
-            stack.number_u32(trace_step.get_pc().get_address());
-            stack.byte(trace_step.get_pc().get_micro());
-            stack.hexstr_as_nibbles(hash);
+        ChallengeType::TraceHash {
+            prover_step_hash,
+            prover_trace,
+            prover_next_hash,
+        } => {
+            stack.hexstr_as_nibbles(prover_step_hash);
+            stack.number_u32(prover_trace.get_write().address);
+            stack.number_u32(prover_trace.get_write().value);
+            stack.number_u32(prover_trace.get_pc().get_address());
+            stack.byte(prover_trace.get_pc().get_micro());
+            stack.hexstr_as_nibbles(prover_next_hash);
             trace_hash_challenge(&mut stack);
         }
-        ChallengeType::TraceHashZero(trace_step, hash) => {
-            stack.number_u32(trace_step.get_write().address);
-            stack.number_u32(trace_step.get_write().value);
-            stack.number_u32(trace_step.get_pc().get_address());
-            stack.byte(trace_step.get_pc().get_micro());
-            stack.hexstr_as_nibbles(hash);
+        ChallengeType::TraceHashZero {
+            prover_trace,
+            prover_next_hash,
+        } => {
+            stack.number_u32(prover_trace.get_write().address);
+            stack.number_u32(prover_trace.get_write().value);
+            stack.number_u32(prover_trace.get_pc().get_address());
+            stack.byte(prover_trace.get_pc().get_micro());
+            stack.hexstr_as_nibbles(prover_next_hash);
             trace_hash_zero_challenge(&mut stack);
         }
-        ChallengeType::EntryPoint(read_pc, step, real_entry_point) => {
-            stack.number_u32(read_pc.pc.get_address());
-            stack.byte(read_pc.pc.get_micro());
-            stack.number_u64(*step);
+        ChallengeType::EntryPoint {
+            prover_read_pc,
+            prover_trace_step,
+            real_entry_point,
+        } => {
+            stack.number_u32(prover_read_pc.pc.get_address());
+            stack.byte(prover_read_pc.pc.get_micro());
+            stack.number_u64(*prover_trace_step);
             entry_point_challenge(&mut stack, real_entry_point.unwrap());
         }
-        ChallengeType::ProgramCounter(pre_pre_hash, pre_step, prover_step_hash, prover_pc_read) => {
-            stack.hexstr_as_nibbles(pre_pre_hash);
-            stack.number_u32(pre_step.get_write().address);
-            stack.number_u32(pre_step.get_write().value);
-            stack.number_u32(pre_step.get_pc().get_address());
-            stack.byte(pre_step.get_pc().get_micro());
+        ChallengeType::ProgramCounter {
+            pre_hash,
+            trace,
+            prover_step_hash,
+            prover_pc_read,
+        } => {
+            stack.hexstr_as_nibbles(pre_hash);
+            stack.number_u32(trace.get_write().address);
+            stack.number_u32(trace.get_write().value);
+            stack.number_u32(trace.get_pc().get_address());
+            stack.byte(trace.get_pc().get_micro());
 
             stack.number_u32(prover_pc_read.pc.get_address());
             stack.byte(prover_pc_read.pc.get_micro());
@@ -655,74 +671,99 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
 
             program_counter_challenge(&mut stack);
         }
-        ChallengeType::Opcode(pc_read, _, chunk) => {
-            stack.number_u32(pc_read.pc.get_address());
-            stack.number_u32(pc_read.opcode);
+        ChallengeType::Opcode {
+            prover_pc_read,
+            chunk_index: _,
+            chunk,
+        } => {
+            stack.number_u32(prover_pc_read.pc.get_address());
+            stack.number_u32(prover_pc_read.opcode);
             opcode_challenge(&mut stack, chunk.as_ref().unwrap());
         }
-        ChallengeType::InputData(read_1, read_2, address, input_for_address) => {
+        ChallengeType::InputData {
+            prover_read_1,
+            prover_read_2,
+            address,
+            input_for_address,
+        } => {
             stack.number_u32(*input_for_address); //TODO: this should make input_wots[address]
-            stack.number_u32(read_1.address);
-            stack.number_u32(read_1.value);
-            stack.number_u64(read_1.last_step);
+            stack.number_u32(prover_read_1.address);
+            stack.number_u32(prover_read_1.value);
+            stack.number_u64(prover_read_1.last_step);
 
-            stack.number_u32(read_2.address);
-            stack.number_u32(read_2.value);
-            stack.number_u64(read_2.last_step);
+            stack.number_u32(prover_read_2.address);
+            stack.number_u32(prover_read_2.value);
+            stack.number_u64(prover_read_2.last_step);
 
             input_challenge(&mut stack, *address);
         }
-        ChallengeType::InitializedData(read_1, read_2, read_selector, _, chunk) => {
-            stack.number_u32(read_1.address);
-            stack.number_u32(read_1.value);
-            stack.number_u64(read_1.last_step);
+        ChallengeType::InitializedData {
+            prover_read_1,
+            prover_read_2,
+            read_selector,
+            chunk_index: _,
+            chunk,
+        } => {
+            stack.number_u32(prover_read_1.address);
+            stack.number_u32(prover_read_1.value);
+            stack.number_u64(prover_read_1.last_step);
 
-            stack.number_u32(read_2.address);
-            stack.number_u32(read_2.value);
-            stack.number_u64(read_2.last_step);
+            stack.number_u32(prover_read_2.address);
+            stack.number_u32(prover_read_2.value);
+            stack.number_u64(prover_read_2.last_step);
 
             stack.number(*read_selector);
 
             initialized_challenge(&mut stack, chunk.as_ref().unwrap());
         }
-        ChallengeType::UninitializedData(read_1, read_2, read_selector, uninitialized_sections) => {
-            stack.number_u32(read_1.address);
-            stack.number_u32(read_1.value);
-            stack.number_u64(read_1.last_step);
+        ChallengeType::UninitializedData {
+            prover_read_1,
+            prover_read_2,
+            read_selector,
+            sections,
+        } => {
+            stack.number_u32(prover_read_1.address);
+            stack.number_u32(prover_read_1.value);
+            stack.number_u64(prover_read_1.last_step);
 
-            stack.number_u32(read_2.address);
-            stack.number_u32(read_2.value);
-            stack.number_u64(read_2.last_step);
+            stack.number_u32(prover_read_2.address);
+            stack.number_u32(prover_read_2.value);
+            stack.number_u64(prover_read_2.last_step);
 
             stack.number(*read_selector);
 
-            uninitialized_challenge(&mut stack, uninitialized_sections.as_ref().unwrap());
+            uninitialized_challenge(&mut stack, sections.as_ref().unwrap());
         }
-        ChallengeType::RomData(read_1, read_2, address, input_for_address) => {
-            stack.number_u32(read_1.address);
-            stack.number_u32(read_1.value);
-            stack.number_u64(read_1.last_step);
-            stack.number_u32(read_2.address);
-            stack.number_u32(read_2.value);
-            stack.number_u64(read_2.last_step);
+        ChallengeType::RomData {
+            prover_read_1,
+            prover_read_2,
+            address,
+            input_for_address,
+        } => {
+            stack.number_u32(prover_read_1.address);
+            stack.number_u32(prover_read_1.value);
+            stack.number_u64(prover_read_1.last_step);
+            stack.number_u32(prover_read_2.address);
+            stack.number_u32(prover_read_2.value);
+            stack.number_u64(prover_read_2.last_step);
             rom_challenge(&mut stack, *address, *input_for_address);
         }
-        ChallengeType::AddressesSections(
-            read_1,
-            read_2,
-            write,
-            memory_witness,
-            pc,
+        ChallengeType::AddressesSections {
+            prover_read_1,
+            prover_read_2,
+            prover_write,
+            prover_witness,
+            prover_pc,
             read_write_sections,
             read_only_sections,
             register_sections,
             code_sections,
-        ) => {
-            stack.number_u32(read_1.address);
-            stack.number_u32(read_2.address);
-            stack.number_u32(write.address);
-            stack.byte(memory_witness.byte());
-            stack.number_u32(pc.get_address());
+        } => {
+            stack.number_u32(prover_read_1.address);
+            stack.number_u32(prover_read_2.address);
+            stack.number_u32(prover_write.address);
+            stack.byte(prover_witness.byte());
+            stack.number_u32(prover_pc.get_address());
 
             addresses_sections_challenge(
                 &mut stack,
@@ -734,45 +775,45 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
         }
         ChallengeType::FutureRead {
             step,
-            read_step_1,
-            read_step_2,
+            prover_read_step_1,
+            prover_read_step_2,
             read_selector,
         } => {
             stack.number_u64(*step);
-            stack.number_u64(*read_step_1);
-            stack.number_u64(*read_step_2);
+            stack.number_u64(*prover_read_step_1);
+            stack.number_u64(*prover_read_step_2);
             stack.number(*read_selector);
 
             future_read_challenge(&mut stack);
         }
         ChallengeType::ReadValue {
-            read_1,
-            read_2,
+            prover_read_1,
+            prover_read_2,
             read_selector,
-            step_hash,
+            prover_hash,
             trace,
-            next_hash,
+            prover_next_hash,
             write_step,
             conflict_step,
         } => {
-            stack.number_u32(read_1.address);
-            stack.number_u32(read_1.value);
-            stack.number_u64(read_1.last_step);
+            stack.number_u32(prover_read_1.address);
+            stack.number_u32(prover_read_1.value);
+            stack.number_u64(prover_read_1.last_step);
 
-            stack.number_u32(read_2.address);
-            stack.number_u32(read_2.value);
-            stack.number_u64(read_2.last_step);
+            stack.number_u32(prover_read_2.address);
+            stack.number_u32(prover_read_2.value);
+            stack.number_u64(prover_read_2.last_step);
 
             stack.number(*read_selector);
 
-            stack.hexstr_as_nibbles(step_hash);
+            stack.hexstr_as_nibbles(prover_hash);
 
             stack.number_u32(trace.get_write().address);
             stack.number_u32(trace.get_write().value);
             stack.number_u32(trace.get_pc().get_address());
             stack.byte(trace.get_pc().get_micro());
 
-            stack.hexstr_as_nibbles(next_hash);
+            stack.hexstr_as_nibbles(prover_next_hash);
 
             stack.number_u64(*write_step);
             stack.number_u64(*conflict_step);
@@ -780,10 +821,10 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             read_value_challenge(&mut stack);
         }
         ChallengeType::CorrectHash {
-            prover_hash,
+            prover_step_hash: prover_hash,
             verifier_hash,
             trace,
-            next_hash,
+            prover_next_hash,
         } => {
             stack.hexstr_as_nibbles(prover_hash);
             stack.hexstr_as_nibbles(verifier_hash);
@@ -793,7 +834,7 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             stack.number_u32(trace.get_pc().get_address());
             stack.byte(trace.get_pc().get_micro());
 
-            stack.hexstr_as_nibbles(next_hash);
+            stack.hexstr_as_nibbles(prover_next_hash);
 
             correct_hash_challenge(&mut stack);
         }
@@ -2017,7 +2058,6 @@ mod tests {
             write_step,
             conflict_step
         ));
-
     }
 
     mod coin_tests {

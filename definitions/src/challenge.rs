@@ -8,48 +8,91 @@ use crate::{
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ChallengeType {
-    TraceHash(String, TraceStep, String), // PROVER_PREV_HASH, PROVER_TRACE_STEP, PROVER_STEP_HASH
-    TraceHashZero(TraceStep, String),     // PROVER_TRACE_STEP, PROVER_STEP_HASH
-    EntryPoint(TraceReadPC, u64, Option<u32>), // (PROVER_READ_PC, PROVER_READ_MICRO), PROVER_TRACE_STEP, ENTRYPOINT (only used on test)
-    ProgramCounter(String, TraceStep, String, TraceReadPC),
-    Opcode(TraceReadPC, u32, Option<Chunk>), // (PROVER_PC, PROVER_OPCODE), CHUNK_INDEX, CHUNK_BASE_ADDRESS, OPCODES_CHUNK
-    InputData(TraceRead, TraceRead, u32, u32),
-    InitializedData(TraceRead, TraceRead, u32, u32, Option<Chunk>),
-    UninitializedData(TraceRead, TraceRead, u32, Option<SectionDefinition>),
-    RomData(TraceRead, TraceRead, u32, u32),
-    AddressesSections(
-        TraceRead,
-        TraceRead,
-        TraceWrite,
-        MemoryWitness,
-        ProgramCounter,
-        Option<SectionDefinition>, // read write sections
-        Option<SectionDefinition>, // read only sections
-        Option<SectionDefinition>, // register sections
-        Option<SectionDefinition>, // code sections
-    ),
+    TraceHash {
+        prover_step_hash: String,
+        prover_trace: TraceStep,
+        prover_next_hash: String,
+    },
+    TraceHashZero {
+        prover_trace: TraceStep,
+        prover_next_hash: String,
+    },
+    EntryPoint {
+        prover_read_pc: TraceReadPC,
+        prover_trace_step: u64,
+        real_entry_point: Option<u32>,
+    },
+    ProgramCounter {
+        pre_hash: String,
+        trace: TraceStep,
+        prover_step_hash: String,
+        prover_pc_read: TraceReadPC,
+    },
+    Opcode {
+        prover_pc_read: TraceReadPC,
+        chunk_index: u32,
+        chunk: Option<Chunk>,
+    },
+    InputData {
+        prover_read_1: TraceRead,
+        prover_read_2: TraceRead,
+        address: u32,
+        input_for_address: u32,
+    },
+    InitializedData {
+        prover_read_1: TraceRead,
+        prover_read_2: TraceRead,
+        read_selector: u32,
+        chunk_index: u32,
+        chunk: Option<Chunk>,
+    },
+    UninitializedData {
+        prover_read_1: TraceRead,
+        prover_read_2: TraceRead,
+        read_selector: u32,
+        sections: Option<SectionDefinition>,
+    },
+    RomData {
+        prover_read_1: TraceRead,
+        prover_read_2: TraceRead,
+        address: u32,
+        input_for_address: u32,
+    },
+    AddressesSections {
+        prover_read_1: TraceRead,
+        prover_read_2: TraceRead,
+        prover_write: TraceWrite,
+        prover_witness: MemoryWitness,
+        prover_pc: ProgramCounter,
+        read_write_sections: Option<SectionDefinition>,
+        read_only_sections: Option<SectionDefinition>,
+        register_sections: Option<SectionDefinition>,
+        code_sections: Option<SectionDefinition>,
+    },
     FutureRead {
         step: u64,
-        read_step_1: u64,
-        read_step_2: u64,
+        prover_read_step_1: u64,
+        prover_read_step_2: u64,
         read_selector: u32,
     },
-    ReadValueNArySearch(u32),
+    ReadValueNArySearch {
+        bits: u32,
+    },
     ReadValue {
-        read_1: TraceRead,
-        read_2: TraceRead,
+        prover_read_1: TraceRead,
+        prover_read_2: TraceRead,
         read_selector: u32,
-        step_hash: String,
+        prover_hash: String,
         trace: TraceStep,
-        next_hash: String,
+        prover_next_hash: String,
         write_step: u64,
         conflict_step: u64,
     },
     CorrectHash {
-        prover_hash: String,
+        prover_step_hash: String,
         verifier_hash: String,
         trace: TraceStep,
-        next_hash: String,
+        prover_next_hash: String,
     },
     No,
 }

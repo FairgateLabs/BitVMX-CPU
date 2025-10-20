@@ -309,29 +309,32 @@ pub fn verifier_choose_challenge(
         false,
     )?;
 
-    let (step_hash, next_hash) = get_hashes(
+    let (prover_step_hash, prover_next_hash) = get_hashes(
         &nary_def.step_mapping(&conflict_step_log.verifier_decisions),
         &conflict_step_log.prover_hash_rounds,
         conflict_step_log.step_to_challenge,
     );
 
     // check trace_hash
-    if (!validate_step_hash(&step_hash, &trace.trace_step, &next_hash)
+    if (!validate_step_hash(&prover_step_hash, &trace.trace_step, &prover_next_hash)
         && force == ForceChallenge::No)
         || force == ForceChallenge::TraceHash
         || force == ForceChallenge::TraceHashZero
     {
         if trace.step_number == 1 {
             info!("Verifier choose to challenge TRACE_HASH_ZERO");
-            return Ok(ChallengeType::TraceHashZero(trace.trace_step, next_hash));
+            return Ok(ChallengeType::TraceHashZero {
+                prover_trace: trace.trace_step,
+                prover_next_hash,
+            });
         }
 
         info!("Verifier choose to challenge TRACE_HASH");
-        return Ok(ChallengeType::TraceHash(
-            step_hash,
-            trace.trace_step,
-            next_hash,
-        ));
+        return Ok(ChallengeType::TraceHash {
+            prover_step_hash,
+            prover_trace: trace.trace_step,
+            prover_next_hash,
+        });
     }
 
     let step = conflict_step_log.step_to_challenge;
@@ -362,10 +365,13 @@ pub fn verifier_choose_challenge(
     let register_sections = program.register_sections.clone();
     let code_sections = program.code_sections.clone();
 
+    let prover_read_1 = trace.read_1;
+    let prover_read_2 = trace.read_2;
+
     let is_valid_read_1 =
-        program.is_valid_mem(trace.mem_witness.read_1(), trace.read_1.address, true);
+        program.is_valid_mem(trace.mem_witness.read_1(), prover_read_1.address, true);
     let is_valid_read_2 =
-        program.is_valid_mem(trace.mem_witness.read_2(), trace.read_2.address, true);
+        program.is_valid_mem(trace.mem_witness.read_2(), prover_read_2.address, true);
 
     let is_valid_write = program.is_valid_mem(
         trace.mem_witness.write(),
@@ -380,17 +386,17 @@ pub fn verifier_choose_challenge(
         || force == ForceChallenge::AddressesSections
     {
         info!("Verifier choose to challenge invalid ADDRESS_SECTION");
-        return Ok(ChallengeType::AddressesSections(
-            trace.read_1,
-            trace.read_2,
-            trace.trace_step.write_1,
-            trace.mem_witness,
-            trace.read_pc.pc,
-            return_script_parameters.then_some(read_write_sections),
-            return_script_parameters.then_some(read_only_sections),
-            return_script_parameters.then_some(register_sections),
-            return_script_parameters.then_some(code_sections),
-        ));
+        return Ok(ChallengeType::AddressesSections {
+            prover_read_1,
+            prover_read_2,
+            prover_write: trace.trace_step.write_1,
+            prover_witness: trace.mem_witness,
+            prover_pc: trace.read_pc.pc,
+            read_write_sections: return_script_parameters.then_some(read_write_sections),
+            read_only_sections: return_script_parameters.then_some(read_only_sections),
+            register_sections: return_script_parameters.then_some(register_sections),
+            code_sections: return_script_parameters.then_some(code_sections),
+        });
     }
 
     // check entrypoint
@@ -403,22 +409,22 @@ pub fn verifier_choose_challenge(
     {
         if trace.step_number == 1 {
             info!("Verifier choose to challenge ENTRYPOINT");
-            return Ok(ChallengeType::EntryPoint(
-                trace.read_pc,
-                trace.step_number,
-                return_script_parameters.then_some(program.pc.get_address()), //this parameter is only used for the test
-            ));
+            return Ok(ChallengeType::EntryPoint {
+                prover_read_pc: trace.read_pc,
+                prover_trace_step: trace.step_number,
+                real_entry_point: return_script_parameters.then_some(program.pc.get_address()), //this parameter is only used for the test
+            });
         } else {
             info!("Verifier choose to challenge PROGRAM_COUNTER");
-            let pre_pre_hash = my_execution[0].1.clone();
+            let pre_hash = my_execution[0].1.clone();
             let pre_step = my_execution[1].0.clone();
 
-            return Ok(ChallengeType::ProgramCounter(
-                pre_pre_hash,
-                pre_step.trace_step,
-                step_hash,
-                trace.read_pc,
-            ));
+            return Ok(ChallengeType::ProgramCounter {
+                pre_hash,
+                trace: pre_step.trace_step,
+                prover_step_hash,
+                prover_pc_read: trace.read_pc,
+            });
         }
     }
 
@@ -428,20 +434,20 @@ pub fn verifier_choose_challenge(
         info!("Verifier choose to challenge invalid OPCODE");
         let pc = trace.read_pc.pc.get_address();
         let code_chunks = program.get_code_chunks(CHUNK_SIZE);
-        let chunk_index = find_chunk_index(&code_chunks, pc).unwrap();
+        let chunk_index = find_chunk_index(&code_chunks, pc).unwrap() as u32;
 
-        return Ok(ChallengeType::Opcode(
-            trace.read_pc,
-            chunk_index as u32,
-            return_script_parameters.then_some(code_chunks[chunk_index].clone()),
-        ));
+        return Ok(ChallengeType::Opcode {
+            prover_pc_read: trace.read_pc,
+            chunk_index,
+            chunk: return_script_parameters.then_some(code_chunks[chunk_index as usize].clone()),
+        });
     }
 
-    let read_step_1 = trace.read_1.last_step;
-    let read_step_2 = trace.read_2.last_step;
+    let prover_read_step_1 = prover_read_1.last_step;
+    let prover_read_step_2 = prover_read_2.last_step;
 
-    let is_read_1_future = read_step_1 > step && read_step_1 != LAST_STEP_INIT;
-    let is_read_2_future = read_step_2 > step && read_step_2 != LAST_STEP_INIT;
+    let is_read_1_future = prover_read_step_1 > step && prover_read_step_1 != LAST_STEP_INIT;
+    let is_read_2_future = prover_read_step_2 > step && prover_read_step_2 != LAST_STEP_INIT;
 
     if ((is_read_1_future || is_read_2_future) && force == ForceChallenge::No)
         || force == ForceChallenge::FutureRead
@@ -450,15 +456,15 @@ pub fn verifier_choose_challenge(
 
         return Ok(ChallengeType::FutureRead {
             step: step + 1,
-            read_step_1,
-            read_step_2,
+            prover_read_step_1,
+            prover_read_step_2,
             read_selector,
         });
     }
 
     // check const read value
-    let is_read_1_conflict = trace.read_1.value != my_trace.read_1.value;
-    let is_read_2_conflict = trace.read_2.value != my_trace.read_2.value;
+    let is_read_1_conflict = prover_read_1.value != my_trace.read_1.value;
+    let is_read_2_conflict = prover_read_2.value != my_trace.read_2.value;
 
     if ((is_read_1_conflict || is_read_2_conflict) && force == ForceChallenge::No)
         || force == ForceChallenge::InputData
@@ -467,9 +473,9 @@ pub fn verifier_choose_challenge(
         || force == ForceChallenge::ReadValueNArySearch
     {
         let (conflict_read, my_conflict_read, read_selector) = if is_read_1_conflict {
-            (trace.read_1.clone(), my_trace.read_1.clone(), 1)
+            (prover_read_1.clone(), my_trace.read_1.clone(), 1)
         } else {
-            (trace.read_2.clone(), my_trace.read_2.clone(), 2)
+            (prover_read_2.clone(), my_trace.read_2.clone(), 2)
         };
 
         let conflict_address = conflict_read.address;
@@ -499,38 +505,40 @@ pub fn verifier_choose_challenge(
                 info!("Verifier choose to challenge invalid INPUT DATA");
                 let value = program.read_mem(conflict_address, false)?;
 
-                return Ok(ChallengeType::InputData(
-                    trace.read_1,
-                    trace.read_2,
-                    conflict_address,
-                    value,
-                ));
+                return Ok(ChallengeType::InputData {
+                    prover_read_1: prover_read_1,
+                    prover_read_2: prover_read_2,
+                    address: conflict_address,
+                    input_for_address: value,
+                });
             } else if (section.initialized && force == ForceChallenge::No)
                 || force == ForceChallenge::InitializedData
             {
                 info!("Verifier choose to challenge invalid INITIALIZED DATA");
                 let initialized_chunks = program.get_initialized_chunks(CHUNK_SIZE);
-                let chunk_index = find_chunk_index(&initialized_chunks, conflict_address).unwrap();
+                let chunk_index =
+                    find_chunk_index(&initialized_chunks, conflict_address).unwrap() as u32;
 
-                return Ok(ChallengeType::InitializedData(
-                    trace.read_1,
-                    trace.read_2,
+                return Ok(ChallengeType::InitializedData {
+                    prover_read_1,
+                    prover_read_2,
                     read_selector,
-                    chunk_index as u32,
-                    return_script_parameters.then_some(initialized_chunks[chunk_index].clone()),
-                ));
+                    chunk_index,
+                    chunk: return_script_parameters
+                        .then_some(initialized_chunks[chunk_index as usize].clone()),
+                });
             } else if (!section.initialized && force == ForceChallenge::No)
                 || force == ForceChallenge::UninitializedData
             {
                 info!("Verifier choose to challenge invalid UNINITIALIZED DATA");
-                let uninitilized_ranges = program.get_uninitialized_ranges(&program_def);
+                let uninitilized_sections = program.get_uninitialized_ranges(&program_def);
 
-                return Ok(ChallengeType::UninitializedData(
-                    trace.read_1,
-                    trace.read_2,
+                return Ok(ChallengeType::UninitializedData {
+                    prover_read_1,
+                    prover_read_2,
                     read_selector,
-                    return_script_parameters.then_some(uninitilized_ranges),
-                ));
+                    sections: return_script_parameters.then_some(uninitilized_sections),
+                });
             }
         } else {
             let step_to_challenge = if conflict_last_step == LAST_STEP_INIT {
@@ -560,7 +568,7 @@ pub fn verifier_choose_challenge(
             verifier_log.read_selector = read_selector;
             verifier_log.save(checkpoint_path)?;
 
-            return Ok(ChallengeType::ReadValueNArySearch(bits));
+            return Ok(ChallengeType::ReadValueNArySearch { bits });
         }
     }
     verifier_log.save(checkpoint_path)?;
@@ -581,7 +589,7 @@ pub fn verifier_choose_challenge_for_read_challenge(
     let conflict_step = verifier_log.conflict_step_log.step_to_challenge;
     let challenge_step = read_challenge_log.step_to_challenge;
 
-    let (step_hash, next_hash) = get_hashes(
+    let (prover_step_hash, prover_next_hash) = get_hashes(
         &nary_def.step_mapping(&read_challenge_log.verifier_decisions),
         &read_challenge_log.prover_hash_rounds,
         challenge_step,
@@ -593,7 +601,7 @@ pub fn verifier_choose_challenge_for_read_challenge(
         challenge_step,
     );
 
-    assert_eq!(next_hash, my_next_hash);
+    assert_eq!(prover_next_hash, my_next_hash);
 
     let my_execution = program_def
         .execute_helper(
@@ -607,14 +615,14 @@ pub fn verifier_choose_challenge_for_read_challenge(
     info!("execution: {:?}", my_execution);
     let my_trace = my_execution[0].0.clone();
 
-    if (step_hash != my_step_hash && force == ForceChallenge::No)
+    if (prover_step_hash != my_step_hash && force == ForceChallenge::No)
         || force == ForceChallenge::CorrectHash
     {
         return Ok(ChallengeType::CorrectHash {
-            prover_hash: step_hash,
+            prover_step_hash,
             verifier_hash: my_step_hash,
             trace: my_trace.trace_step,
-            next_hash,
+            prover_next_hash,
         });
     }
 
@@ -623,17 +631,17 @@ pub fn verifier_choose_challenge_for_read_challenge(
         || force == ForceChallenge::ReadValue
     {
         let conflict_step_trace = verifier_log.conflict_step_log.final_trace;
-        let read_1 = conflict_step_trace.read_1;
-        let read_2 = conflict_step_trace.read_2;
+        let prover_read_1 = conflict_step_trace.read_1;
+        let prover_read_2 = conflict_step_trace.read_2;
         let read_selector = verifier_log.read_selector;
 
         return Ok(ChallengeType::ReadValue {
-            read_1,
-            read_2,
+            prover_read_1,
+            prover_read_2,
             read_selector,
-            step_hash,
+            prover_hash: prover_step_hash,
             trace: my_trace.trace_step,
-            next_hash,
+            prover_next_hash,
             write_step: challenge_step + 1,
             conflict_step: conflict_step + 1,
         });
@@ -845,7 +853,7 @@ mod tests {
         .unwrap();
 
         let challenge = match &challenge {
-            ChallengeType::ReadValueNArySearch(bits) => {
+            ChallengeType::ReadValueNArySearch { bits } => {
                 let mut v_decision = *bits;
                 for round in 2..nary_def.total_rounds() + 1 {
                     let hashes = prover_get_hashes_for_round(
