@@ -50,7 +50,7 @@ fn name_or_nop<X: RdZero>(x: &X, name: &str) -> String {
 }
 
 fn name_or_nop_with_micro<X: RdZero>(x: &X, name: &str, micro: u8) -> String {
-    if x.is_rd_zero() {
+    if micro > 1 && x.is_rd_zero() {
         "nop".to_string()
     } else {
         format!("{}_{}", name, micro)

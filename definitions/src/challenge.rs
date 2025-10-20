@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    memory::{MemoryWitness, SectionDefinition},
+    memory::{Chunk, MemoryWitness, SectionDefinition},
     trace::{ProgramCounter, TraceRWStep, TraceRead, TraceReadPC, TraceStep, TraceWrite},
 };
 
@@ -12,8 +12,10 @@ pub enum ChallengeType {
     TraceHashZero(TraceStep, String),     // PROVER_TRACE_STEP, PROVER_STEP_HASH
     EntryPoint(TraceReadPC, u64, Option<u32>), // (PROVER_READ_PC, PROVER_READ_MICRO), PROVER_TRACE_STEP, ENTRYPOINT (only used on test)
     ProgramCounter(String, TraceStep, String, TraceReadPC),
-    Opcode(TraceReadPC, u32, Option<u32>, Option<Vec<u32>>), // (PROVER_PC, PROVER_OPCODE), CHUNK_INDEX, CHUNK_BASE_ADDRESS, OPCODES_CHUNK
+    Opcode(TraceReadPC, u32, Option<Chunk>), // (PROVER_PC, PROVER_OPCODE), CHUNK_INDEX, CHUNK_BASE_ADDRESS, OPCODES_CHUNK
     InputData(TraceRead, TraceRead, u32, u32),
+    InitializedData(TraceRead, TraceRead, u32, u32, Option<Chunk>),
+    UninitializedData(TraceRead, TraceRead, u32, Option<SectionDefinition>),
     RomData(TraceRead, TraceRead, u32, u32),
     AddressesSections(
         TraceRead,
@@ -26,6 +28,29 @@ pub enum ChallengeType {
         Option<SectionDefinition>, // register sections
         Option<SectionDefinition>, // code sections
     ),
+    FutureRead {
+        step: u64,
+        read_step_1: u64,
+        read_step_2: u64,
+        read_selector: u32,
+    },
+    ReadValueNArySearch(u32),
+    ReadValue {
+        read_1: TraceRead,
+        read_2: TraceRead,
+        read_selector: u32,
+        step_hash: String,
+        trace: TraceStep,
+        next_hash: String,
+        write_step: u64,
+        conflict_step: u64,
+    },
+    CorrectHash {
+        prover_hash: String,
+        verifier_hash: String,
+        trace: TraceStep,
+        next_hash: String,
+    },
     No,
 }
 

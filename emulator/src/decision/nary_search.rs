@@ -1,7 +1,34 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, str::FromStr};
 
-use serde::Serialize;
+use clap::ValueEnum;
+use serde::{Deserialize, Serialize};
 use tracing::{error, info};
+
+#[derive(Clone, Copy, PartialEq, ValueEnum, Serialize, Deserialize, Debug)]
+pub enum NArySearchType {
+    ConflictStep,
+    ReadValueChallenge,
+}
+impl ToString for NArySearchType {
+    fn to_string(&self) -> String {
+        match self {
+            NArySearchType::ConflictStep => "conflict-step".to_string(),
+            NArySearchType::ReadValueChallenge => "read-value-challenge".to_string(),
+        }
+    }
+}
+
+impl FromStr for NArySearchType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "conflict-step" => Ok(NArySearchType::ConflictStep),
+            "read-value-challenge" => Ok(NArySearchType::ReadValueChallenge),
+            _ => Err(format!("'{}' is not a valid NArySearchType", s)),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct NArySearchDefinition {
@@ -13,7 +40,7 @@ pub struct NArySearchDefinition {
 
 impl NArySearchDefinition {
     pub fn new(aprox_max_steps: u64, nary: u8) -> NArySearchDefinition {
-        assert!(nary > 1);
+        assert!(nary > 1 && nary.count_ones() == 1);
         let max_bits = f64::ceil(f64::log2(aprox_max_steps as f64));
         let max_steps = 2f64.powi(max_bits as i32) as u64;
         let nary_bits = f64::log2(nary as f64);
@@ -157,19 +184,26 @@ pub fn choose_segment(
     round: u8,
     prover_hashes: &ExecutionHashes,
     my_hashes: &ExecutionHashes,
+    nary_type: NArySearchType,
 ) -> (u32, u64, u64) {
     if prover_hashes.hashes.len() != my_hashes.hashes.len() {
         error!("Prover and my hashes should have the same length");
     }
 
     // finds if there is any difference in the hashes
-    let mut selection = prover_hashes.hashes.len() + 1;
+    let mut selection = if nary_type == NArySearchType::ConflictStep {
+        prover_hashes.hashes.len() + 1
+    } else {
+        1
+    };
     for i in 0..prover_hashes.hashes.len() {
         let prover_hash = &prover_hashes.hashes[i];
         let my_hash = &my_hashes.hashes[i];
         if prover_hash != my_hash {
             selection = i + 1;
-            break;
+            if nary_type == NArySearchType::ConflictStep {
+                break;
+            };
         }
     }
 
@@ -177,12 +211,25 @@ pub fn choose_segment(
     //println!("Selection: {}", selection);
     let mismatch_step = nary_defs.step_from_base_and_bits(round, base_step, selection as u32) - 1;
     //println!("Mismatch step: {}", mismatch_step);
-    let lower_limit_bits = if selected_step < mismatch_step {
-        nary_defs.step_bits_for_round(round, selected_step)
+    let (lower_limit_bits, choice) = if selected_step < mismatch_step {
+        if nary_type == NArySearchType::ConflictStep {
+            (
+                nary_defs.step_bits_for_round(round, selected_step),
+                selected_step,
+            )
+        } else {
+            (selection as u32, mismatch_step + 1)
+        }
     } else {
-        selection as u32 - 1
+        if nary_type == NArySearchType::ConflictStep {
+            (selection as u32 - 1, mismatch_step)
+        } else {
+            (
+                nary_defs.step_bits_for_round(round, selected_step),
+                selected_step,
+            )
+        }
     };
-    let choice = mismatch_step.min(selected_step);
 
     //println!("Lower limit bits: {}", lower_limit_bits);
     let base_step = nary_defs.step_from_base_and_bits(round, base_step, lower_limit_bits);
@@ -331,6 +378,7 @@ mod tests {
             round,
             &prover_hashes.into(),
             &my_hashes.into(),
+            NArySearchType::ConflictStep,
         );
         assert_eq!(bits, exp_bits);
         assert_eq!(base, exp_step);

@@ -13,7 +13,7 @@ It is not production-ready, has not been audited, and future updates may introdu
 ## Structure
 
 The repository contains three folders
-1. **docker-riscv32**: Contains the recipe for an image that allows the compilation of C programs into the RISCV-32i architecture. Currently, the programs must be carefully crafted to be used inside BitVMX, using specific memory layouts, predefined input sections and the lack of support for now of the stdlib.  
+1. **docker-riscv32**: Contains the recipe for an image that allows the compilation of C programs into the RISCV-32i architecture. Currently, the programs must be carefully crafted to be used inside BitVMX, using specific memory layouts and predefined input sections. There is now the possibility to compile with the stdlib, it is not fully tested and may cause problems if it uses unimplemented syscalls.
 There are two subfolders: `compliance` which have the code necessary to create the RISCV compliance verification files, and `verifier` which helps with the compilation of a zero knowledge proof verifier program.
 2. **emulator**: The emulator is a library with a command line interface implemented in Rust which is used to execute the binary files compiled. Also this tool helps in the creation of the execution trace, the hash list of the execution necessary for the challenge protocol.
 3. **bitocoin-script-riscv**: This library contains the code that allows to verify any of the RISCV instructions on Bitcoin Script, and therefore challenge the execution of the CPU on-chain.  

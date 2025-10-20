@@ -5,7 +5,7 @@ use bitcoin_script_riscv::riscv::instruction_mapping::{
 };
 use bitvmx_cpu_definitions::{
     constants::LAST_STEP_INIT,
-    memory::{MemoryAccessType, SectionDefinition},
+    memory::{Chunk, MemoryAccessType, SectionDefinition},
     trace::{generate_initial_step_hash, ProgramCounter, TraceRead, TraceWrite},
 };
 use elf::{abi::SHF_EXECINSTR, abi::SHF_WRITE, endian::LittleEndian, ElfBytes};
@@ -13,7 +13,9 @@ use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 use tracing::{error, info};
 
-use crate::{constants::*, EmulatorError, ExecutionResult};
+use crate::{
+    constants::*, loader::program_definition::ProgramDefinition, EmulatorError, ExecutionResult,
+};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Section {
@@ -76,17 +78,12 @@ impl Section {
         (self.start, self.start + self.size - 1)
     }
 
-    pub fn contains(&self, address: u32) -> bool {
-        let (start, end) = self.range();
-        return address >= start && address <= end - 3;
-    }
-
     pub fn is_merge_compatible(&self, other: &Self) -> bool {
-        return self.is_code == other.is_code
+        self.is_code == other.is_code
             && self.is_write == other.is_write
             && self.initialized == other.initialized
             && self.registers == other.registers
-            && self.start + self.size == other.start;
+            && self.start + self.size == other.start
     }
 
     pub fn merge_in_place(&mut self, other: Self) {
@@ -203,6 +200,30 @@ pub struct Program {
 }
 
 impl Program {
+    pub fn load_input(
+        &mut self,
+        input: Vec<u8>,
+        input_section_name: &str,
+        little_endian: bool,
+    ) -> Result<(), ExecutionResult> {
+        // if the step is non-zero then we are running the program from a checkpoint
+        // so we shouldn't rewrite the input. First, because it's already included in the checkpoint
+        // and second, because the input section is writable and the value could've been changed
+        if !input.is_empty() && self.step == 0 {
+            if let Some(section) = self.find_section_by_name_mut(input_section_name) {
+                let input_as_u32 = vec_u8_to_vec_u32(&input, little_endian);
+                for (i, byte) in input_as_u32.iter().enumerate() {
+                    section.data[i] = *byte;
+                }
+            } else {
+                return Err(ExecutionResult::SectionNotFound(
+                    input_section_name.to_string(),
+                ));
+            }
+        }
+
+        Ok(())
+    }
     pub fn serialize_to_file(&self, fpath: &str) {
         let fname = format!("{}/checkpoint.{}.json", fpath, self.step);
         let serialized = serde_json::to_string(self).unwrap();
@@ -256,7 +277,7 @@ impl Program {
         self.sections = merged;
     }
 
-    pub fn generate_sections_definitions(&mut self) {
+    fn generate_sections_definitions(&mut self) {
         for section in &self.sections {
             let section_range = section.range();
 
@@ -266,15 +287,13 @@ impl Program {
                 self.read_write_sections.ranges.push(section_range);
             } else if section.is_code {
                 self.code_sections.ranges.push(section_range);
-                self.read_only_sections.ranges.push(section_range);
             } else {
                 self.read_only_sections.ranges.push(section_range);
             }
         }
     }
 
-    pub fn sanity_check(&self) -> Result<(), EmulatorError> {
-        //check overlapping sections
+    pub fn check_overlaping_sections(&self) -> Result<(), EmulatorError> {
         for i in 0..self.sections.len() {
             for j in i + 1..self.sections.len() {
                 let section1 = &self.sections[i];
@@ -289,6 +308,120 @@ impl Program {
                 }
             }
         }
+
+        Ok(())
+    }
+
+    pub fn check_overflowing_sections(&self) -> Result<(), EmulatorError> {
+        let overflowing_section = self
+            .sections
+            .iter()
+            .find(|section| section.start > section.start.wrapping_add(section.size - 1));
+
+        if let Some(overflowing_section) = overflowing_section {
+            return Err(EmulatorError::CantLoadPorgram(format!(
+                "Cannot load program: section '{}' overflows, start: {}, size: {}",
+                overflowing_section.name, overflowing_section.start, overflowing_section.size,
+            )));
+        };
+
+        Ok(())
+    }
+
+    pub fn check_sections_next_to_stack(
+        &self,
+        sp_base_address: Option<u32>,
+    ) -> Result<(), EmulatorError> {
+        if sp_base_address.is_none() {
+            return Ok(());
+        }
+
+        let stack_section = self.find_section(sp_base_address.unwrap());
+
+        if stack_section.is_err() {
+            return Ok(());
+        }
+
+        let stack_section = stack_section.unwrap();
+
+        let section_next_to_stack = self.sections.iter().find(|&other_section| {
+            let stack_section_end = stack_section.start + stack_section.size;
+            let other_section_end = other_section.start + other_section.size;
+
+            (other_section != stack_section)
+                && (stack_section_end == other_section.start
+                    || other_section_end == stack_section.start)
+        });
+
+        if let Some(section_next_to_stack) = section_next_to_stack {
+            return Err(EmulatorError::CantLoadPorgram(format!(
+                "Cannot load program: section '{}' is next to the stack section and a stack overflow could corrupt its content",
+                section_next_to_stack.name
+            )));
+        }
+
+        Ok(())
+    }
+
+    pub fn check_low_sections(&self) -> Result<(), EmulatorError> {
+        let low_section = self.sections.iter().find(|section| section.start < 0x1000);
+        if let Some(low_section) = low_section {
+            return Err(EmulatorError::CantLoadPorgram(format!(
+                "Cannot load program: section '{}' starts at a low memory address (0x{:X}), which is below the allowed threshold of 0x1000.",
+                low_section.name,
+                low_section.start,
+            )));
+        }
+
+        Ok(())
+    }
+
+    pub fn check_sections_with_invalid_opcode(&self) -> Result<(), EmulatorError> {
+        let section_with_invalid_opcode = self.sections.iter().find(|section| {
+            section.is_code
+                && section
+                    .data
+                    .iter()
+                    .find(|opcode| riscv_decode::decode(u32::from_be(**opcode)).is_err())
+                    .is_some()
+        });
+
+        if let Some(section_with_invalid_opcode) = section_with_invalid_opcode {
+            return Err(EmulatorError::CantLoadPorgram(format!(
+                "Cannot load program: code section '{}' has invalid opcode '{}'",
+                section_with_invalid_opcode.name,
+                section_with_invalid_opcode
+                    .data
+                    .iter()
+                    .find(|opcode| riscv_decode::decode(u32::from_be(**opcode)).is_err())
+                    .map(|opcode| u32::from_be(*opcode))
+                    .unwrap()
+            )));
+        }
+
+        Ok(())
+    }
+
+    pub fn check_too_many_sections(&self) -> Result<(), EmulatorError> {
+        let sections_count = self.sections.len();
+        if sections_count > MAX_SECTIONS {
+            Err(EmulatorError::CantLoadPorgram(format!(
+                "Too many sections: {:?}",
+                sections_count
+            )))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn sanity_check(&self, sp_base_address: Option<u32>) -> Result<(), EmulatorError> {
+        self.check_overflowing_sections()?;
+        self.check_overlaping_sections()?;
+        self.check_low_sections()?;
+        self.check_sections_next_to_stack(sp_base_address)?;
+        self.check_sections_with_invalid_opcode()?;
+        self.check_too_many_sections()?;
+
         Ok(())
     }
 
@@ -300,14 +433,13 @@ impl Program {
         self.sections.insert(pos, section);
     }
 
-    fn find_section_idx(&self, address: u32) -> Result<usize, ExecutionResult> {
+    pub fn find_section_idx(&self, address: u32) -> Result<usize, ExecutionResult> {
         // Binary search to find the appropriate section
-        Ok(self
-            .sections
+        self.sections
             .binary_search_by(|section| {
                 if address < section.start {
                     Ordering::Greater
-                } else if address >= section.start + section.size {
+                } else if address > section.start + section.size - 1 {
                     Ordering::Less
                 } else {
                     Ordering::Equal
@@ -318,7 +450,7 @@ impl Program {
                     "Address 0x{:08x} not found in any section",
                     address
                 ))
-            })?)
+            })
     }
 
     // Find the section that contains the given address
@@ -351,7 +483,11 @@ impl Program {
         Ok(section)
     }
 
-    pub fn find_section_by_name(&mut self, name: &str) -> Option<&mut Section> {
+    pub fn find_section_by_name(&self, name: &str) -> Option<&Section> {
+        self.sections.iter().find(|section| section.name == name)
+    }
+
+    pub fn find_section_by_name_mut(&mut self, name: &str) -> Option<&mut Section> {
         self.sections
             .iter_mut()
             .find(|section| section.name == name)
@@ -363,18 +499,30 @@ impl Program {
         }
         let section = self.find_section(address)?;
         if !section.is_code {
-            return Err(ExecutionResult::ReadFromNonCodeSection);
+            return Err(ExecutionResult::ExecuteFromNonCodeSection);
         }
         Ok(u32::from_be(
             section.data[(address - section.start) as usize / 4],
         ))
     }
 
-    pub fn read_mem(&self, address: u32) -> Result<u32, ExecutionResult> {
+    pub fn read_mem(
+        &self,
+        address: u32,
+        fail_execute_only_protection: bool,
+    ) -> Result<u32, ExecutionResult> {
         if cfg!(target_endian = "big") {
             panic!("Big endian machine not supported");
         }
+        if address % 4 != 0 {
+            return Err(ExecutionResult::UnalignedRead(address));
+        }
         let section = self.find_section(address)?;
+
+        if section.is_code && !fail_execute_only_protection {
+            return Err(ExecutionResult::ReadFromExecuteOnlySection);
+        };
+
         Ok(u32::from_be(
             section.data[(address - section.start) as usize / 4],
         ))
@@ -386,6 +534,10 @@ impl Program {
     }
 
     pub fn write_mem(&mut self, address: u32, value: u32) -> Result<(), ExecutionResult> {
+        if address % 4 != 0 {
+            return Err(ExecutionResult::UnalignedWrite(address));
+        }
+
         let step = self.step;
         let section = self.find_section_mut(address)?;
         if !section.is_write || section.is_code {
@@ -467,88 +619,79 @@ impl Program {
         }
     }
 
-    pub fn get_chunks(&self, chunk_size: u32) -> Vec<(u32, Vec<u32>)> {
-        let mut chunks = Vec::new();
-
-        for section in &self.sections {
-            if !section.is_code {
-                continue;
-            }
-
-            for (index, chunk) in section.data.chunks(chunk_size as usize).enumerate() {
-                chunks.push((
-                    section.start + index as u32 * chunk_size,
-                    chunk
-                        .to_vec()
-                        .iter()
-                        .map(|opcode| u32::from_be(*opcode))
-                        .collect(),
-                ));
-            }
-        }
-
-        chunks
+    pub fn get_chunks(&self, chunk_size: u32, filter: impl Fn(&&Section) -> bool) -> Vec<Chunk> {
+        self.sections
+            .iter()
+            .filter(filter)
+            .flat_map(|section| {
+                section
+                    .data
+                    .chunks(chunk_size as usize)
+                    .enumerate()
+                    .map(|(index, chunk)| {
+                        let offset = section.start + index as u32 * chunk_size;
+                        let data = chunk.iter().map(|opcode| u32::from_be(*opcode)).collect();
+                        Chunk {
+                            base_addr: offset,
+                            data,
+                        }
+                    })
+            })
+            .collect()
     }
 
-    // Avoids calling get_chunks().len() to prevent unnecessary Vec allocations and cloning
-    pub fn get_chunk_count(&self, chunk_size: u32) -> u32 {
-        let mut chunk_count = 0;
-
-        for section in &self.sections {
-            if !section.is_code {
-                continue;
-            }
-
-            let section_instrs = section.size / 4;
-            // only counts full chunks
-            let mut section_chunks = section_instrs / chunk_size;
-
-            // if section_instrs isn't a multiple of chunk_size that means that there is a non-full chunk we have to count
-            if section_instrs % chunk_size != 0 {
-                section_chunks += 1;
-            }
-
-            chunk_count += section_chunks;
-        }
-
-        chunk_count
+    pub fn get_initialized_chunks(&self, chunk_size: u32) -> Vec<Chunk> {
+        self.get_chunks(chunk_size, |section| {
+            section.initialized && !section.is_code
+        })
     }
 
-    pub fn get_chunk_info(&self, address: u32, chunk_size: u32) -> (u32, u32, usize) {
-        let mut chunk_index = 0;
+    pub fn get_code_chunks(&self, chunk_size: u32) -> Vec<Chunk> {
+        self.get_chunks(chunk_size, |section| section.is_code)
+    }
 
-        for section in &self.sections {
-            if !section.is_code {
-                continue;
-            }
+    pub fn get_uninitialized_ranges(
+        &self,
+        program_definition: &ProgramDefinition,
+    ) -> SectionDefinition {
+        let mut uninitialized: Vec<(u32, u32)> = self
+            .sections
+            .iter()
+            .filter(|section| {
+                // we do inputs separately
+                !section.initialized && section.name != program_definition.input_section_name
+            })
+            .map(|section| section.range())
+            .collect();
 
-            if section.contains(address) {
-                let section_start = section.start;
-                let offset = address - section_start;
-                let instr_index = offset / 4;
+        let input_section = self
+            .find_section_by_name(&program_definition.input_section_name)
+            .expect("Input section not found");
 
-                chunk_index += instr_index / chunk_size;
+        // input section is usually bigger than the actual input of the program, so the remaining space should be uninitialized
+        let input_size = program_definition
+            .inputs
+            .iter()
+            .fold(0, |acc, input| acc + input.size);
 
-                let chunk_start_instr = instr_index - (instr_index % chunk_size);
-                let chunk_base_addr = section_start + chunk_start_instr * 4;
-                let chunk_start_index = chunk_start_instr as usize;
+        let (start, end) = input_section.range();
+        let uninit_start = start + input_size as u32;
 
-                return (chunk_index, chunk_base_addr, chunk_start_index);
-            }
+        assert!(
+            uninit_start <= end,
+            "Input size ({}) exceeds input section size ({}..{})",
+            input_size,
+            start,
+            end
+        );
 
-            let section_instrs = section.size / 4;
-            // only counts full chunks
-            let mut section_chunks = section_instrs / chunk_size;
-
-            // if section_instrs isn't a multiple of chunk_size that means that there is a non-full chunk we have to count
-            if section_instrs % chunk_size != 0 {
-                section_chunks += 1;
-            }
-
-            chunk_index += section_chunks;
+        if uninit_start < end {
+            uninitialized.push((uninit_start, end));
         }
 
-        unreachable!("Non-executable address: 0x{:08X}", address);
+        SectionDefinition {
+            ranges: uninitialized,
+        }
     }
 }
 
@@ -632,6 +775,8 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Result<Program, EmulatorErr
         }
         let start = start.unwrap();
         let size = size.unwrap();
+        assert!(start % 4 == 0, "Start address must be a multiple of 4");
+        let padded_size = (size + 3) & !0b11;
 
         let initialized = phdr.sh_type == elf::abi::SHT_PROGBITS;
         if size == 0 {
@@ -644,8 +789,7 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Result<Program, EmulatorErr
         let data = if initialized {
             vec_u8_to_vec_u32(&slice[phdr.sh_offset as usize..(phdr.sh_offset + size as u64) as usize], false)
         } else {
-            assert!(size % 4 == 0, "Number of bytes must be a multiple of 4");
-            let num_u32 = size / 4;
+            let num_u32 = padded_size / 4;
             vec![0; num_u32 as usize]
         };
 
@@ -657,12 +801,12 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Result<Program, EmulatorErr
         let is_write = phdr.sh_flags as u32 & SHF_WRITE == SHF_WRITE;
         assert!(!(is_code && is_write), "We don't allow writable code sections");
 
-        program.add_section(Section::new_with_data(&name, data, start, size, is_code, is_write, initialized));
+        program.add_section(Section::new_with_data(&name, data, start, padded_size, is_code, is_write, initialized));
     });
 
+    program.sanity_check(Some(STACK_BASE_ADDRESS))?;
     program.merge_sections();
     program.generate_sections_definitions();
-    program.sanity_check()?;
 
     Ok(program)
 }
@@ -695,7 +839,7 @@ pub fn generate_rom_commitment(program: &Program) -> Result<RomCommitment, Emula
         if section.is_code {
             for i in 0..section.size / 4 {
                 let position = section.start + i * 4;
-                let data = program.read_mem(position)?;
+                let data = program.read_mem(position, false)?;
 
                 let instruction = riscv_decode::decode(data).expect(&format!(
                     "code section with undecodeable instruction: 0x{:08x} at position: 0x{:08x}",
@@ -722,7 +866,7 @@ pub fn generate_rom_commitment(program: &Program) -> Result<RomCommitment, Emula
         if !section.is_code && section.initialized {
             for i in 0..section.size / 4 {
                 let position = section.start + i * 4;
-                let data = program.read_mem(position)?;
+                let data = program.read_mem(position, false)?;
                 info!("Address: 0x{:08x} value: 0x{:08x}", position, data);
                 rom_commitment.constants.push((position, data));
             }
@@ -754,7 +898,65 @@ mod tests {
         let mut program = Program::new(0, 0, 0);
         program.add_section(Section::new("test_1", 0, 10, false, true, false));
         program.add_section(Section::new("test_2", 9, 5, false, true, false));
-        assert!(program.sanity_check().is_err());
+        assert!(program.check_overlaping_sections().is_err());
+    }
+
+    #[test]
+    fn test_overflowing_section() {
+        let mut program = Program::new(0, 0, 0);
+        program.add_section(Section::new("test_1", 0xffff_fff2, 0xf, false, true, false));
+        assert!(program.check_overflowing_sections().is_err());
+
+        let mut program = Program::new(0, 0, 0);
+        program.add_section(Section::new("test_2", 0xffff_ffff, 0x1, false, true, false));
+        assert!(program.check_overflowing_sections().is_ok());
+    }
+
+    #[test]
+    fn test_section_next_to_stack() {
+        let mut program = Program::new(0, 0, 0);
+        program.add_section(Section::new("test_1", 0, 10, false, true, false));
+        program.add_section(Section::new("stack", 10, 5, false, true, false));
+        assert!(program.check_sections_next_to_stack(Some(14)).is_err());
+    }
+
+    #[test]
+    fn test_low_section() {
+        let mut program = Program::new(0, 0, 0);
+        program.add_section(Section::new("test_1", 0, 10, false, true, false));
+        assert!(program.check_low_sections().is_err());
+    }
+
+    #[test]
+    fn test_invalid_opcode() {
+        let mut program = Program::new(0, 0, 0);
+        program.add_section(Section::new_with_data(
+            "code",
+            vec![30],
+            0,
+            4,
+            true,
+            false,
+            true,
+        ));
+        assert!(program.check_sections_with_invalid_opcode().is_err());
+    }
+
+    #[test]
+    fn test_too_many_sections() {
+        let mut program = Program::new(0, 0, 0);
+        for _ in 0..=MAX_SECTIONS {
+            program.add_section(Section::new_with_data(
+                "code",
+                vec![30],
+                0,
+                4,
+                true,
+                false,
+                true,
+            ));
+        }
+        assert!(program.check_too_many_sections().is_err());
     }
 
     #[test]
@@ -827,60 +1029,97 @@ mod tests {
         // there are no new sections
         assert_eq!(program.sections.len(), 4);
     }
+}
 
-    #[test]
-    fn test_chunk_info() {
-        let mut program = Program::new(0, 0, 0);
+#[test]
+#[should_panic(expected = "Cannot set register zero")]
+fn test_set_register_zero_panics() {
+    let mut registers = Registers::new(0, 0);
+    registers.set(REGISTER_ZERO as u32, 123, 1);
+}
 
-        // first section has 3 chunks, two full chunks of 500 instructions and half a chunk of 250 instructions
-        program.add_section(Section::new(
-            "code_1",
-            1000,
-            500 * 4 * 2 + 250 * 4,
-            true,
-            false,
-            false,
-        ));
-        program.add_section(Section::new("code_2", 10000, 500 * 4, true, false, false));
+#[test]
+fn test_read_mem_unaligned() {
+    let mut program = Program::new(0, 0, 0);
+    program.add_section(Section::new("data", 0, 100, false, false, false));
+    assert!(program.read_mem(1, false).is_err());
+    assert!(program.read_mem(2, false).is_err());
+    assert!(program.read_mem(3, false).is_err());
+}
 
-        // start of first chunk
-        let (chunk_index, chunk_base_addr, chunk_start_index) = program.get_chunk_info(1000, 500);
-        assert_eq!(chunk_index, 0);
-        assert_eq!(chunk_base_addr, 1000);
-        assert_eq!(chunk_start_index, 0);
+#[test]
+fn test_write_mem_unaligned() {
+    let mut program = Program::new(0, 0, 0);
+    program.add_section(Section::new("data", 0, 100, false, true, false));
+    assert!(program.write_mem(1, 123).is_err());
+    assert!(program.write_mem(2, 123).is_err());
+    assert!(program.write_mem(3, 123).is_err());
+}
 
-        // middle of first chunk
-        let (chunk_index, chunk_base_addr, chunk_start_index) =
-            program.get_chunk_info(1000 + 250 * 4, 500);
-        assert_eq!(chunk_index, 0);
-        assert_eq!(chunk_base_addr, 1000);
-        assert_eq!(chunk_start_index, 0);
+#[test]
+fn test_is_valid_mem() {
+    let mut program = Program::new(0, 0, 0);
+    program.add_section(Section::new("registers", 0, 128, false, true, true));
+    program.add_section(Section::new("code", 1000, 100, true, false, false));
+    program.add_section(Section::new("data", 2000, 100, false, true, false));
+    program.add_section(Section::new("rodata", 3000, 100, false, false, false));
+    program.generate_sections_definitions();
 
-        // start of second chunk
-        let (chunk_index, chunk_base_addr, chunk_start_index) =
-            program.get_chunk_info(1000 + 500 * 4, 500);
-        assert_eq!(chunk_index, 1);
-        assert_eq!(chunk_base_addr, 1000 + 500 * 4);
-        assert_eq!(chunk_start_index, 500);
+    // Test register access
+    assert!(program.is_valid_mem(MemoryAccessType::Register, 0, false));
+    assert!(!program.is_valid_mem(MemoryAccessType::Register, 1000, false));
 
-        // middle of second chunk
-        let (chunk_index, chunk_base_addr, chunk_start_index) =
-            program.get_chunk_info(1000 + 500 * 4 + 250 * 4, 500);
-        assert_eq!(chunk_index, 1);
-        assert_eq!(chunk_base_addr, 1000 + 500 * 4);
-        assert_eq!(chunk_start_index, 500);
+    // Test memory access
+    assert!(program.is_valid_mem(MemoryAccessType::Memory, 2000, false));
 
-        // start of first chunk of the second section
-        let (chunk_index, chunk_base_addr, chunk_start_index) = program.get_chunk_info(10000, 500);
-        assert_eq!(chunk_index, 3);
-        assert_eq!(chunk_base_addr, 10000);
-        assert_eq!(chunk_start_index, 0);
+    // Test read-only access
+    assert!(program.is_valid_mem(MemoryAccessType::Memory, 3000, true));
 
-        // middle of first chunk of the second section
-        let (chunk_index, chunk_base_addr, chunk_start_index) =
-            program.get_chunk_info(10000 + 250 * 4, 500);
-        assert_eq!(chunk_index, 3);
-        assert_eq!(chunk_base_addr, 10000);
-        assert_eq!(chunk_start_index, 0);
-    }
+    // Test can't read from code
+    assert!(!program.is_valid_mem(MemoryAccessType::Memory, 1000, false));
+    assert!(!program.is_valid_mem(MemoryAccessType::Memory, 1000, true));
+}
+
+#[test]
+fn test_vec_u8_to_vec_u32() {
+    let input = vec![0x01, 0x02, 0x03, 0x04, 0x05];
+
+    // Test little endian with padding
+    let result = vec_u8_to_vec_u32(&input, true);
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0], 0x04030201);
+    assert_eq!(result[1], 0x00000005);
+
+    // Test big endian with padding
+    let result = vec_u8_to_vec_u32(&input, false);
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0], 0x01020304);
+    assert_eq!(result[1], 0x05000000);
+}
+
+#[test]
+fn test_serialize_deserialize() {
+    let temp_dir = std::env::temp_dir();
+    let path = temp_dir.to_str().unwrap();
+
+    let mut original = Program::new(0x1000, 0x2000, 0x3000);
+    original.add_section(Section::new("code", 0x4000, 100, true, false, false));
+    original.add_section(Section::new("data", 0x5000, 100, false, true, false));
+
+    // Serialize
+    original.serialize_to_file(path);
+
+    // Deserialize
+    let deserialized = Program::deserialize_from_file(path, 0).unwrap();
+
+    // Compare
+    assert_eq!(original.pc.get_address(), deserialized.pc.get_address());
+    assert_eq!(original.sections.len(), deserialized.sections.len());
+    assert_eq!(
+        original.registers.get_base_address(),
+        deserialized.registers.get_base_address()
+    );
+
+    // Clean up
+    std::fs::remove_file(format!("{}/checkpoint.0.json", path)).unwrap();
 }

@@ -663,4 +663,110 @@ mod tests {
 
         assert!(stack.run().success);
     }
+
+    fn build_j_type_opcode(rd: u32, imm: i32) -> u32 {
+        let imm_val = imm as u32;
+        let opcode = 0x6f;
+
+        let imm_20 = (imm_val >> 20) & 1;
+        let imm_10_1 = (imm_val >> 1) & 0x3ff;
+        let imm_11 = (imm_val >> 11) & 1;
+        let imm_19_12 = (imm_val >> 12) & 0xff;
+
+        let instruction = (imm_20 << 31)
+            | (imm_10_1 << 21)
+            | (imm_11 << 20)
+            | (imm_19_12 << 12)
+            | (rd << 7)
+            | opcode;
+        instruction
+    }
+
+    // A generic test runner that handles the stack setup and assertions.
+    fn run_j_type_test(opcode: u32, expected_rd: u32, expected_imm: i32) {
+        use bitcoin_script_stack::stack::StackTracker;
+        let mut stack = StackTracker::new();
+        let tables = StackTables::new(&mut stack, false, false, 5, 4, 0);
+        let opcode_var = stack.number_u32(opcode);
+        stack.rename(opcode_var, "opcode_var");
+
+        let (rd, imm) = decode_j_type(&mut stack, &tables, opcode_var);
+
+        // Assert that the decoded register 'rd' is correct.
+        // The script calculates the register's memory offset, which is index * 4.
+        let expected_rd_addr = stack.byte((expected_rd * 4) as u8);
+        stack.equals(rd, true, expected_rd_addr, true);
+
+        // Assert that the decoded immediate 'imm' is correct.
+        // The value should be correctly sign-extended from its 21 bits.
+        let expected_imm_val = stack.number_u32(expected_imm as u32);
+        stack.equals(imm, true, expected_imm_val, true);
+
+        tables.drop(&mut stack);
+        stack.op_true();
+        assert!(
+            stack.run().success,
+            "Test failed for opcode: {:#010x}",
+            opcode
+        );
+    }
+
+    // The main test function that executes all the proposed test vectors.
+    #[test]
+    pub fn test_j_type_vectors() {
+        struct TestCase {
+            name: &'static str,
+            rd: u32,
+            imm: i32,
+        }
+
+        let tests = vec![
+            TestCase {
+                name: "Zero Immediate, rd=x0",
+                rd: 0,
+                imm: 0,
+            },
+            TestCase {
+                name: "Positive Immediate, rd=x1",
+                rd: 1,
+                imm: 8,
+            },
+            TestCase {
+                name: "Negative Immediate, rd=x2",
+                rd: 2,
+                imm: -8,
+            },
+            TestCase {
+                name: "Max Negative Immediate, rd=x4",
+                rd: 4,
+                imm: -(1 << 20),
+            }, // -1 MiB
+            TestCase {
+                name: "rd = x31",
+                rd: 31,
+                imm: 100,
+            },
+            TestCase {
+                name: "Walking-1 Bit: imm[1]",
+                rd: 5,
+                imm: 1 << 1,
+            },
+            TestCase {
+                name: "Walking-1 Bit: imm[11]",
+                rd: 6,
+                imm: 1 << 11,
+            },
+            TestCase {
+                name: "Walking-1 Bit: imm[12]",
+                rd: 7,
+                imm: 1 << 12,
+            },
+        ];
+
+        for test in tests {
+            println!("Running J-Type Test: {}", test.name);
+            let opcode = build_j_type_opcode(test.rd, test.imm);
+            run_j_type_test(opcode, test.rd, test.imm);
+        }
+    }
 }

@@ -25,3 +25,6 @@ tests/resources/
 # checkpoints
 *.json
 .DS_Store
+
+# Test error log
+_coin/reference_tests/error.log

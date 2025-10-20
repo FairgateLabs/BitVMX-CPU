@@ -54,7 +54,7 @@ fn test_jalr() {
 
     let _ = op_jalr(&x, &mut program);
 
-    assert_eq!(program.pc.get_address(), imm + rs1_value);
+    assert_eq!(program.pc.get_address(), (imm + rs1_value) & !1);
     assert_eq!(program.registers.get(rd), 4);
 }
 
@@ -152,7 +152,7 @@ fn test_load_byte(
     let start_address = program.find_section_by_name("test_data").unwrap().start;
 
     program
-        .write_mem(start_address + imm_value, set_mem)
+        .write_mem(start_address + imm_value - imm_value % 4, set_mem)
         .unwrap();
     program.registers.set(idx_rs1, start_address, 0);
 
@@ -164,7 +164,7 @@ fn test_load_byte(
         _ => panic!("Unreachable"),
     };
 
-    let _ = op_load(&instruction, &x, &mut program);
+    let _ = op_load(&instruction, &x, &mut program, false);
 
     assert_eq!(program.registers.get(rd as u32), expected);
 }
@@ -247,11 +247,11 @@ fn test_load_half_word(
     let start_address = program.find_section_by_name("test_data").unwrap().start;
 
     program
-        .write_mem(start_address + imm_value, set_mem_aux_1)
+        .write_mem(start_address + imm_value - imm_value % 4, set_mem_aux_1)
         .unwrap();
     program
         .write_mem(
-            start_address + imm_value + mem_aux_2_byte_offset,
+            start_address + imm_value - imm_value % 4 + mem_aux_2_byte_offset,
             set_mem_aux_2,
         )
         .unwrap();
@@ -266,7 +266,7 @@ fn test_load_half_word(
     };
 
     for _ in 0..micros {
-        let _ = op_load(&instruction, &x, &mut program);
+        let _ = op_load(&instruction, &x, &mut program, false);
     }
 
     assert_eq!(program.registers.get(rd), expected);
@@ -340,11 +340,11 @@ fn test_load_word(
     let start_address = program.find_section_by_name("test_data").unwrap().start;
 
     program
-        .write_mem(start_address + imm_value, set_mem_aux_1)
+        .write_mem(start_address + imm_value - imm_value % 4, set_mem_aux_1)
         .unwrap();
     program
         .write_mem(
-            start_address + imm_value + mem_aux_2_byte_offset,
+            start_address + imm_value - imm_value % 4 + mem_aux_2_byte_offset,
             set_mem_aux_2,
         )
         .unwrap();
@@ -358,8 +358,181 @@ fn test_load_word(
     };
 
     for _ in 0..micros {
-        let _ = op_load(&instruction, &x, &mut program);
+        let _ = op_load(&instruction, &x, &mut program, false);
     }
 
     assert_eq!(program.registers.get(rd), expected);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_slti_equal() {
+        let rs1_idx = 2;
+        let rs1_value = 0x1;
+        let rd = 1;
+        let imm = 0x1;
+
+        let mut program = get_new_program();
+
+        program.registers.set(rs1_idx, rs1_value, 0);
+        let x = create_itype_from(imm, rs1_idx as u8, rd);
+        let instruction = Instruction::Slti(x);
+
+        let _ = op_sl_imm(&instruction, &x, &mut program);
+        assert_eq!(program.registers.get(rd as u32), 0x00000000);
+    }
+
+    #[test]
+    fn test_sltiu_max() {
+        let rs1_idx = 2;
+        let rs1_value = 0xFFFFFFFF;
+        let rd = 1;
+        let imm = 0xFFFFFFFF;
+
+        let mut program = get_new_program();
+
+        program.registers.set(rs1_idx, rs1_value, 0);
+        let x = create_itype_from(imm, rs1_idx as u8, rd);
+        let instruction = Instruction::Sltiu(x);
+
+        let _ = op_sl_imm(&instruction, &x, &mut program);
+        assert_eq!(program.registers.get(rd as u32), 0x00000000);
+    }
+
+    #[rstest]
+    fn test_jalr_negative_imm() {
+        let imm = -63;
+        let rd = 31;
+        let rs1 = 15;
+        let rs1_value = 10;
+
+        let mut program = get_new_program();
+        program.registers.set(rs1, rs1_value, 0);
+
+        let x = create_itype_from(imm as u32, rs1 as u8, rd as u8);
+
+        let _ = op_jalr(&x, &mut program);
+
+        assert_eq!(
+            program.pc.get_address(),
+            (imm as i32 + rs1_value as i32) as u32 & !1
+        );
+        assert_eq!(program.registers.get(rd), 4);
+    }
+
+    #[test]
+    fn test_addi_overflow() {
+        let mut program = get_new_program();
+
+        program.registers.set(3, 0x7FFFFFFF, 0);
+
+        let x = create_itype_from(1, 3, 1);
+        let instruction = Instruction::Addi(x);
+
+        let _ = op_arithmetic_imm(&instruction, &x, &mut program);
+        assert_eq!(program.registers.get(1), 0x80000000);
+    }
+
+    #[test]
+    fn test_xori_all_bits() {
+        let mut program = get_new_program();
+
+        program.registers.set(3, 0xFFFFFFFF, 0);
+
+        let x = create_itype_from(0xFFFFFFFF, 3, 1);
+        let instruction = Instruction::Xori(x);
+
+        let _ = op_arithmetic_imm(&instruction, &x, &mut program);
+        assert_eq!(program.registers.get(1), 0x00000000);
+    }
+
+    #[rstest]
+    #[case(rnd_range(), 0x17, rnd_range(), "lb", 0xFD563412, 0xFFFFFFFD)] // unaligned immediate
+    fn test_load_byte_unaligned(
+        #[case] rd: u32,
+        #[case] imm_value: u32,
+        #[case] idx_rs1: u32,
+        #[case] instruction: &str,
+        #[case] set_mem: u32,
+        #[case] expected: u32,
+    ) {
+        let mut program = get_new_program();
+        program.add_section(get_new_section());
+
+        let start_address = program.find_section_by_name("test_data").unwrap().start;
+
+        program
+            .write_mem(start_address + imm_value - imm_value % 4, set_mem)
+            .unwrap();
+        program.registers.set(idx_rs1, start_address, 0);
+
+        let x = create_itype_from(imm_value, idx_rs1 as u8, rd as u8);
+
+        let instruction = match instruction {
+            "lb" => Instruction::Lb(x),
+            "lbu" => Instruction::Lbu(x),
+            _ => panic!("Unreachable"),
+        };
+
+        let _ = op_load(&instruction, &x, &mut program, false);
+
+        assert_eq!(program.registers.get(rd as u32), expected);
+    }
+
+    #[rstest]
+    #[case(
+        rnd_range(),
+        0x0,
+        rnd_range(),
+        "lw",
+        0xFFFFFFFF,
+        0x12345678,
+        0xFFFFFFFF,
+        1
+    )]
+    fn test_load_word_boundary(
+        #[case] rd: u32,
+        #[case] imm_value: u32,
+        #[case] idx_rs1: u32,
+        #[case] instruction: &str,
+        #[case] set_mem_aux_1: u32,
+        #[case] set_mem_aux_2: u32,
+        #[case] expected: u32,
+        #[case] micros: u32,
+    ) {
+        let mem_aux_2_byte_offset = 4;
+        let mut program = get_new_program();
+        program.add_section(get_new_section());
+
+        let start_address = program.find_section_by_name("test_data").unwrap().start;
+        let boundary_address =
+            start_address + program.find_section_by_name("test_data").unwrap().size - 4;
+
+        program
+            .write_mem(boundary_address + imm_value, set_mem_aux_1)
+            .unwrap();
+        program
+            .write_mem(
+                boundary_address + imm_value + mem_aux_2_byte_offset,
+                set_mem_aux_2,
+            )
+            .expect_err("This write should fail, it lands outside the section");
+        program.registers.set(idx_rs1, boundary_address, 0);
+
+        let x = create_itype_from(imm_value, idx_rs1 as u8, rd as u8);
+
+        let instruction = match instruction {
+            "lw" => Instruction::Lw(x),
+            _ => panic!("Unreachable"),
+        };
+
+        for _ in 0..micros {
+            let _ = op_load(&instruction, &x, &mut program, false);
+        }
+
+        assert_eq!(program.registers.get(rd), expected);
+    }
 }
