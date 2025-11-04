@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use strum_macros::{EnumIter, EnumString};
 use thiserror::Error;
 
 use crate::{
@@ -70,10 +71,12 @@ pub enum ChallengeType {
         code_sections: Option<SectionDefinition>,
     },
     FutureRead {
-        step: u64,
+        cosigned_decisions_bits: Vec<u32>,
         prover_read_step_1: u64,
         prover_read_step_2: u64,
         read_selector: u32,
+        nary: Option<u8>,
+        nary_last_round: Option<u8>,
     },
     ReadValueNArySearch {
         bits: u32,
@@ -85,8 +88,10 @@ pub enum ChallengeType {
         prover_hash: String,
         trace: TraceStep,
         prover_next_hash: String,
-        write_step: u64,
-        conflict_step: u64,
+        cosigned_read_bits: Vec<u32>,
+        cosigned_conflict_bits: Vec<u32>,
+        nary: Option<u8>,
+        nary_last_round: Option<u8>,
     },
     CorrectHash {
         prover_step_hash: String,
@@ -94,7 +99,24 @@ pub enum ChallengeType {
         trace: TraceStep,
         prover_next_hash: String,
     },
+    EquivocationHash {
+        prover_true_hash: String,
+        prover_wrong_hash: String,
+        cosigned_decisions_bits: Vec<u32>,
+        kind: EquivocationKind,
+        round: u8,
+        index: u8,
+        nary: Option<u8>,
+        nary_last_round: Option<u8>,
+    },
     No,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, EnumString, EnumIter, Default)]
+pub enum EquivocationKind {
+    #[default]
+    StepHash,
+    NextHash,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -119,6 +141,14 @@ pub enum EmulatorResultType {
     },
     ProverFinalTraceResult {
         final_trace: TraceRWStep,
+        resigned_step_hash: String,
+        resigned_next_hash: String,
+        cosigned_decision_bits: Vec<u32>,
+    },
+    ProverGetCosignedBitsAndHashesResult {
+        resigned_step_hash: String,
+        resigned_next_hash: String,
+        cosigned_decision_bits: Vec<u32>,
     },
     VerifierChooseChallengeResult {
         challenge: ChallengeType,
@@ -188,11 +218,42 @@ impl EmulatorResultType {
         }
     }
 
-    pub fn as_final_trace(&self) -> Result<TraceRWStep, EmulatorResultError> {
+    pub fn as_final_trace(
+        &self,
+    ) -> Result<(TraceRWStep, String, String, Vec<u32>), EmulatorResultError> {
         match self {
-            EmulatorResultType::ProverFinalTraceResult { final_trace } => Ok(final_trace.clone()),
+            EmulatorResultType::ProverFinalTraceResult {
+                final_trace,
+                resigned_step_hash,
+                resigned_next_hash,
+                cosigned_decision_bits,
+            } => Ok((
+                final_trace.clone(),
+                resigned_step_hash.to_string(),
+                resigned_next_hash.to_string(),
+                cosigned_decision_bits.clone(),
+            )),
             _ => Err(EmulatorResultError::GenericError(
                 "Expected ProverFinalTraceResult".to_string(),
+            )),
+        }
+    }
+
+    pub fn as_cosigned_bits_and_hashes(
+        &self,
+    ) -> Result<(String, String, Vec<u32>), EmulatorResultError> {
+        match self {
+            EmulatorResultType::ProverGetCosignedBitsAndHashesResult {
+                resigned_step_hash,
+                resigned_next_hash,
+                cosigned_decision_bits,
+            } => Ok((
+                resigned_step_hash.to_string(),
+                resigned_next_hash.to_string(),
+                cosigned_decision_bits.clone(),
+            )),
+            _ => Err(EmulatorResultError::GenericError(
+                "Expected ProverGetCosignedBitsAndHashesResult".to_string(),
             )),
         }
     }

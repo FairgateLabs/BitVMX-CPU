@@ -217,7 +217,6 @@ fn test_division_aux(dividend: i32, divisor: i32, quotioent: i32, remainder: i32
     assert_eq!(program.registers.get(1), quotioent as u32);
     assert_eq!(witness.unwrap(), remainder as u32);
 
-
     let (_, witness) = op_arithmetic(&rem, &x, &mut program);
     assert_eq!(program.registers.get(1), remainder as u32);
     assert_eq!(witness.unwrap(), quotioent as u32);

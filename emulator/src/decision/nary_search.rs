@@ -145,6 +145,15 @@ impl NArySearchDefinition {
         info!("Mapping: {:?}", mapping);
         mapping
     }
+
+    pub fn step_from_decision_bits(&self, decision_bits: &Vec<u32>) -> u64 {
+        decision_bits
+            .iter()
+            .enumerate()
+            .fold(0, |res, (round, bits)| {
+                (res << self.bits_for_round(round as u8 + 1)) + *bits as u64
+            })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -421,5 +430,21 @@ mod tests {
         test_selection_aux(8, 128, 0, 9, 1, Some(0), 0, 0, 9);
         test_selection_aux(8, 128, 0, 9, 2, Some(1), 1, 2, 3);
         test_selection_aux(8, 128, 2, 3, 3, Some(0), 0, 2, 2);
+    }
+
+    fn test_step_from_all_bits_aux(max_steps: u64, nary: u8, bits: &Vec<u32>, expected_step: u64) {
+        let nary_search = NArySearchDefinition::new(max_steps, nary);
+        assert_eq!(bits.len(), nary_search.total_rounds() as usize);
+        assert_eq!(nary_search.step_from_decision_bits(bits), expected_step);
+    }
+
+    #[test]
+    fn test_step_from_all_bits() {
+        test_step_from_all_bits_aux(128, 8, &vec![0, 0, 0], 0);
+        test_step_from_all_bits_aux(128, 8, &vec![0, 0, 1], 1);
+        test_step_from_all_bits_aux(2000, 8, &vec![4, 2, 4, 0], 1104);
+        test_step_from_all_bits_aux(2000, 8, &vec![4, 2, 4, 1], 1105);
+        test_step_from_all_bits_aux(2000, 8, &vec![4, 2, 4, 2], 1106);
+        test_step_from_all_bits_aux(2000, 8, &vec![4, 2, 4, 3], 1107);
     }
 }

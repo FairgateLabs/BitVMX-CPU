@@ -301,9 +301,12 @@ pub fn execute_step(
         Slli(x) | Srli(x) | Srai(x) => op_shift_imm(&instruction, &x, program),
         Slti(x) | Sltiu(x) => op_sl_imm(&instruction, &x, program),
         Sb(x) | Sh(x) | Sw(x) => op_store(&instruction, &x, program)?,
-        Lbu(x) | Lb(x) | Lh(x) | Lhu(x) | Lw(x) => {
-            op_load(&instruction, &x, program, fail_config.fail_execute_only_protection)?
-        }
+        Lbu(x) | Lb(x) | Lh(x) | Lhu(x) | Lw(x) => op_load(
+            &instruction,
+            &x,
+            program,
+            fail_config.fail_execute_only_protection,
+        )?,
         Auipc(x) | Lui(x) => op_upper(&instruction, &x, program),
         Beq(x) | Bne(x) | Blt(x) | Bge(x) | Bltu(x) | Bgeu(x) => {
             op_conditional(&instruction, &x, program)

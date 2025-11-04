@@ -1,5 +1,5 @@
 use bitvmx_cpu_definitions::{
-    challenge::ChallengeType,
+    challenge::{ChallengeType, EquivocationKind},
     constants::{CHUNK_SIZE, LAST_STEP_INIT},
     memory::Chunk,
     trace::{generate_initial_step_hash, hashvec_to_string, validate_step_hash, TraceRWStep},
@@ -89,7 +89,17 @@ pub fn prover_get_hashes_for_round(
         fail_config,
     )?;
     nary_log.hash_rounds.push(hashes.clone());
-    nary_log.verifier_decisions.push(verifier_decision);
+    // at the first round the verifier hasn't decided anything yet
+    if round > 1 {
+        nary_log.verifier_decisions.push(verifier_decision)
+    };
+    // the hashes of the first round would be reused in the next nary-search
+    if round == 1 && nary_type == NArySearchType::ConflictStep {
+        challenge_log
+            .read_challenge_log
+            .hash_rounds
+            .push(hashes.clone());
+    }
     challenge_log.save(checkpoint_path)?;
     Ok(hashes)
 }
@@ -206,7 +216,7 @@ pub fn prover_final_trace(
     checkpoint_path: &str,
     final_bits: u32,
     fail_config: Option<FailConfiguration>,
-) -> Result<TraceRWStep, EmulatorError> {
+) -> Result<(TraceRWStep, String, String, Vec<u32>), EmulatorError> {
     let mut challenge_log = ProverChallengeLog::load(checkpoint_path)?;
     let input = challenge_log.input.clone();
     let nary_log = challenge_log.get_nary_log(NArySearchType::ConflictStep);
@@ -218,14 +228,65 @@ pub fn prover_final_trace(
     let final_step = nary_def.step_from_base_and_bits(total_rounds, nary_log.base_step, final_bits);
 
     nary_log.base_step = final_step;
-    nary_log.verifier_decisions.push(final_bits);
+    nary_log.verifier_decisions.push(final_bits - 1);
 
     info!("The prover needs to provide the full trace for the selected step {final_step}");
     let final_trace =
-        program_def.get_trace_step(checkpoint_path, input, final_step, fail_config)?;
+        program_def.get_trace_step(checkpoint_path, input, final_step, fail_config.clone())?;
     nary_log.final_trace = final_trace.clone();
     challenge_log.save(checkpoint_path)?;
-    Ok(final_trace)
+
+    let (step_hash, next_hash, cosigned_bits) = prover_get_cosigned_bits_and_hashes(
+        program_definition_file,
+        checkpoint_path,
+        NArySearchType::ConflictStep,
+        None,
+        fail_config,
+    )?;
+
+    Ok((final_trace, step_hash, next_hash, cosigned_bits))
+}
+
+pub fn prover_get_cosigned_bits_and_hashes(
+    program_definition_file: &str,
+    checkpoint_path: &str,
+    nary_type: NArySearchType,
+    final_bits: Option<u32>,
+    fail_config: Option<FailConfiguration>,
+) -> Result<(String, String, Vec<u32>), EmulatorError> {
+    let mut challenge_log = ProverChallengeLog::load(checkpoint_path)?;
+    let nary_log = challenge_log.get_nary_log(nary_type);
+
+    let program_def = ProgramDefinition::from_config(program_definition_file)?;
+    let nary_def = program_def.nary_def();
+
+    let total_rounds = nary_def.total_rounds();
+
+    let final_step = match nary_type {
+        NArySearchType::ConflictStep => nary_log.base_step - 1,
+        _ => {
+            let final_bits = final_bits.unwrap();
+            nary_log.verifier_decisions.push(final_bits);
+            nary_def.step_from_base_and_bits(total_rounds, nary_log.base_step, final_bits)
+        }
+    };
+
+    let (mut step_hash, mut next_hash) = get_hashes(
+        &nary_def.step_mapping(&nary_log.verifier_decisions),
+        &nary_log.hash_rounds,
+        final_step,
+    );
+
+    if let Some(step) = fail_config.unwrap_or_default().fail_resign_hash {
+        if step == final_step {
+            step_hash = next_hash.clone();
+        } else if step == final_step + 1 {
+            next_hash = step_hash.clone();
+        }
+    }
+
+    let cosigned_bits = nary_log.verifier_decisions.clone();
+    Ok((step_hash, next_hash, cosigned_bits))
 }
 
 pub fn get_hashes(
@@ -255,6 +316,7 @@ pub fn get_hashes(
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, EnumString, Display, EnumIter)]
 #[strum(serialize_all = "snake_case")]
 pub enum ForceChallenge {
+    EquivocationHash(EquivocationKind),
     CorrectHash,
     TraceHash,
     TraceHashZero,
@@ -291,6 +353,8 @@ pub fn verifier_choose_challenge(
     program_definition_file: &str,
     checkpoint_path: &str,
     trace: TraceRWStep,
+    resigned_step_hash: &str,
+    resigned_next_hash: &str,
     force: ForceChallenge,
     fail_config: Option<FailConfiguration>,
     return_script_parameters: bool,
@@ -309,11 +373,48 @@ pub fn verifier_choose_challenge(
         false,
     )?;
 
-    let (prover_step_hash, prover_next_hash) = get_hashes(
-        &nary_def.step_mapping(&conflict_step_log.verifier_decisions),
-        &conflict_step_log.prover_hash_rounds,
-        conflict_step_log.step_to_challenge,
-    );
+    let mapping = &nary_def.step_mapping(&conflict_step_log.verifier_decisions);
+    let step = conflict_step_log.step_to_challenge;
+
+    let (prover_step_hash, prover_next_hash) =
+        get_hashes(mapping, &conflict_step_log.prover_hash_rounds, step);
+
+    let nary = return_script_parameters.then_some(nary_def.nary);
+    let nary_last_round = return_script_parameters.then_some(nary_def.nary_last_round);
+
+    let cosigned_decisions_bits = conflict_step_log.verifier_decisions.clone();
+    if (prover_step_hash != resigned_step_hash && force == ForceChallenge::No)
+        || force == ForceChallenge::EquivocationHash(EquivocationKind::StepHash)
+    {
+        let (round, index) = *mapping.get(&step).unwrap();
+
+        return Ok(ChallengeType::EquivocationHash {
+            prover_true_hash: prover_step_hash,
+            prover_wrong_hash: resigned_step_hash.to_string(),
+            cosigned_decisions_bits,
+            kind: EquivocationKind::StepHash,
+            round,
+            index: index + 1,
+            nary,
+            nary_last_round,
+        });
+    }
+
+    if (prover_next_hash != resigned_next_hash && force == ForceChallenge::No)
+        || force == ForceChallenge::EquivocationHash(EquivocationKind::NextHash)
+    {
+        let (round, index) = *mapping.get(&(step + 1)).unwrap();
+        return Ok(ChallengeType::EquivocationHash {
+            prover_true_hash: prover_next_hash,
+            prover_wrong_hash: resigned_next_hash.to_string(),
+            cosigned_decisions_bits,
+            kind: EquivocationKind::NextHash,
+            round,
+            index: index+1,
+            nary,
+            nary_last_round,
+        });
+    }
 
     // check trace_hash
     if (!validate_step_hash(&prover_step_hash, &trace.trace_step, &prover_next_hash)
@@ -337,7 +438,6 @@ pub fn verifier_choose_challenge(
         });
     }
 
-    let step = conflict_step_log.step_to_challenge;
     let mut steps = vec![step, step + 1];
     let mut my_trace_idx = 1;
     if step > 0 {
@@ -455,10 +555,12 @@ pub fn verifier_choose_challenge(
         let read_selector = if is_read_1_future { 1 } else { 2 };
 
         return Ok(ChallengeType::FutureRead {
-            step: step + 1,
+            cosigned_decisions_bits,
             prover_read_step_1,
             prover_read_step_2,
             read_selector,
+            nary,
+            nary_last_round,
         });
     }
 
@@ -578,28 +680,65 @@ pub fn verifier_choose_challenge(
 pub fn verifier_choose_challenge_for_read_challenge(
     program_definition_file: &str,
     checkpoint_path: &str,
+    resigned_step_hash: &str,
+    resigned_next_hash: &str,
     fail_config: Option<FailConfiguration>,
     force: ForceChallenge,
+    return_script_parameters: bool,
 ) -> Result<ChallengeType, EmulatorError> {
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
     let nary_def = program_def.nary_def();
     let verifier_log = VerifierChallengeLog::load(checkpoint_path)?;
 
     let read_challenge_log = verifier_log.read_challenge_log;
-    let conflict_step = verifier_log.conflict_step_log.step_to_challenge;
+    let conflict_step_log = verifier_log.conflict_step_log;
     let challenge_step = read_challenge_log.step_to_challenge;
 
+    let mapping = &nary_def.step_mapping(&read_challenge_log.verifier_decisions);
     let (prover_step_hash, prover_next_hash) = get_hashes(
-        &nary_def.step_mapping(&read_challenge_log.verifier_decisions),
+        mapping,
         &read_challenge_log.prover_hash_rounds,
         challenge_step,
     );
 
     let (my_step_hash, my_next_hash) = get_hashes(
-        &nary_def.step_mapping(&read_challenge_log.verifier_decisions),
+        mapping,
         &read_challenge_log.verifier_hash_rounds,
         challenge_step,
     );
+
+    let nary = return_script_parameters.then_some(nary_def.nary);
+    let nary_last_round = return_script_parameters.then_some(nary_def.nary_last_round);
+
+    let cosigned_decisions_bits = read_challenge_log.verifier_decisions;
+    if prover_step_hash != resigned_step_hash {
+        let (round, index) = *mapping.get(&challenge_step).unwrap();
+
+        return Ok(ChallengeType::EquivocationHash {
+            prover_true_hash: prover_step_hash,
+            prover_wrong_hash: resigned_step_hash.to_string(),
+            cosigned_decisions_bits,
+            kind: EquivocationKind::StepHash,
+            round,
+            index: index + 1,
+            nary,
+            nary_last_round,
+        });
+    }
+
+    if prover_next_hash != resigned_next_hash {
+        let (round, index) = *mapping.get(&(challenge_step + 1)).unwrap();
+        return Ok(ChallengeType::EquivocationHash {
+            prover_true_hash: prover_next_hash,
+            prover_wrong_hash: resigned_next_hash.to_string(),
+            cosigned_decisions_bits,
+            kind: EquivocationKind::NextHash,
+            round,
+            index: index + 1,
+            nary,
+            nary_last_round,
+        });
+    }
 
     assert_eq!(prover_next_hash, my_next_hash);
 
@@ -630,10 +769,12 @@ pub fn verifier_choose_challenge_for_read_challenge(
     if (read_step == challenge_step && force == ForceChallenge::No)
         || force == ForceChallenge::ReadValue
     {
-        let conflict_step_trace = verifier_log.conflict_step_log.final_trace;
+        let conflict_step_trace = conflict_step_log.final_trace;
         let prover_read_1 = conflict_step_trace.read_1;
         let prover_read_2 = conflict_step_trace.read_2;
         let read_selector = verifier_log.read_selector;
+
+        let cosigned_conflict_bits = conflict_step_log.verifier_decisions.clone();
 
         return Ok(ChallengeType::ReadValue {
             prover_read_1,
@@ -642,8 +783,10 @@ pub fn verifier_choose_challenge_for_read_challenge(
             prover_hash: prover_step_hash,
             trace: my_trace.trace_step,
             prover_next_hash,
-            write_step: challenge_step + 1,
-            conflict_step: conflict_step + 1,
+            cosigned_read_bits: cosigned_decisions_bits,
+            cosigned_conflict_bits,
+            nary,
+            nary_last_round,
         });
     }
 
@@ -827,7 +970,7 @@ mod tests {
 
         //PROVER PROVIDES EXECUTE STEP (and reveals full_trace)
         //Use v_desision + 1 as v_decision defines the last agreed step
-        let final_trace =
+        let (final_trace, step_hash, next_hash, _) =
             prover_final_trace(pdf, chk_prover_path, v_decision + 1, fail_config_prover).unwrap();
         info!("Prover final trace: {:?}", final_trace.to_csv());
 
@@ -846,6 +989,8 @@ mod tests {
             pdf,
             chk_verifier_path,
             final_trace,
+            step_hash.as_str(),
+            next_hash.as_str(),
             force,
             fail_config_verifier,
             true,
@@ -879,11 +1024,24 @@ mod tests {
                     info!("{:?}", v_decision);
                 }
 
+                let (resigned_step_hash, resigned_next_hash, _) =
+                    prover_get_cosigned_bits_and_hashes(
+                        pdf,
+                        &chk_prover_path,
+                        NArySearchType::ReadValueChallenge,
+                        Some(v_decision),
+                        fail_config_prover_read_challenge,
+                    )
+                    .unwrap();
+
                 verifier_choose_challenge_for_read_challenge(
                     pdf,
                     chk_verifier_path,
+                    resigned_step_hash.as_str(),
+                    resigned_next_hash.as_str(),
                     fail_config_verifier_read_challenge,
                     force_read_challenge,
+                    true,
                 )
                 .unwrap()
             }
@@ -1940,6 +2098,138 @@ mod tests {
             false,
             ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::FutureRead,
+            ForceChallenge::No,
+        );
+    }
+
+    #[test]
+    fn test_challenge_read_same_step() {
+        init_trace();
+        let fail_read_args = vec!["1106", "0xf000003c", "0xaa000004", "0xf000003c", "1106"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+
+        let fail_read_1 = Some(FailConfiguration::new_fail_reads(FailReads::new(
+            Some(&fail_read_args),
+            None,
+        )));
+
+        test_challenge_aux(
+            "45",
+            "hello-world.yaml",
+            17,
+            false,
+            fail_read_1.clone(),
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "46",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            None,
+            fail_read_1,
+            None,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::FutureRead,
+            ForceChallenge::No,
+        );
+    }
+
+    #[test]
+    fn test_challenge_equivocation_step_hash() {
+        init_trace();
+        let fail_read_args = vec!["1106", "0xf000003c", "0xaa000004", "0xf000003c", "1100"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+
+        let mut fail_config =
+            FailConfiguration::new_fail_reads(FailReads::new(Some(&fail_read_args), None));
+        fail_config.fail_resign_hash = Some(1105);
+        let fail_config = Some(fail_config);
+
+        test_challenge_aux(
+            "47",
+            "hello-world.yaml",
+            17,
+            false,
+            fail_config.clone(),
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "48",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            None,
+            fail_config,
+            None,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::EquivocationHash(EquivocationKind::StepHash),
+            ForceChallenge::No,
+        );
+    }
+
+    #[test]
+    fn test_challenge_equivocation_next_hash() {
+        init_trace();
+        let fail_read_args = vec!["1106", "0xf000003c", "0xaa000004", "0xf000003c", "1100"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+
+        let mut fail_config =
+            FailConfiguration::new_fail_reads(FailReads::new(Some(&fail_read_args), None));
+        fail_config.fail_resign_hash = Some(1106);
+        let fail_config = Some(fail_config);
+
+        test_challenge_aux(
+            "49",
+            "hello-world.yaml",
+            17,
+            false,
+            fail_config.clone(),
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "50",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            None,
+            fail_config,
+            None,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::EquivocationHash(EquivocationKind::NextHash),
             ForceChallenge::No,
         );
     }

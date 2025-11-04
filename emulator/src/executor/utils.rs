@@ -219,6 +219,7 @@ impl FailOpcode {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct FailConfiguration {
     pub fail_hash: Option<u64>,
+    pub fail_resign_hash: Option<u64>,
     pub fail_hash_until: Option<u64>,
     pub fail_execute: Option<FailExecute>,
     pub fail_reads: Option<FailReads>,
@@ -233,6 +234,12 @@ impl FailConfiguration {
     pub fn new_fail_hash(fail_hash: u64) -> Self {
         Self {
             fail_hash: Some(fail_hash),
+            ..Default::default()
+        }
+    }
+    pub fn new_fail_resign_hash(fail_resign_hash: u64) -> Self {
+        Self {
+            fail_resign_hash: Some(fail_resign_hash),
             ..Default::default()
         }
     }
