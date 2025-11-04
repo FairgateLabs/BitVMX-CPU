@@ -1498,7 +1498,7 @@ pub fn verify_wrong_chunk_value(
 ) {
     address_in_range(stack, &chunk.range(), &address);
     stack.op_verify();
-    
+
     let chunk_table = WordTable::new(stack, chunk.data.clone());
 
     let base_addr = stack.number_u32(chunk.base_addr);
@@ -1611,6 +1611,160 @@ pub fn var_to_number(stack: &mut StackTracker, var: StackVariable) -> StackVaria
     }
 
     result
+}
+
+pub fn shift(stack: &mut StackTracker, tables: &StackShiftTables, amount: u8) {
+    if amount == 0 {
+        return;
+    }
+
+    let tables = [tables.shift_1, tables.shift_2, tables.shift_3];
+
+    if amount > 3 {
+        stack.op_drop();
+        stack.number(0);
+    } else {
+        stack.get_value_from_table(tables[amount as usize - 1], None);
+    }
+}
+
+const BITS_NIBBLE: u8 = 4;
+
+pub fn split(stack: &mut StackTracker, tables: &StackTables, right_size: u8) {
+    stack.op_dup();
+
+    shift(stack, &tables.rshift, right_size);
+    stack.op_swap();
+    shift(stack, &tables.lshift, BITS_NIBBLE - right_size);
+    shift(stack, &tables.rshift, BITS_NIBBLE - right_size);
+}
+
+pub fn var_to_decisions_in_stack(
+    stack: &mut StackTracker,
+    tables: &StackTables,
+    var: StackVariable,
+    nary_last_round: u8,
+    nary: u8,
+    rounds: u8,
+) {
+    let bits_nary_round = f64::log2(nary as f64) as u8;
+    let mut start_position = 0;
+    let mut remaining_bits = if nary_last_round == 0 {
+        bits_nary_round
+    } else {
+        f64::log2(nary_last_round as f64) as u8
+    };
+
+    stack.move_var(var);
+    stack.explode(var);
+    stack.number(0);
+    let nibbles_needed =
+        (remaining_bits + bits_nary_round * (rounds - 1) + BITS_NIBBLE - 1) / BITS_NIBBLE;
+
+    for _ in 0..nibbles_needed {
+        if remaining_bits > BITS_NIBBLE {
+            stack.op_swap();
+            shift(stack, &tables.lshift, start_position);
+            stack.op_add();
+            start_position += BITS_NIBBLE;
+            remaining_bits -= BITS_NIBBLE;
+        } else if remaining_bits == BITS_NIBBLE {
+            stack.op_swap();
+            shift(stack, &tables.lshift, start_position);
+            stack.op_add();
+            start_position = 0;
+            remaining_bits = bits_nary_round;
+            stack.to_altstack();
+            stack.number(0);
+        } else {
+            let times_needed =
+                1 + (BITS_NIBBLE - remaining_bits + bits_nary_round - 1) / bits_nary_round;
+            let mut current_bits = BITS_NIBBLE;
+            for _ in 0..times_needed {
+                stack.op_swap();
+                split(stack, tables, remaining_bits);
+                shift(stack, &tables.lshift, start_position);
+                stack.op_rot();
+                stack.op_add();
+
+                if remaining_bits <= current_bits {
+                    current_bits -= remaining_bits;
+                    remaining_bits = bits_nary_round;
+                    start_position = 0;
+                    stack.to_altstack();
+                    stack.number(0);
+                } else {
+                    remaining_bits -= current_bits;
+                    start_position += current_bits;
+                }
+            }
+            stack.op_swap();
+            stack.number(0);
+            stack.op_equalverify();
+        }
+    }
+
+    stack.number(0);
+    stack.op_equalverify();
+
+    for _ in 0..(16 - nibbles_needed) {
+        stack.number(0);
+        stack.op_equalverify();
+    }
+}
+
+pub fn next_decision(stack: &mut StackTracker, rounds: u8, max_last_round: u8, max_nary: u8) {
+    stack.op_dup();
+    stack.number(max_last_round as u32);
+    stack.op_equal();
+
+    let (mut overflow, mut no_overflow) = stack.open_if();
+    no_overflow.op_1add();
+    no_overflow.to_altstack();
+    no_overflow.number(0);
+    no_overflow.to_altstack();
+
+    overflow.op_drop();
+    overflow.number(0);
+    overflow.to_altstack();
+    overflow.number(1);
+    overflow.to_altstack();
+
+    stack.end_if(overflow, no_overflow, 1, vec![], 2);
+
+    for _ in 1..rounds - 1 {
+        stack.from_altstack();
+        stack.number(1);
+        stack.op_equal();
+
+        let (mut inc, mut no_inc) = stack.open_if();
+        no_inc.to_altstack();
+        no_inc.number(0);
+        no_inc.to_altstack();
+
+        inc.op_dup();
+        inc.number(max_nary as u32);
+        inc.op_equal();
+
+        let (mut overflow, mut no_overflow) = inc.open_if();
+        no_overflow.op_1add();
+        no_overflow.to_altstack();
+        no_overflow.number(0);
+        no_overflow.to_altstack();
+
+        overflow.op_drop();
+        overflow.number(0);
+        overflow.to_altstack();
+        overflow.number(1);
+        overflow.to_altstack();
+
+        inc.end_if(overflow, no_overflow, 1, vec![], 2);
+        stack.end_if(inc, no_inc, 1, vec![], 2);
+    }
+
+    stack.from_altstack();
+    stack.op_add();
+    stack.to_altstack();
 }
 
 #[cfg(test)]
@@ -2475,6 +2629,98 @@ mod tests {
             0x2222_2222,
             chunk
         ));
+    }
+
+    fn test_var_to_decisions_in_stack_aux(
+        decisions: &[u32],
+        step: u64,
+        nary_last_round: u8,
+        nary: u8,
+    ) {
+        let stack = &mut StackTracker::new();
+        let tables = &StackTables::new(stack, false, false, 0b111, 0b111, 0);
+
+        for decision in decisions.iter().rev() {
+            stack.number(*decision);
+        }
+        let var = stack.number_u64(step);
+        var_to_decisions_in_stack(
+            stack,
+            tables,
+            var,
+            nary_last_round,
+            nary,
+            decisions.len() as u8,
+        );
+
+        for _ in 0..decisions.len() {
+            stack.from_altstack();
+            stack.op_equalverify();
+        }
+
+        tables.drop(stack);
+        stack.op_true();
+        assert!(stack.run().success);
+    }
+
+    #[test]
+    fn test_var_to_decisions_in_stack() {
+        test_var_to_decisions_in_stack_aux(&[4, 2, 4, 0], 1104, 4, 8);
+        test_var_to_decisions_in_stack_aux(&[4, 2, 4, 1], 1105, 4, 8);
+        test_var_to_decisions_in_stack_aux(&[4, 2, 4, 2], 1106, 4, 8);
+        test_var_to_decisions_in_stack_aux(&[4, 2, 4, 3], 1107, 4, 8);
+
+        test_var_to_decisions_in_stack_aux(&[0, 3, 0, 3], 99, 4, 8);
+        test_var_to_decisions_in_stack_aux(&[1, 3, 0, 3], 355, 4, 8);
+    }
+
+    fn test_next_decision_aux(decision: u64, rounds: u8, nary: u8, nary_last_round: u8) {
+        let stack = &mut StackTracker::new();
+        let tables = &StackTables::new(stack, false, false, 0b111, 0b111, 0);
+
+        let max_nary = nary - 1;
+        let max_last_round = if nary_last_round == 0 {
+            max_nary
+        } else {
+            nary_last_round - 1
+        };
+
+        let decision_var = stack.number_u64(decision);
+        let next_decision_var = stack.number_u64(decision + 1);
+
+        var_to_decisions_in_stack(
+            stack,
+            tables,
+            next_decision_var,
+            nary_last_round,
+            nary,
+            rounds,
+        );
+
+        var_to_decisions_in_stack(stack, tables, decision_var, nary_last_round, nary, rounds);
+
+        let decision = stack.from_altstack_joined(rounds as u32, "decision_bits");
+
+        stack.explode(decision);
+        next_decision(stack, rounds, max_last_round, max_nary);
+        let next_decision_bits = stack.from_altstack_joined(rounds as u32, "decision_bits");
+
+        let expected_next_decision_bits =
+            stack.from_altstack_joined(rounds as u32, "expected_decision_bits");
+
+        stack.equals(next_decision_bits, true, expected_next_decision_bits, true);
+
+        tables.drop(stack);
+        stack.op_true();
+
+        assert!(stack.run().success);
+    }
+    #[test]
+    fn test_next_decision() {
+        test_next_decision_aux(100, 4, 8, 4);
+        test_next_decision_aux(302, 8, 8, 2);
+        test_next_decision_aux(38, 8, 2, 2);
+        test_next_decision_aux(892, 4, 8, 0);
     }
 
     mod fuzz_tests {

@@ -1,4 +1,4 @@
-use bitcoin_script_stack::{stack::{StackTracker, StackVariable}};
+use bitcoin_script_stack::stack::{StackTracker, StackVariable};
 use bitvmx_cpu_definitions::memory::{MemoryAccessType, MemoryWitness};
 use riscv_decode::Instruction::{self, *};
 
@@ -130,7 +130,7 @@ pub fn op_load_micro_0_missaligned(
             MemoryAccessType::Register,
         ),
     );
-    
+
     let (nibs, max_extra, prepad, unsigned) = match instruction {
         Lb(_) => (2, 0, 6, false),
         Lh(_) => (4, 2, 4, false),
@@ -240,7 +240,7 @@ pub fn op_load_micro_0_aligned(
     let write_addr = number_u32_partial(&mut if_false, base_register_address, 6);
     if_false.move_var(rd);
     if_false.join(write_addr);
-    
+
     //calculate the byte to be stored (with proper bit extension)
     if_false.move_var(trace_read.read_2_value);
     if_false.move_var(alignment); //restore alignment
@@ -259,10 +259,7 @@ pub fn op_load_micro_0_aligned(
         if_is_register_zero,
         if_false,
         4,
-        vec![
-            (8, "write_add".to_string()),
-            (8, "write_value".to_string()),
-        ],
+        vec![(8, "write_add".to_string()), (8, "write_value".to_string())],
         0,
     );
 

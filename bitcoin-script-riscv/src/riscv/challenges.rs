@@ -1,7 +1,7 @@
 use bitcoin_script_functions::hash::blake3;
 use bitcoin_script_stack::stack::{StackTracker, StackVariable};
 use bitvmx_cpu_definitions::{
-    challenge::ChallengeType,
+    challenge::{ChallengeType, EquivocationKind},
     constants::LAST_STEP_INIT,
     memory::{Chunk, MemoryAccessType, SectionDefinition},
     trace::{generate_initial_step_hash, hashvec_to_string},
@@ -11,7 +11,8 @@ use crate::riscv::{
     memory_alignment::{is_aligned, load_lower_half_nibble_table, load_upper_half_nibble_table},
     script_utils::{
         address_in_sections, address_not_in_sections, get_selected_vars, is_lower_than,
-        verify_wrong_chunk_value, witness_equals, StackTables,
+        next_decision, var_to_decisions_in_stack, verify_wrong_chunk_value, witness_equals,
+        StackTables,
     },
 };
 
@@ -493,7 +494,7 @@ pub fn uninitialized_challenge(
     stack.drop(read_addr);
 }
 
-pub fn read_value_challenge(stack: &mut StackTracker) {
+pub fn read_value_challenge(stack: &mut StackTracker, rounds: u8, nary: u8, nary_last_round: u8) {
     stack.clear_definitions();
 
     let read_addr_1 = stack.define(8, "prover_read_addr_1");
@@ -515,12 +516,23 @@ pub fn read_value_challenge(stack: &mut StackTracker) {
 
     let next_hash = stack.define(40, "next_hash");
 
-    let write_step = stack.define(16, "write_step");
-    let conflict_step = stack.define(16, "conflict_step");
+    let write_bits = stack.define(rounds as u32, "write_bits");
+    let conflict_bits = stack.define(rounds as u32, "conflict_bits");
 
-    let write_step_copy = stack.copy_var(write_step);
-    is_lower_than(stack, write_step_copy, conflict_step, true);
+    let write_bits_copy = stack.copy_var(write_bits);
+    is_lower_than(stack, write_bits_copy, conflict_bits, true);
     stack.op_verify();
+
+    let max_nary = nary - 1;
+    let max_last_round = if nary_last_round == 0 {
+        max_nary
+    } else {
+        nary_last_round - 1
+    };
+
+    stack.explode(write_bits);
+    next_decision(stack, rounds, max_last_round, max_nary);
+    let write_bits = stack.from_altstack_joined(rounds as u32, "next_write_bits");
 
     let [read_addr, read_value, read_step] = get_selected_vars(
         stack,
@@ -528,10 +540,18 @@ pub fn read_value_challenge(stack: &mut StackTracker) {
         [read_addr_2, read_value_2, read_step_2],
         read_selector,
     );
+    stack.rename(read_addr, "read_addr");
+
+    let read_step_copy = stack.copy_var(read_step);
+
+    let tables = &StackTables::new(stack, false, false, 0b111, 0b111, 0);
+    var_to_decisions_in_stack(stack, tables, read_step, nary_last_round, nary, rounds);
+    tables.drop(stack);
+    let read_step_bits = stack.from_altstack_joined(rounds as u32, "read_step");
 
     // if read_step == write_step -> write_addr != read_addr || write_value != read_value
-    stack.equality(read_step, false, write_step, false, true, false);
-
+    stack.equality(read_step_bits, false, write_bits, false, true, false);
+    stack.set_breakpoint("MY AWESOME BREAK POINT");
     stack.equality(write_addr, false, read_addr, false, false, false);
     stack.equality(write_value, false, read_value, true, false, false);
     stack.op_boolor();
@@ -540,8 +560,8 @@ pub fn read_value_challenge(stack: &mut StackTracker) {
     let init = stack.number_u64(LAST_STEP_INIT);
 
     // if read_step == INIT || read_step < write_step -> write_addr == read_addr
-    stack.equality(read_step, false, init, true, true, false);
-    is_lower_than(stack, read_step, write_step, true);
+    stack.equality(read_step_copy, true, init, true, true, false);
+    is_lower_than(stack, read_step_bits, write_bits, true);
     stack.op_boolor();
 
     stack.equality(write_addr, false, read_addr, true, true, false);
@@ -594,8 +614,10 @@ pub fn correct_hash_challenge(stack: &mut StackTracker) {
     stack.equals(result, true, next_hash, true);
 }
 
-pub fn future_read_challenge(stack: &mut StackTracker) {
-    let step = stack.define(16, "prover_step");
+pub fn future_read_challenge(stack: &mut StackTracker, rounds: u8, nary: u8, nary_last_round: u8) {
+    stack.clear_definitions();
+
+    let step = stack.define(rounds as u32, "prover_step");
     let read_step_1 = stack.define(16, "prover_read_step_1");
     let read_step_2 = stack.define(16, "prover_read_step_2");
 
@@ -607,9 +629,85 @@ pub fn future_read_challenge(stack: &mut StackTracker) {
     let init = stack.number_u64(LAST_STEP_INIT);
     stack.equality(read_step, false, init, true, false, true);
 
+    let tables = &StackTables::new(stack, false, false, 0b111, 0b111, 0);
+
+    var_to_decisions_in_stack(stack, tables, read_step, nary_last_round, nary, rounds);
+    tables.drop(stack);
+    let read_step = stack.from_altstack_joined(rounds as u32, "read_step");
+
     is_lower_than(stack, read_step, step, true);
     stack.op_not();
     stack.op_verify();
+}
+
+fn get_round_and_index(stack: &mut StackTracker, decisions_bits: StackVariable, round: u8) {
+    if round == 0 {
+        stack.number(0);
+        stack.number(0);
+    } else {
+        stack.copy_var_sub_n(decisions_bits, round as u32 - 1);
+        stack.number(0);
+        stack.op_equal();
+
+        let (mut if_true, mut if_false) = stack.open_if_with_debug();
+
+        if_false.number(round as u32);
+        if_false.copy_var_sub_n(decisions_bits, round as u32 - 1);
+
+        get_round_and_index(&mut if_true, decisions_bits, round - 1);
+
+        stack.end_if(
+            if_true,
+            if_false,
+            0,
+            vec![
+                (1, "calculated_round".to_string()),
+                (1, "calculated_index".to_string()),
+            ],
+            0,
+        );
+    }
+}
+
+pub fn equivocation_hash_challenge(
+    stack: &mut StackTracker,
+    rounds: u8,
+    kind: EquivocationKind,
+    expected_round: u8,
+    expected_index: u8,
+    nary: u8,
+    nary_last_round: u8,
+) {
+    stack.clear_definitions();
+
+    let true_hash = stack.define(40, "prover_true_hash");
+    let wrong_hash = stack.define(40, "prover_wrong_hash");
+    let mut decisions_bits = stack.define(rounds as u32, "decisions_bits");
+
+    if kind == EquivocationKind::NextHash {
+        stack.explode(decisions_bits);
+        let max_nary = nary - 1;
+        let max_last_round = if nary_last_round == 0 {
+            max_nary
+        } else {
+            nary_last_round - 1
+        };
+
+        next_decision(stack, rounds, max_last_round, max_nary);
+        decisions_bits = stack.from_altstack_joined(rounds as u32, "next_decisions_bits");
+    }
+
+    get_round_and_index(stack, decisions_bits, rounds);
+
+    stack.number(expected_index as u32);
+    stack.op_equalverify();
+
+    stack.number(expected_round as u32);
+    stack.op_equalverify();
+
+    stack.equality(true_hash, true, wrong_hash, true, false, true);
+
+    stack.drop(decisions_bits);
 }
 
 //TODO: memory section challenge
@@ -774,17 +872,27 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             );
         }
         ChallengeType::FutureRead {
-            step,
+            cosigned_decisions_bits,
             prover_read_step_1,
             prover_read_step_2,
             read_selector,
+            nary,
+            nary_last_round,
         } => {
-            stack.number_u64(*step);
+            for bit in cosigned_decisions_bits {
+                stack.number(*bit);
+            }
+
             stack.number_u64(*prover_read_step_1);
             stack.number_u64(*prover_read_step_2);
             stack.number(*read_selector);
 
-            future_read_challenge(&mut stack);
+            future_read_challenge(
+                &mut stack,
+                cosigned_decisions_bits.len() as u8,
+                nary.unwrap(),
+                nary_last_round.unwrap(),
+            );
         }
         ChallengeType::ReadValue {
             prover_read_1,
@@ -793,8 +901,10 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             prover_hash,
             trace,
             prover_next_hash,
-            write_step,
-            conflict_step,
+            cosigned_read_bits,
+            cosigned_conflict_bits,
+            nary,
+            nary_last_round,
         } => {
             stack.number_u32(prover_read_1.address);
             stack.number_u32(prover_read_1.value);
@@ -815,18 +925,28 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
 
             stack.hexstr_as_nibbles(prover_next_hash);
 
-            stack.number_u64(*write_step);
-            stack.number_u64(*conflict_step);
+            for bits in cosigned_read_bits {
+                stack.number(*bits);
+            }
 
-            read_value_challenge(&mut stack);
+            for bits in cosigned_conflict_bits {
+                stack.number(*bits);
+            }
+
+            read_value_challenge(
+                &mut stack,
+                cosigned_read_bits.len() as u8,
+                nary.unwrap(),
+                nary_last_round.unwrap(),
+            );
         }
         ChallengeType::CorrectHash {
-            prover_step_hash: prover_hash,
+            prover_step_hash,
             verifier_hash,
             trace,
             prover_next_hash,
         } => {
-            stack.hexstr_as_nibbles(prover_hash);
+            stack.hexstr_as_nibbles(prover_step_hash);
             stack.hexstr_as_nibbles(verifier_hash);
 
             stack.number_u32(trace.get_write().address);
@@ -837,6 +957,33 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             stack.hexstr_as_nibbles(prover_next_hash);
 
             correct_hash_challenge(&mut stack);
+        }
+        ChallengeType::EquivocationHash {
+            prover_true_hash,
+            prover_wrong_hash,
+            cosigned_decisions_bits,
+            kind,
+            round,
+            index,
+            nary,
+            nary_last_round,
+        } => {
+            stack.hexstr_as_nibbles(prover_true_hash);
+            stack.hexstr_as_nibbles(prover_wrong_hash);
+
+            for bits in cosigned_decisions_bits {
+                stack.number(*bits);
+            }
+
+            equivocation_hash_challenge(
+                &mut stack,
+                cosigned_decisions_bits.len() as u8,
+                kind.clone(),
+                *round,
+                *index,
+                nary.unwrap(),
+                nary_last_round.unwrap(),
+            );
         }
         _ => {
             return false;
@@ -1878,12 +2025,23 @@ mod tests {
     fn test_future_read_aux(step: u64, read_step: u64) -> bool {
         let stack = &mut StackTracker::new();
 
-        stack.number_u64(step);
+        let tables = &StackTables::new(stack, false, false, 0b111, 0b111, 0);
+
+        let rounds = 4;
+        let nary = 8;
+        let nary_last_round = 4;
+
+        let step = stack.number_u64(step);
+        var_to_decisions_in_stack(stack, tables, step, nary_last_round, nary, rounds);
+        tables.drop(stack);
+
+        stack.from_altstack_joined(rounds as u32, "step");
+
         stack.number_u64(read_step); // read_1_step
         stack.number_u64(read_step); // read_2_step
         stack.number(1); // read_selector
 
-        future_read_challenge(stack);
+        future_read_challenge(stack, rounds, nary, nary_last_round);
 
         stack.op_true();
         stack.run().success
@@ -1934,10 +2092,24 @@ mod tests {
 
         stack.hexstr_as_nibbles(&next_hash);
 
-        stack.number_u64(write_step);
-        stack.number_u64(conflict_step);
+        let tables = &StackTables::new(stack, false, false, 0b111, 0b111, 0);
 
-        read_value_challenge(stack);
+        let write_step = stack.number_u64(write_step - 1);
+        let conflict_step = stack.number_u64(conflict_step - 1);
+
+        let rounds = 4;
+        let nary = 8;
+        let nary_last_round = 4;
+
+        var_to_decisions_in_stack(stack, tables, conflict_step, nary_last_round, nary, rounds);
+        var_to_decisions_in_stack(stack, tables, write_step, nary_last_round, nary, rounds);
+
+        tables.drop(stack);
+
+        stack.from_altstack_joined(rounds as u32, "write_bits");
+        stack.from_altstack_joined(rounds as u32, "conflict_bits");
+
+        read_value_challenge(stack, rounds, nary, nary_last_round);
 
         stack.op_true();
         stack.run().success
@@ -2060,6 +2232,100 @@ mod tests {
         ));
     }
 
+    fn test_equivocation_hash_aux(
+        hash1: &String,
+        hash2: &String,
+        decisions_bits: &Vec<u32>,
+        kind: EquivocationKind,
+        round: u8,
+        index: u8,
+        nary: u8,
+        nary_last_round: u8,
+    ) -> bool {
+        let stack = &mut StackTracker::new();
+        stack.hexstr_as_nibbles(hash1);
+        stack.hexstr_as_nibbles(hash2);
+
+        for decision in decisions_bits {
+            stack.number(*decision);
+        }
+
+        equivocation_hash_challenge(
+            stack,
+            decisions_bits.len() as u8,
+            kind,
+            round,
+            index,
+            nary,
+            nary_last_round,
+        );
+
+        stack.op_true();
+
+        stack.run().success
+    }
+
+    #[test]
+    pub fn test_equivocation_hash() {
+        let true_hash = &"e2f115006467b4b1b2b27612bbfd40ed3bc8299b".to_string();
+        let wrong_hash = &"345721506e79c53d2549fc63d02ba8fc3b17efa4".to_string();
+
+        let nary = 8;
+        let nary_last_round = 4;
+
+        // this decisions bits selects the hash at round 4 and index 3
+        // the next hash was given at round 2 index 1
+        let decisions_bits = &vec![4, 0, 7, 3];
+
+        // can't challenge true hash
+        assert!(!test_equivocation_hash_aux(
+            true_hash,
+            true_hash,
+            decisions_bits,
+            EquivocationKind::StepHash,
+            4,
+            3,
+            nary,
+            nary_last_round,
+        ));
+
+        // can't challenge with other step hash
+        // this hash was at round 2 index 3
+        assert!(!test_equivocation_hash_aux(
+            true_hash,
+            wrong_hash,
+            decisions_bits,
+            EquivocationKind::StepHash,
+            2, // round
+            3, // index
+            nary,
+            nary_last_round,
+        ));
+
+        // can challenge if wrong hash and correct round and index
+        assert!(test_equivocation_hash_aux(
+            true_hash,
+            wrong_hash,
+            decisions_bits,
+            EquivocationKind::StepHash,
+            4,
+            3,
+            nary,
+            nary_last_round,
+        ));
+
+        // can challenge if wrong hash and correct round and index for next hash
+        assert!(test_equivocation_hash_aux(
+            true_hash,
+            wrong_hash,
+            decisions_bits,
+            EquivocationKind::NextHash,
+            2,
+            1,
+            nary,
+            nary_last_round,
+        ));
+    }
     mod coin_tests {
         use super::*;
         use ::blake3::Hasher;
