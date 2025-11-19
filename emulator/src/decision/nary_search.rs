@@ -3,6 +3,7 @@ use std::{collections::HashMap, str::FromStr};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
+use std::cmp::{max, min};
 
 #[derive(Clone, Copy, PartialEq, ValueEnum, Serialize, Deserialize, Debug)]
 pub enum NArySearchType {
@@ -194,6 +195,7 @@ pub fn choose_segment(
     prover_hashes: &ExecutionHashes,
     my_hashes: &ExecutionHashes,
     nary_type: NArySearchType,
+    conflict_step: Option<u64>,
 ) -> (u32, u64, u64) {
     if prover_hashes.hashes.len() != my_hashes.hashes.len() {
         error!("Prover and my hashes should have the same length");
@@ -218,25 +220,19 @@ pub fn choose_segment(
 
     // first mismatch step
     //println!("Selection: {}", selection);
-    let mismatch_step = nary_defs.step_from_base_and_bits(round, base_step, selection as u32) - 1;
+    let mismatch_step =
+        nary_defs.step_from_base_and_bits(round, base_step, selection as u32);
     //println!("Mismatch step: {}", mismatch_step);
-    let (lower_limit_bits, choice) = if selected_step < mismatch_step {
-        if nary_type == NArySearchType::ConflictStep {
-            (
-                nary_defs.step_bits_for_round(round, selected_step),
-                selected_step,
-            )
-        } else {
-            (selection as u32, mismatch_step + 1)
+    let (lower_limit_bits, choice) = match nary_type {
+        NArySearchType::ConflictStep => {
+            let choice = min(selected_step, mismatch_step - 1);
+            (nary_defs.step_bits_for_round(round, choice), choice)
         }
-    } else {
-        if nary_type == NArySearchType::ConflictStep {
-            (selection as u32 - 1, mismatch_step)
-        } else {
-            (
-                nary_defs.step_bits_for_round(round, selected_step),
-                selected_step,
-            )
+        _ => {
+            let conflict = conflict_step.unwrap();
+            let base = max(selected_step, mismatch_step);
+            let choice = min(base, conflict);
+            (nary_defs.step_bits_for_round(round, choice), choice)
         }
     };
 
@@ -388,6 +384,7 @@ mod tests {
             &prover_hashes.into(),
             &my_hashes.into(),
             NArySearchType::ConflictStep,
+            None,
         );
         assert_eq!(bits, exp_bits);
         assert_eq!(base, exp_step);

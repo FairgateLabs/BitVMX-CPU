@@ -49,6 +49,7 @@ fn test_nary_search_trace_aux(input: u8, expect_err: bool, checkpoint_path: &str
             &claim_hashes,
             &my_hashes,
             NArySearchType::ConflictStep,
+            None,
         );
         base = new_base;
         selected = new_selected;

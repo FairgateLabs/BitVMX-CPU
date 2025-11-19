@@ -176,6 +176,11 @@ pub fn verifier_choose_segment(
     let mut challenge_log = VerifierChallengeLog::load(checkpoint_path)?;
     let input = challenge_log.input.clone();
 
+    let conflict_step = match nary_type {
+        NArySearchType::ConflictStep => None,
+        _ => Some(challenge_log.conflict_step_log.step_to_challenge),
+    };
+
     let nary_log = challenge_log.get_nary_log(nary_type);
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
 
@@ -198,6 +203,7 @@ pub fn verifier_choose_segment(
         &claim_hashes,
         &my_hashes,
         nary_type,
+        conflict_step,
     );
     nary_log.base_step = base;
     nary_log.step_to_challenge = new_selected;
