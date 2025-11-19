@@ -155,7 +155,9 @@ pub fn execute_program(
             }
         }
 
-        if print_trace || trace.is_err() || program.halt {
+        let limit_step_reached = limit_step.is_some_and(|limit_step| limit_step == program.step);
+
+        if print_trace || trace.is_err() || program.halt || limit_step_reached {
             if trace_set.is_none() || trace_set.as_ref().unwrap().contains(&program.step) {
                 let hash_hex = hash_to_string(&program.hash);
                 traces.push((
@@ -203,10 +205,8 @@ pub fn execute_program(
             break ExecutionResult::Halt(program.registers.get(REGISTER_A0 as u32), program.step);
         }
 
-        if let Some(limit_step) = limit_step {
-            if limit_step == program.step {
-                break ExecutionResult::LimitStepReached(limit_step);
-            }
+        if limit_step_reached {
+            break ExecutionResult::LimitStepReached(program.step);
         }
     };
 
