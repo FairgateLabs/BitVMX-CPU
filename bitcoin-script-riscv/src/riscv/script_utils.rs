@@ -1713,7 +1713,16 @@ pub fn var_to_decisions_in_stack(
     }
 }
 
-pub fn next_decision(stack: &mut StackTracker, rounds: u8, max_last_round: u8, max_nary: u8) {
+pub fn next_decision_in_stack(
+    stack: &mut StackTracker,
+    decisions_bits: StackVariable,
+    rounds: u8,
+    max_last_round: u8,
+    max_nary: u8,
+) {
+    stack.move_var(decisions_bits);
+    stack.explode(decisions_bits);
+
     stack.op_dup();
     stack.number(max_last_round as u32);
     stack.op_equal();
@@ -2701,8 +2710,7 @@ mod tests {
 
         let decision = stack.from_altstack_joined(rounds as u32, "decision_bits");
 
-        stack.explode(decision);
-        next_decision(stack, rounds, max_last_round, max_nary);
+        next_decision_in_stack(stack, decision, rounds, max_last_round, max_nary);
         let next_decision_bits = stack.from_altstack_joined(rounds as u32, "decision_bits");
 
         let expected_next_decision_bits =

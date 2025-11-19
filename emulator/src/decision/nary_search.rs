@@ -2,8 +2,8 @@ use std::{collections::HashMap, str::FromStr};
 
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
-use tracing::{error, info};
 use std::cmp::{max, min};
+use tracing::{error, info};
 
 #[derive(Clone, Copy, PartialEq, ValueEnum, Serialize, Deserialize, Debug)]
 pub enum NArySearchType {
@@ -220,8 +220,7 @@ pub fn choose_segment(
 
     // first mismatch step
     //println!("Selection: {}", selection);
-    let mismatch_step =
-        nary_defs.step_from_base_and_bits(round, base_step, selection as u32);
+    let mismatch_step = nary_defs.step_from_base_and_bits(round, base_step, selection as u32);
     //println!("Mismatch step: {}", mismatch_step);
     let (lower_limit_bits, choice) = match nary_type {
         NArySearchType::ConflictStep => {

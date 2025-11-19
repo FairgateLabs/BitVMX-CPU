@@ -5,7 +5,7 @@ use emulator::{
     constants::REGISTERS_BASE_ADDRESS,
     decision::{
         challenge::{
-            prover_execute, prover_final_trace, prover_get_cosigned_bits_and_hashes,
+            prover_execute, prover_final_trace, prover_get_hashes_and_step,
             prover_get_hashes_for_round, verifier_check_execution, verifier_choose_challenge,
             verifier_choose_challenge_for_read_challenge, verifier_choose_segment, ForceChallenge,
             ForceCondition,
@@ -662,7 +662,7 @@ fn main() -> Result<(), EmulatorError> {
             fail_config_prover,
             command_file,
         }) => {
-            let (final_trace, resigned_step_hash, resigned_next_hash, cosigned_decision_bits) =
+            let (final_trace, resigned_step_hash, resigned_next_hash, conflict_step) =
                 prover_final_trace(
                     pdf,
                     checkpoint_prover_path,
@@ -672,16 +672,13 @@ fn main() -> Result<(), EmulatorError> {
             info!("Prover final trace: {:?}", final_trace);
             info!("Prover resigned step hash: {:?}", resigned_step_hash);
             info!("Prover resigned next hash: {:?}", resigned_next_hash);
-            info!(
-                "Prover cosigned decision bits: {:?}",
-                cosigned_decision_bits
-            );
+            info!("Prover conflict step: {:?}", conflict_step);
 
             let result = EmulatorResultType::ProverFinalTraceResult {
                 final_trace,
                 resigned_step_hash,
                 resigned_next_hash,
-                cosigned_decision_bits,
+                conflict_step,
             }
             .to_value()?;
             let mut file = create_or_open_file(command_file);
@@ -753,19 +750,18 @@ fn main() -> Result<(), EmulatorError> {
             command_file,
             fail_config_prover,
         }) => {
-            let (resigned_step_hash, resigned_next_hash, cosigned_decision_bits) =
-                prover_get_cosigned_bits_and_hashes(
-                    pdf,
-                    &checkpoint_prover_path,
-                    NArySearchType::ReadValueChallenge,
-                    Some(*v_decision),
-                    fail_config_prover.clone(),
-                )?;
+            let (resigned_step_hash, resigned_next_hash, write_step) = prover_get_hashes_and_step(
+                pdf,
+                &checkpoint_prover_path,
+                NArySearchType::ReadValueChallenge,
+                Some(*v_decision),
+                fail_config_prover.clone(),
+            )?;
 
             let result = EmulatorResultType::ProverGetCosignedBitsAndHashesResult {
                 resigned_step_hash,
                 resigned_next_hash,
-                cosigned_decision_bits,
+                write_step,
             }
             .to_value()?;
             let mut file = create_or_open_file(command_file);

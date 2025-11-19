@@ -222,7 +222,7 @@ pub fn prover_final_trace(
     checkpoint_path: &str,
     final_bits: u32,
     fail_config: Option<FailConfiguration>,
-) -> Result<(TraceRWStep, String, String, Vec<u32>), EmulatorError> {
+) -> Result<(TraceRWStep, String, String, u64), EmulatorError> {
     let mut challenge_log = ProverChallengeLog::load(checkpoint_path)?;
     let input = challenge_log.input.clone();
     let nary_log = challenge_log.get_nary_log(NArySearchType::ConflictStep);
@@ -242,7 +242,7 @@ pub fn prover_final_trace(
     nary_log.final_trace = final_trace.clone();
     challenge_log.save(checkpoint_path)?;
 
-    let (step_hash, next_hash, cosigned_bits) = prover_get_cosigned_bits_and_hashes(
+    let (step_hash, next_hash, conflict_step) = prover_get_hashes_and_step(
         program_definition_file,
         checkpoint_path,
         NArySearchType::ConflictStep,
@@ -250,16 +250,16 @@ pub fn prover_final_trace(
         fail_config,
     )?;
 
-    Ok((final_trace, step_hash, next_hash, cosigned_bits))
+    Ok((final_trace, step_hash, next_hash, conflict_step))
 }
 
-pub fn prover_get_cosigned_bits_and_hashes(
+pub fn prover_get_hashes_and_step(
     program_definition_file: &str,
     checkpoint_path: &str,
     nary_type: NArySearchType,
     final_bits: Option<u32>,
     fail_config: Option<FailConfiguration>,
-) -> Result<(String, String, Vec<u32>), EmulatorError> {
+) -> Result<(String, String, u64), EmulatorError> {
     let mut challenge_log = ProverChallengeLog::load(checkpoint_path)?;
     let nary_log = challenge_log.get_nary_log(nary_type);
 
@@ -291,8 +291,7 @@ pub fn prover_get_cosigned_bits_and_hashes(
         }
     }
 
-    let cosigned_bits = nary_log.verifier_decisions.clone();
-    Ok((step_hash, next_hash, cosigned_bits))
+    Ok((step_hash, next_hash, final_step))
 }
 
 pub fn get_hashes(
@@ -322,7 +321,8 @@ pub fn get_hashes(
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, EnumString, Display, EnumIter)]
 #[strum(serialize_all = "snake_case")]
 pub enum ForceChallenge {
-    EquivocationHash(EquivocationKind),
+    EquivocationHash,
+    EquivocationResign(EquivocationKind),
     CorrectHash,
     TraceHash,
     TraceHashZero,
@@ -387,38 +387,40 @@ pub fn verifier_choose_challenge(
 
     let nary = return_script_parameters.then_some(nary_def.nary);
     let nary_last_round = return_script_parameters.then_some(nary_def.nary_last_round);
+    let rounds = return_script_parameters.then_some(nary_def.total_rounds());
 
-    let cosigned_decisions_bits = conflict_step_log.verifier_decisions.clone();
     if (prover_step_hash != resigned_step_hash && force == ForceChallenge::No)
-        || force == ForceChallenge::EquivocationHash(EquivocationKind::StepHash)
+        || force == ForceChallenge::EquivocationResign(EquivocationKind::StepHash)
     {
         let (round, index) = *mapping.get(&step).unwrap();
 
-        return Ok(ChallengeType::EquivocationHash {
+        return Ok(ChallengeType::EquivocationResign {
             prover_true_hash: prover_step_hash,
             prover_wrong_hash: resigned_step_hash.to_string(),
-            cosigned_decisions_bits,
+            prover_challenge_step_tk: step,
             kind: EquivocationKind::StepHash,
-            round,
-            index: index + 1,
+            expected_round: round,
+            expected_index: index + 1,
             nary,
             nary_last_round,
+            rounds,
         });
     }
 
     if (prover_next_hash != resigned_next_hash && force == ForceChallenge::No)
-        || force == ForceChallenge::EquivocationHash(EquivocationKind::NextHash)
+        || force == ForceChallenge::EquivocationResign(EquivocationKind::NextHash)
     {
         let (round, index) = *mapping.get(&(step + 1)).unwrap();
-        return Ok(ChallengeType::EquivocationHash {
+        return Ok(ChallengeType::EquivocationResign {
             prover_true_hash: prover_next_hash,
             prover_wrong_hash: resigned_next_hash.to_string(),
-            cosigned_decisions_bits,
+            prover_challenge_step_tk: step,
             kind: EquivocationKind::NextHash,
-            round,
-            index: index+1,
+            expected_round: round,
+            expected_index: index + 1,
             nary,
             nary_last_round,
+            rounds,
         });
     }
 
@@ -433,6 +435,7 @@ pub fn verifier_choose_challenge(
             return Ok(ChallengeType::TraceHashZero {
                 prover_trace: trace.trace_step,
                 prover_next_hash,
+                prover_conflict_step_tk: step,
             });
         }
 
@@ -561,12 +564,10 @@ pub fn verifier_choose_challenge(
         let read_selector = if is_read_1_future { 1 } else { 2 };
 
         return Ok(ChallengeType::FutureRead {
-            cosigned_decisions_bits,
+            prover_conflict_step_tk: step,
             prover_read_step_1,
             prover_read_step_2,
             read_selector,
-            nary,
-            nary_last_round,
         });
     }
 
@@ -698,6 +699,7 @@ pub fn verifier_choose_challenge_for_read_challenge(
 
     let read_challenge_log = verifier_log.read_challenge_log;
     let conflict_step_log = verifier_log.conflict_step_log;
+    let conflict_step = conflict_step_log.step_to_challenge;
     let challenge_step = read_challenge_log.step_to_challenge;
 
     let mapping = &nary_def.step_mapping(&read_challenge_log.verifier_decisions);
@@ -707,7 +709,7 @@ pub fn verifier_choose_challenge_for_read_challenge(
         challenge_step,
     );
 
-    let (my_step_hash, my_next_hash) = get_hashes(
+    let (my_step_hash, _) = get_hashes(
         mapping,
         &read_challenge_log.verifier_hash_rounds,
         challenge_step,
@@ -715,38 +717,62 @@ pub fn verifier_choose_challenge_for_read_challenge(
 
     let nary = return_script_parameters.then_some(nary_def.nary);
     let nary_last_round = return_script_parameters.then_some(nary_def.nary_last_round);
+    let rounds = return_script_parameters.then_some(nary_def.total_rounds());
 
-    let cosigned_decisions_bits = read_challenge_log.verifier_decisions;
-    if prover_step_hash != resigned_step_hash {
+    if (prover_step_hash != resigned_step_hash && force == ForceChallenge::No)
+        || force == ForceChallenge::EquivocationResign(EquivocationKind::StepHash)
+    {
         let (round, index) = *mapping.get(&challenge_step).unwrap();
 
-        return Ok(ChallengeType::EquivocationHash {
+        return Ok(ChallengeType::EquivocationResign {
             prover_true_hash: prover_step_hash,
             prover_wrong_hash: resigned_step_hash.to_string(),
-            cosigned_decisions_bits,
+            prover_challenge_step_tk: challenge_step,
             kind: EquivocationKind::StepHash,
-            round,
-            index: index + 1,
+            expected_round: round,
+            expected_index: index + 1,
             nary,
             nary_last_round,
+            rounds,
         });
     }
 
-    if prover_next_hash != resigned_next_hash {
+    if (prover_next_hash != resigned_next_hash && force == ForceChallenge::No)
+        || force == ForceChallenge::EquivocationResign(EquivocationKind::NextHash)
+    {
         let (round, index) = *mapping.get(&(challenge_step + 1)).unwrap();
-        return Ok(ChallengeType::EquivocationHash {
+        return Ok(ChallengeType::EquivocationResign {
             prover_true_hash: prover_next_hash,
             prover_wrong_hash: resigned_next_hash.to_string(),
-            cosigned_decisions_bits,
+            prover_challenge_step_tk: challenge_step,
             kind: EquivocationKind::NextHash,
-            round,
-            index: index + 1,
+            expected_round: round,
+            expected_index: index + 1,
             nary,
             nary_last_round,
+            rounds,
         });
     }
 
-    assert_eq!(prover_next_hash, my_next_hash);
+    if (prover_step_hash != my_step_hash
+        && conflict_step == challenge_step
+        && force == ForceChallenge::No)
+        || force == ForceChallenge::EquivocationHash
+    {
+        let mapping = &nary_def.step_mapping(&conflict_step_log.verifier_decisions);
+        let (prover_step_hash1, _) = get_hashes(
+            mapping,
+            &conflict_step_log.prover_hash_rounds,
+            challenge_step,
+        );
+
+        return Ok(ChallengeType::EquivocationHash {
+            prover_step_hash1,
+            prover_step_hash2: prover_step_hash,
+            prover_write_step_tk: challenge_step,
+            prover_conflict_step_tk: conflict_step_log.step_to_challenge,
+        });
+    }
 
     let my_execution = program_def
         .execute_helper(
@@ -780,8 +806,6 @@ pub fn verifier_choose_challenge_for_read_challenge(
         let prover_read_2 = conflict_step_trace.read_2;
         let read_selector = verifier_log.read_selector;
 
-        let cosigned_conflict_bits = conflict_step_log.verifier_decisions.clone();
-
         return Ok(ChallengeType::ReadValue {
             prover_read_1,
             prover_read_2,
@@ -789,10 +813,8 @@ pub fn verifier_choose_challenge_for_read_challenge(
             prover_hash: prover_step_hash,
             trace: my_trace.trace_step,
             prover_next_hash,
-            cosigned_read_bits: cosigned_decisions_bits,
-            cosigned_conflict_bits,
-            nary,
-            nary_last_round,
+            prover_write_step_tk: challenge_step,
+            prover_conflict_step_tk: conflict_step_log.step_to_challenge,
         });
     }
 
@@ -1030,15 +1052,14 @@ mod tests {
                     info!("{:?}", v_decision);
                 }
 
-                let (resigned_step_hash, resigned_next_hash, _) =
-                    prover_get_cosigned_bits_and_hashes(
-                        pdf,
-                        &chk_prover_path,
-                        NArySearchType::ReadValueChallenge,
-                        Some(v_decision),
-                        fail_config_prover_read_challenge,
-                    )
-                    .unwrap();
+                let (resigned_step_hash, resigned_next_hash, _) = prover_get_hashes_and_step(
+                    pdf,
+                    &chk_prover_path,
+                    NArySearchType::ReadValueChallenge,
+                    Some(v_decision),
+                    fail_config_prover_read_challenge,
+                )
+                .unwrap();
 
                 verifier_choose_challenge_for_read_challenge(
                     pdf,
@@ -1927,7 +1948,7 @@ mod tests {
             false,
             ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::ReadValueNArySearch,
-            ForceChallenge::TraceHash,
+            ForceChallenge::CorrectHash,
         );
     }
     #[test]
@@ -1972,7 +1993,7 @@ mod tests {
             false,
             ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::ReadValueNArySearch,
-            ForceChallenge::TraceHash,
+            ForceChallenge::CorrectHash,
         );
     }
 
@@ -2153,7 +2174,7 @@ mod tests {
     }
 
     #[test]
-    fn test_challenge_equivocation_step_hash() {
+    fn test_challenge_equivocation_resign_step_hash() {
         init_trace();
         let fail_read_args = vec!["1106", "0xf000003c", "0xaa000004", "0xf000003c", "1100"]
             .iter()
@@ -2191,13 +2212,13 @@ mod tests {
             None,
             false,
             ForceCondition::ValidInputWrongStepOrHash,
-            ForceChallenge::EquivocationHash(EquivocationKind::StepHash),
+            ForceChallenge::EquivocationResign(EquivocationKind::StepHash),
             ForceChallenge::No,
         );
     }
 
     #[test]
-    fn test_challenge_equivocation_next_hash() {
+    fn test_challenge_equivocation_resign_next_hash() {
         init_trace();
         let fail_read_args = vec!["1106", "0xf000003c", "0xaa000004", "0xf000003c", "1100"]
             .iter()
@@ -2235,8 +2256,60 @@ mod tests {
             None,
             false,
             ForceCondition::ValidInputWrongStepOrHash,
-            ForceChallenge::EquivocationHash(EquivocationKind::NextHash),
+            ForceChallenge::EquivocationResign(EquivocationKind::NextHash),
             ForceChallenge::No,
+        );
+    }
+
+    #[test]
+    fn test_challenge_equivocation_hash() {
+        init_trace();
+        let fail_read_args = vec!["1106", "0xaa000000", "0x11111100", "0xaa000000", "1100"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+
+        let fail_read_2 = Some(FailConfiguration::new_fail_reads(FailReads::new(
+            None,
+            Some(&fail_read_args),
+        )));
+
+        let fail_write_args = vec!["1100", "0xaa000000", "0x11111100", "0xaa000000"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+        let fail_write = Some(FailConfiguration::new_fail_write(FailWrite::new(
+            &fail_write_args,
+        )));
+
+        test_challenge_aux(
+            "51",
+            "hello-world.yaml",
+            17,
+            false,
+            fail_read_2.clone(),
+            fail_write.clone(),
+            None,
+            None,
+            true,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "52",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            None,
+            fail_read_2,
+            fail_write,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::ReadValueNArySearch,
+            ForceChallenge::EquivocationHash,
         );
     }
 
@@ -2377,6 +2450,35 @@ mod tests {
             0,
             true,
             Some(fail_mem_protection),
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::No,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+    }
+
+    #[test]
+    fn test_pc_limit() {
+        init_trace();
+
+        // executes a NOP in the step that should jump to the infinite loop, causing the program to wrongfuly halt
+        let fail_args = vec!["2", "0x100073"] // Ebreak (NOP)
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+        let fail_opcode = Some(FailConfiguration::new_fail_opcode(FailOpcode::new(
+            &fail_args,
+        )));
+
+        test_challenge_aux(
+            "pc_limit",
+            "pc_limit.yaml",
+            0,
+            false,
+            fail_opcode,
             None,
             None,
             None,

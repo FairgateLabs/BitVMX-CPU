@@ -17,6 +17,7 @@ pub enum ChallengeType {
     TraceHashZero {
         prover_trace: TraceStep,
         prover_next_hash: String,
+        prover_conflict_step_tk: u64,
     },
     EntryPoint {
         prover_read_pc: TraceReadPC,
@@ -71,12 +72,10 @@ pub enum ChallengeType {
         code_sections: Option<SectionDefinition>,
     },
     FutureRead {
-        cosigned_decisions_bits: Vec<u32>,
+        prover_conflict_step_tk: u64,
         prover_read_step_1: u64,
         prover_read_step_2: u64,
         read_selector: u32,
-        nary: Option<u8>,
-        nary_last_round: Option<u8>,
     },
     ReadValueNArySearch {
         bits: u32,
@@ -88,10 +87,8 @@ pub enum ChallengeType {
         prover_hash: String,
         trace: TraceStep,
         prover_next_hash: String,
-        cosigned_read_bits: Vec<u32>,
-        cosigned_conflict_bits: Vec<u32>,
-        nary: Option<u8>,
-        nary_last_round: Option<u8>,
+        prover_write_step_tk: u64,
+        prover_conflict_step_tk: u64,
     },
     CorrectHash {
         prover_step_hash: String,
@@ -99,15 +96,22 @@ pub enum ChallengeType {
         trace: TraceStep,
         prover_next_hash: String,
     },
-    EquivocationHash {
+    EquivocationResign {
         prover_true_hash: String,
         prover_wrong_hash: String,
-        cosigned_decisions_bits: Vec<u32>,
+        prover_challenge_step_tk: u64,
         kind: EquivocationKind,
-        round: u8,
-        index: u8,
+        expected_round: u8,
+        expected_index: u8,
+        rounds: Option<u8>,
         nary: Option<u8>,
         nary_last_round: Option<u8>,
+    },
+    EquivocationHash {
+        prover_step_hash1: String,
+        prover_step_hash2: String,
+        prover_write_step_tk: u64,
+        prover_conflict_step_tk: u64,
     },
     No,
 }
@@ -143,12 +147,12 @@ pub enum EmulatorResultType {
         final_trace: TraceRWStep,
         resigned_step_hash: String,
         resigned_next_hash: String,
-        cosigned_decision_bits: Vec<u32>,
+        conflict_step: u64,
     },
     ProverGetCosignedBitsAndHashesResult {
         resigned_step_hash: String,
         resigned_next_hash: String,
-        cosigned_decision_bits: Vec<u32>,
+        write_step: u64,
     },
     VerifierChooseChallengeResult {
         challenge: ChallengeType,
@@ -220,18 +224,18 @@ impl EmulatorResultType {
 
     pub fn as_final_trace(
         &self,
-    ) -> Result<(TraceRWStep, String, String, Vec<u32>), EmulatorResultError> {
+    ) -> Result<(TraceRWStep, String, String, u64), EmulatorResultError> {
         match self {
             EmulatorResultType::ProverFinalTraceResult {
                 final_trace,
                 resigned_step_hash,
                 resigned_next_hash,
-                cosigned_decision_bits,
+                conflict_step,
             } => Ok((
                 final_trace.clone(),
                 resigned_step_hash.to_string(),
                 resigned_next_hash.to_string(),
-                cosigned_decision_bits.clone(),
+                *conflict_step,
             )),
             _ => Err(EmulatorResultError::GenericError(
                 "Expected ProverFinalTraceResult".to_string(),
@@ -241,16 +245,16 @@ impl EmulatorResultType {
 
     pub fn as_cosigned_bits_and_hashes(
         &self,
-    ) -> Result<(String, String, Vec<u32>), EmulatorResultError> {
+    ) -> Result<(String, String, u64), EmulatorResultError> {
         match self {
             EmulatorResultType::ProverGetCosignedBitsAndHashesResult {
                 resigned_step_hash,
                 resigned_next_hash,
-                cosigned_decision_bits,
+                write_step,
             } => Ok((
                 resigned_step_hash.to_string(),
                 resigned_next_hash.to_string(),
-                cosigned_decision_bits.clone(),
+                *write_step,
             )),
             _ => Err(EmulatorResultError::GenericError(
                 "Expected ProverGetCosignedBitsAndHashesResult".to_string(),
