@@ -205,7 +205,7 @@ pub fn choose_segment(
     let mut selection = if nary_type == NArySearchType::ConflictStep {
         prover_hashes.hashes.len() + 1
     } else {
-        1
+        0
     };
     for i in 0..prover_hashes.hashes.len() {
         let prover_hash = &prover_hashes.hashes[i];
