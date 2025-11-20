@@ -183,7 +183,7 @@ enum Commands {
         command_file: String,
     },
 
-    ProverGetCosignedBitsAndHashes {
+    ProverGetHashesAndStep {
         #[arg(short, long, value_name = "FILE")]
         pdf: String,
 
@@ -743,7 +743,7 @@ fn main() -> Result<(), EmulatorError> {
             file.write_all(result.to_string().as_bytes())
                 .expect("Failed to write JSON to file");
         }
-        Some(Commands::ProverGetCosignedBitsAndHashes {
+        Some(Commands::ProverGetHashesAndStep {
             pdf,
             checkpoint_prover_path,
             v_decision,
@@ -758,7 +758,7 @@ fn main() -> Result<(), EmulatorError> {
                 fail_config_prover.clone(),
             )?;
 
-            let result = EmulatorResultType::ProverGetCosignedBitsAndHashesResult {
+            let result = EmulatorResultType::ProverGetHashesAndStepResult {
                 resigned_step_hash,
                 resigned_next_hash,
                 write_step,

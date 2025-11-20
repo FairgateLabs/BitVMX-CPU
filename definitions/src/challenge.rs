@@ -149,7 +149,7 @@ pub enum EmulatorResultType {
         resigned_next_hash: String,
         conflict_step: u64,
     },
-    ProverGetCosignedBitsAndHashesResult {
+    ProverGetHashesAndStepResult {
         resigned_step_hash: String,
         resigned_next_hash: String,
         write_step: u64,
@@ -243,11 +243,9 @@ impl EmulatorResultType {
         }
     }
 
-    pub fn as_cosigned_bits_and_hashes(
-        &self,
-    ) -> Result<(String, String, u64), EmulatorResultError> {
+    pub fn as_hashes_and_step(&self) -> Result<(String, String, u64), EmulatorResultError> {
         match self {
-            EmulatorResultType::ProverGetCosignedBitsAndHashesResult {
+            EmulatorResultType::ProverGetHashesAndStepResult {
                 resigned_step_hash,
                 resigned_next_hash,
                 write_step,
