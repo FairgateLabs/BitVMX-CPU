@@ -48,21 +48,20 @@ pub fn add_with_bit_extension(
 ) -> StackVariable {
     stack.set_breakpoint("add_with_bit_extension");
 
-    let value_size = stack.get_size(value);
     //move the value and split the nibbles
     stack.move_var(value);
     stack.explode(value);
 
     let add_size = stack.get_size(to_add);
     let mut last = StackVariable::null();
-    for i in 0..value_size {
+    for i in 0..8 {
         if i > 0 {
             stack.op_add();
         }
 
         if i < add_size {
             stack.move_var_sub_n(to_add, add_size - i - 1);
-        } else if i < value_size - 1 {
+        } else if i < 7 {
             stack.copy_var(bit_extension);
         } else {
             stack.move_var(bit_extension);
@@ -70,24 +69,24 @@ pub fn add_with_bit_extension(
 
         stack.op_add();
 
-        if i < value_size - 1 {
+        if i < 7 {
             stack.op_dup();
         }
 
         last = stack.get_value_from_table(tables.modulo, None);
 
-        if i < value_size - 1 {
+        if i < 7 {
             stack.to_altstack();
             stack.get_value_from_table(tables.quotient, None);
         }
     }
 
-    for _ in 0..value_size - 1 {
+    for _ in 0..7 {
         stack.from_altstack();
     }
 
     stack.rename(last, "add_bit_ext");
-    stack.join_count(last, value_size - 1)
+    stack.join_count(last, 7)
 }
 
 pub fn sub(
