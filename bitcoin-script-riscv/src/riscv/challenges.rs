@@ -2953,7 +2953,7 @@ mod tests {
                                 }
                             }
                         } else {
-                            // To fail, either the steps mismatch, OR the instruction is the success , OR the hash is different.
+                            // To fail, either the steps mismatch, OR the instruction is the success ecall, AND the hash is correct.
                             if rng.random_bool(0.5) {
                                 // Scenario: Steps mismatch. Instruction can be anything.
                                 trace_step = last_step.wrapping_add(rng.random_range(1..u64::MAX));
@@ -2962,7 +2962,7 @@ mod tests {
                                 opcode = rng.random();
                                 hash = rng.random();
                             } else {
-                                // Scenario: Steps match, but it's the valid success ecall.
+                                // Scenario: Steps match, but it's the valid success ecall and correct hash.
                                 trace_step = last_step;
                                 read_value_1 = SUCCESS_ECALL_VAL1;
                                 read_value_2 = SUCCESS_ECALL_VAL2;
