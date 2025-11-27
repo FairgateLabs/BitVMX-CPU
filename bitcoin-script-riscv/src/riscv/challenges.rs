@@ -113,10 +113,11 @@ pub fn entry_point_challenge(stack: &mut StackTracker, entry_point: u32) {
     stack.clear_definitions();
     let provided_pc = stack.define(8, "provided_pc");
     let _provided_micro = stack.define(2, "provided_micro");
-    let provided_step = stack.define(16, "provided_step");
+    let conflict_step = stack.define(16, "prover_conflict_step_tk");
 
-    let step_high = stack.number_u64(1);
-    stack.equals(provided_step, true, step_high, true);
+    // conflict_step is off by one of the trace step
+    let zero = stack.number_u64(0);
+    stack.equals(conflict_step, true, zero, true);
 
     let real = stack.number_u32(entry_point);
     let _micro = stack.byte(0);
@@ -778,12 +779,12 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
         }
         ChallengeType::EntryPoint {
             prover_read_pc,
-            prover_trace_step,
+            prover_conflict_step_tk,
             real_entry_point,
         } => {
             stack.number_u32(prover_read_pc.pc.get_address());
             stack.byte(prover_read_pc.pc.get_micro());
-            stack.number_u64(*prover_trace_step);
+            stack.number_u64(*prover_conflict_step_tk);
             entry_point_challenge(&mut stack, real_entry_point.unwrap());
         }
         ChallengeType::ProgramCounter {
@@ -1052,10 +1053,10 @@ mod tests {
 
     #[test]
     fn test_entry_point_challenge() {
-        assert!(test_entry_point_challenge_aux(0x1234, 0, 1, 0x2222));
-        assert!(test_entry_point_challenge_aux(0x2222, 1, 1, 0x2222));
-        assert!(!test_entry_point_challenge_aux(0x1234, 0, 1, 0x1234));
-        assert!(!test_entry_point_challenge_aux(0x1234, 0, 2, 0x2222));
+        assert!(test_entry_point_challenge_aux(0x1234, 0, 0, 0x2222));
+        assert!(test_entry_point_challenge_aux(0x2222, 1, 0, 0x2222));
+        assert!(!test_entry_point_challenge_aux(0x1234, 0, 0, 0x1234));
+        assert!(!test_entry_point_challenge_aux(0x1234, 0, 1, 0x2222));
     }
 
     fn test_program_counter_challenge_aux(
@@ -2478,7 +2479,7 @@ mod tests {
             entry_point_challenge(&mut stack, entry_point_real);
             stack.op_true();
 
-            let expected_to_succeed = wots_step == 1 && wots_prover_pc != entry_point_real;
+            let expected_to_succeed = wots_step == 0 && wots_prover_pc != entry_point_real;
             stack.run().success == expected_to_succeed
         }
 
@@ -2805,9 +2806,9 @@ mod tests {
                         let wots_prover_pc: u32 = rng.random();
                         let wots_prover_micro: u8 = rng.random();
                         let wots_step: u64 = if rng.random_bool(0.5) {
-                            1
+                            0
                         } else {
-                            rng.random_range(0..100)
+                            rng.random_range(1..100)
                         };
                         let entry_point_real: u32 = rng.random();
 
@@ -3494,65 +3495,59 @@ mod tests {
                     TestCase {
                         description: "Standard case: Prover's PC is simply wrong.",
                         prover_pc: 0x80000004,
-                        step: 1,
+                        step: 0,
                         entry_point: 0x80000000,
                     },
                     TestCase {
                         description: "Border case: Prover's PC is 0, but the entry point is not.",
                         prover_pc: 0,
-                        step: 1,
+                        step: 0,
                         entry_point: 0x80000000,
                     },
                     TestCase {
                         description:
                             "Border case: Prover's PC is u32::MAX, but the entry point is not.",
                         prover_pc: u32::MAX,
-                        step: 1,
+                        step: 0,
                         entry_point: 0x80000000,
                     },
                     TestCase {
                         description: "Border case: Entry point is 0, but the prover's PC is not.",
                         prover_pc: 0x80000000,
-                        step: 1,
+                        step: 0,
                         entry_point: 0,
                     },
                     TestCase {
                         description:
                             "Border case: Entry point is u32::MAX, but the prover's PC is not.",
                         prover_pc: 0,
-                        step: 1,
+                        step: 0,
                         entry_point: u32::MAX,
                     },
                     // --- Failure Scenarios (Challenge should fail: Prover is correct or conditions not met) ---
                     TestCase {
                         description:
-                            "Failure Case: Prover is correct (step is 1, PC matches entry point).",
+                            "Failure Case: Prover is correct (step is 0, PC matches entry point).",
                         prover_pc: 0x80000000,
-                        step: 1,
+                        step: 0,
                         entry_point: 0x80000000,
                     },
                     TestCase {
                         description: "Border case: Prover is correct at entry point 0.",
                         prover_pc: 0,
-                        step: 1,
+                        step: 0,
                         entry_point: 0,
                     },
                     TestCase {
                         description: "Border case: Prover is correct at entry point u32::MAX.",
                         prover_pc: u32::MAX,
-                        step: 1,
+                        step: 0,
                         entry_point: u32::MAX,
                     },
                     TestCase {
-                        description: "Failure Case: The step number is 0, PC check is irrelevant.",
+                        description: "Failure Case: The step number is 1, PC check is irrelevant.",
                         prover_pc: 0x80000004,
-                        step: 0,
-                        entry_point: 0x80000000,
-                    },
-                    TestCase {
-                        description: "Failure Case: The step number is 2, PC check is irrelevant.",
-                        prover_pc: 0x80000004,
-                        step: 2,
+                        step: 1,
                         entry_point: 0x80000000,
                     },
                     TestCase {

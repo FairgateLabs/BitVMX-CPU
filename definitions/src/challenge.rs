@@ -28,7 +28,7 @@ pub enum ChallengeType {
     },
     EntryPoint {
         prover_read_pc: TraceReadPC,
-        prover_trace_step: u64,
+        prover_conflict_step_tk: u64,
         real_entry_point: Option<u32>,
     },
     ProgramCounter {

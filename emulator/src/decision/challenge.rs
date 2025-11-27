@@ -560,7 +560,7 @@ pub fn verifier_choose_challenge(
             info!("Verifier choose to challenge ENTRYPOINT");
             return Ok(ChallengeType::EntryPoint {
                 prover_read_pc: trace.read_pc,
-                prover_trace_step: trace.step_number,
+                prover_conflict_step_tk: step,
                 real_entry_point: return_script_parameters.then_some(program.pc.get_address()), //this parameter is only used for the test
             });
         } else {
