@@ -1781,6 +1781,21 @@ pub fn increment_var(stack: &mut StackTracker, var: StackVariable) -> StackVaria
     stack.from_altstack_joined(nibbles, "inc")
 }
 
+pub fn verify_challenge_step(
+    stack: &mut StackTracker,
+    step: StackVariable,
+    decisions: StackVariable,
+    nary: u8,
+    nary_last_round: u8,
+    rounds: u8,
+) {
+    let tables = &StackTables::new(stack, false, false, 0b111, 0b111, 0);
+    var_to_decisions_in_altstack(stack, tables, step, nary_last_round, nary, rounds);
+    let converted_step = stack.from_altstack_joined(rounds as u32, "converted_step");
+    stack.equals(decisions, true, converted_step, true);
+    tables.drop(stack);
+}
+
 #[cfg(test)]
 mod tests {
     use bitvmx_cpu_definitions::memory::MemoryWitness;
@@ -2651,29 +2666,20 @@ mod tests {
         nary_last_round: u8,
         nary: u8,
     ) {
+        let rounds = decisions.len();
         let stack = &mut StackTracker::new();
-        let tables = &StackTables::new(stack, false, false, 0b111, 0b111, 0);
 
-        for decision in decisions.iter().rev() {
+        for decision in decisions.iter() {
             stack.number(*decision);
         }
-        let var = stack.number_u64(step);
-        var_to_decisions_in_altstack(
-            stack,
-            tables,
-            var,
-            nary_last_round,
-            nary,
-            decisions.len() as u8,
-        );
 
-        for _ in 0..decisions.len() {
-            stack.from_altstack();
-            stack.op_equalverify();
-        }
+        let decisions = stack.join_in_stack(rounds as u32, None, Some("decisions_bits"));
+        let step = stack.number_u64(step);
 
-        tables.drop(stack);
+        verify_challenge_step(stack, step, decisions, nary, nary_last_round, rounds as u8);
+
         stack.op_true();
+
         assert!(stack.run().success);
     }
 
