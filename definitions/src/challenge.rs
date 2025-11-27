@@ -9,6 +9,13 @@ use crate::{
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ChallengeType {
+    Halt {
+        prover_last_step: u64,
+        prover_conflict_step_tk: u64,
+        prover_trace: TraceRWStep,
+        prover_next_hash: String,
+        prover_last_hash: String,
+    },
     TraceHash {
         prover_step_hash: String,
         prover_trace: TraceStep,

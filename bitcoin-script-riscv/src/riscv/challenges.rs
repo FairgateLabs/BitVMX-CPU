@@ -9,11 +9,10 @@ use bitvmx_cpu_definitions::{
 
 use crate::riscv::{
     memory_alignment::{is_aligned, load_lower_half_nibble_table, load_upper_half_nibble_table},
-    operations::add_with_bit_extension,
     script_utils::{
-        address_in_sections, address_not_in_sections, get_selected_vars, is_lower_than,
-        next_decision_in_stack, var_to_decisions_in_stack, verify_wrong_chunk_value,
-        witness_equals, StackTables,
+        address_in_sections, address_not_in_sections, get_selected_vars, increment_var,
+        is_lower_than, next_decision_in_altstack, var_to_decisions_in_altstack,
+        verify_wrong_chunk_value, witness_equals, StackTables,
     },
 };
 
@@ -184,22 +183,33 @@ pub fn program_counter_challenge(stack: &mut StackTracker) {
 // WOTS_PROVER_FINAL_STEP:16 == WOTS_PROVER_TRACE_STEP:16 && ( WOTS_PROVER_READ_VALUE_1:8 | WOTS_PROVER_READ_VALUE_2:8 | WOTS_PROVER_OPCODE:8 !=  93 | 0 | 115 )
 pub fn halt_challenge(stack: &mut StackTracker) {
     stack.clear_definitions();
-    let final_step = stack.define(16, "final_step");
-    let trace_step = stack.define(16, "trace_step");
-    let provided = stack.define(8, "read_value_1");
-    stack.define(8, "read_value_2");
-    stack.define(8, "opcode");
 
-    stack.join_count(provided, 2);
+    let last_step = stack.define(16, "prover_last_step");
+    let conflict_step = stack.define(16, "prover_conflict_step_tk");
+    let read_1 = stack.define(8, "prover_read_1_value");
+    // technically we don't need to check the status code since execute_step will fail if we call a halt without success
+    let read_2 = stack.define(8, "prover_read_2_value");
+    let opcode = stack.define(8, "prover_read_pc_opcode");
+    let next_hash = stack.define(40, "prover_next_hash_tk");
+    let last_hash = stack.define(40, "prover_last_hash");
 
-    let expected = stack.number_u32(93);
-    stack.number_u32(0);
-    stack.number_u32(115);
-    stack.join_count(expected, 2);
+    // the neary search is off by one
+    let incremented_conflict_step = increment_var(stack, conflict_step);
+    stack.equals(last_step, true, incremented_conflict_step, true);
 
-    stack.not_equal(provided, true, expected, true);
+    let halt_syscall = stack.number_u32(0x5d);
+    let sucess_exit_code = stack.number_u32(0);
+    let syscall_opcode = stack.number_u32(0x73);
 
-    stack.equals(final_step, true, trace_step, true);
+    stack.equality(read_1, true, halt_syscall, true, false, false);
+    stack.equality(read_2, true, sucess_exit_code, true, false, false);
+    stack.equality(opcode, true, syscall_opcode, true, false, false);
+    stack.equality(next_hash, true, last_hash, true, false, false);
+
+    stack.op_boolor();
+    stack.op_boolor();
+    stack.op_boolor();
+    stack.op_verify();
 }
 
 // When the prover expands the trace it could happen that  HASH( hash_prev_step | trace_write ) != hash_step
@@ -529,10 +539,7 @@ pub fn read_value_challenge(stack: &mut StackTracker) {
     stack.op_verify();
 
     // the nary search ends up pointing to the previous step of the write, so we have to increment it
-    let tables = &StackTables::new(stack, true, true, 0, 0, 0);
-    let one = stack.number(1);
-    let no_bit_extension = stack.number(0);
-    let write_step = add_with_bit_extension(stack, tables, write_step, one, no_bit_extension);
+    let write_step = increment_var(stack, write_step);
 
     let [read_addr, read_value, read_step] = get_selected_vars(
         stack,
@@ -563,7 +570,6 @@ pub fn read_value_challenge(stack: &mut StackTracker) {
 
     stack.op_verify();
 
-    tables.drop(stack);
     //save the hash to compare
     stack.to_altstack();
 
@@ -679,7 +685,7 @@ pub fn equivocation_resign_challenge(
 
     // TODO: Optimize this...
     let tables = &StackTables::new(stack, false, false, 0b111, 0b111, 0);
-    var_to_decisions_in_stack(stack, tables, step, nary_last_round, nary, rounds);
+    var_to_decisions_in_altstack(stack, tables, step, nary_last_round, nary, rounds);
     tables.drop(stack);
     let mut decisions_bits = stack.from_altstack_joined(rounds as u32, "decisions_bits");
 
@@ -691,7 +697,7 @@ pub fn equivocation_resign_challenge(
             nary_last_round - 1
         };
 
-        next_decision_in_stack(stack, decisions_bits, rounds, max_last_round, max_nary);
+        next_decision_in_altstack(stack, decisions_bits, rounds, max_last_round, max_nary);
         decisions_bits = stack.from_altstack_joined(rounds as u32, "next_decisions_bits");
     }
 
@@ -724,6 +730,25 @@ pub fn equivocation_hash_challenge(stack: &mut StackTracker) {
 pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
     let mut stack = StackTracker::new();
     match challege_type {
+        ChallengeType::Halt {
+            prover_last_step,
+            prover_conflict_step_tk,
+            prover_trace,
+            prover_next_hash,
+            prover_last_hash,
+        } => {
+            stack.number_u64(*prover_last_step);
+            stack.number_u64(*prover_conflict_step_tk);
+
+            stack.number_u32(prover_trace.read_1.value);
+            stack.number_u32(prover_trace.read_2.value);
+            stack.number_u32(prover_trace.read_pc.opcode);
+
+            stack.hexstr_as_nibbles(prover_next_hash);
+            stack.hexstr_as_nibbles(prover_last_hash);
+
+            halt_challenge(&mut stack);
+        }
         ChallengeType::TraceHash {
             prover_step_hash,
             prover_trace,
@@ -1104,32 +1129,108 @@ mod tests {
     }
 
     fn test_halt_challenge_aux(
-        final_step: u64,
-        trace_step: u64,
-        read_value_1: u32,
-        read_value_2: u32,
+        last_step: u64,
+        conflict_step: u64,
+        read_1: u32,
+        read_2: u32,
         opcode: u32,
+        next_hash: &String,
+        last_hash: &String,
     ) -> bool {
-        let mut stack = StackTracker::new();
+        let stack = &mut StackTracker::new();
 
-        stack.number_u64(final_step);
-        stack.number_u64(trace_step);
-        stack.number_u32(read_value_1);
-        stack.number_u32(read_value_2);
+        stack.number_u64(last_step);
+        stack.number_u64(conflict_step);
+
+        stack.number_u32(read_1);
+        stack.number_u32(read_2);
         stack.number_u32(opcode);
 
-        halt_challenge(&mut stack);
+        stack.hexstr_as_nibbles(next_hash);
+        stack.hexstr_as_nibbles(last_hash);
+
+        halt_challenge(stack);
+
         stack.op_true();
         stack.run().success
     }
 
     #[test]
-    fn test_halt_challenge() {
-        assert!(test_halt_challenge_aux(0x0, 0x0, 93, 1, 115));
-        assert!(test_halt_challenge_aux(0x0, 0x0, 92, 0, 115));
-        assert!(test_halt_challenge_aux(0x0, 0x0, 93, 0, 114));
-        assert!(!test_halt_challenge_aux(0x0, 0x0, 93, 0, 115));
-        assert!(!test_halt_challenge_aux(0x0, 0x1, 93, 0, 114));
+    pub fn test_halt_challenge() {
+        let last_step = 100;
+        let conflict_step = last_step - 1;
+        let last_hash = &"e2f115006467b4b1b2b27612bbfd40ed3bc8299b".to_string();
+        let wrong_hash = &"345721506e79c53d2549fc63d02ba8fc3b17efa4".to_string();
+
+        let halt_syscall = 0x5d;
+        let success_exit_code = 0;
+        let syscall_opcode = 0x73;
+
+        // can't challenge at wrong step
+        assert!(!test_halt_challenge_aux(
+            last_step,
+            conflict_step + 1,
+            0xDEAD,
+            0xDEAD,
+            0xDEAD,
+            last_hash,
+            wrong_hash
+        ));
+
+        // can't challenge if everything is correct
+        assert!(!test_halt_challenge_aux(
+            last_step,
+            conflict_step,
+            halt_syscall,
+            success_exit_code,
+            syscall_opcode,
+            last_hash,
+            last_hash
+        ));
+
+        // can challenge if not halt syscall
+        assert!(test_halt_challenge_aux(
+            last_step,
+            conflict_step,
+            0xDEAD,
+            success_exit_code,
+            syscall_opcode,
+            last_hash,
+            last_hash
+        ));
+
+        // can challenge if not success exit code
+        assert!(test_halt_challenge_aux(
+            last_step,
+            conflict_step,
+            halt_syscall,
+            0xDEAD,
+            syscall_opcode,
+            last_hash,
+            last_hash
+        ));
+
+        // can challenge if not syscall opcode
+        assert!(test_halt_challenge_aux(
+            last_step,
+            conflict_step,
+            halt_syscall,
+            success_exit_code,
+            0xDEAD,
+            last_hash,
+            last_hash
+        ));
+
+        // can challenge if wrong hash
+        assert!(test_halt_challenge_aux(
+            last_step,
+            conflict_step,
+            halt_syscall,
+            success_exit_code,
+            syscall_opcode,
+            last_hash,
+            wrong_hash
+        ));
     }
 
     fn test_trace_hash_zero_aux(
@@ -2382,19 +2483,24 @@ mod tests {
         }
 
         fn halt_challenge_aux(
-            final_step: u64,
+            last_step: u64,
             trace_step: u64,
             read_value_1: u32,
             read_value_2: u32,
             opcode: u32,
+            hash: &str,
+            last_hash: &str,
             expected_to_succeed: bool,
         ) -> bool {
             let mut stack = StackTracker::new();
-            stack.number_u64(final_step);
-            stack.number_u64(trace_step);
+            let conflict_step = trace_step - 1;
+            stack.number_u64(last_step);
+            stack.number_u64(conflict_step);
             stack.number_u32(read_value_1);
             stack.number_u32(read_value_2);
             stack.number_u32(opcode);
+            stack.hexstr_as_nibbles(hash);
+            stack.hexstr_as_nibbles(last_hash);
 
             halt_challenge(&mut stack);
             stack.op_true();
@@ -2820,68 +2926,80 @@ mod tests {
                         const SUCCESS_ECALL_VAL2: u32 = 0;
                         const SUCCESS_ECALL_OPCODE: u32 = 115;
 
-                        let final_step: u64 = rng.random();
+                        let last_step: u64 = rng.random();
+                        let last_hash: [u8; 20] = rng.random();
                         let trace_step: u64;
                         let mut read_value_1: u32;
                         let mut read_value_2: u32;
                         let mut opcode: u32;
+                        let mut hash: [u8; 20];
 
                         if should_succeed {
                             // To succeed, steps must match AND the instruction must NOT be the success ecall.
-                            trace_step = final_step;
+                            trace_step = last_step;
 
                             loop {
                                 read_value_1 = rng.random();
                                 read_value_2 = rng.random();
                                 opcode = rng.random();
+                                hash = rng.random();
                                 if !(read_value_1 == SUCCESS_ECALL_VAL1
                                     && read_value_2 == SUCCESS_ECALL_VAL2
-                                    && opcode == SUCCESS_ECALL_OPCODE)
+                                    && opcode == SUCCESS_ECALL_OPCODE
+                                    && hash == last_hash)
                                 {
                                     break;
                                 }
                             }
                         } else {
-                            // To fail, either the steps mismatch, OR the instruction is the success ecall.
+                            // To fail, either the steps mismatch, OR the instruction is the success , OR the hash is different.
                             if rng.random_bool(0.5) {
                                 // Scenario: Steps mismatch. Instruction can be anything.
-                                trace_step = final_step.wrapping_add(rng.random_range(1..u64::MAX));
+                                trace_step = last_step.wrapping_add(rng.random_range(1..u64::MAX));
                                 read_value_1 = rng.random();
                                 read_value_2 = rng.random();
                                 opcode = rng.random();
+                                hash = rng.random();
                             } else {
                                 // Scenario: Steps match, but it's the valid success ecall.
-                                trace_step = final_step;
+                                trace_step = last_step;
                                 read_value_1 = SUCCESS_ECALL_VAL1;
                                 read_value_2 = SUCCESS_ECALL_VAL2;
                                 opcode = SUCCESS_ECALL_OPCODE;
+                                hash = last_hash.clone();
                             }
                         }
 
                         (
-                            final_step,
+                            last_step,
                             trace_step,
                             read_value_1,
                             read_value_2,
                             opcode,
                             should_succeed,
+                            hash,
+                            last_hash,
                         )
                     },
                     |input| {
                         let (
-                            final_step,
+                            last_step,
                             trace_step,
                             read_value_1,
                             read_value_2,
                             opcode,
                             expected_to_succeed,
+                            hash,
+                            last_hash,
                         ) = input;
                         halt_challenge_aux(
-                            final_step,
+                            last_step,
                             trace_step,
                             read_value_1,
                             read_value_2,
                             opcode,
+                            &hex::encode(hash),
+                            &hex::encode(last_hash),
                             expected_to_succeed,
                         )
                     },
@@ -3562,6 +3680,9 @@ mod tests {
                 const SUCCESS_ECALL_VAL2: u32 = 0;
                 const SUCCESS_ECALL_OPCODE: u32 = 115;
 
+                let last_hash = &"e2f115006467b4b1b2b27612bbfd40ed3bc8299b".to_string();
+                let wrong_hash = &"345721506e79c53d2549fc63d02ba8fc3b17efa4".to_string();
+
                 #[derive(Debug)]
                 struct TestCase {
                     description: &'static str,
@@ -3570,6 +3691,8 @@ mod tests {
                     val1: u32,
                     val2: u32,
                     opcode: u32,
+                    hash: String,
+                    last_hash: String,
                     expected_to_succeed: bool,
                 }
 
@@ -3581,9 +3704,11 @@ mod tests {
                         prover_step: 100,
                         verifier_step: 100,
                         val1: 94,
-                        val2: 0,
-                        opcode: 115,
+                        val2: SUCCESS_ECALL_VAL2,
+                        opcode: SUCCESS_ECALL_OPCODE,
                         expected_to_succeed: true,
+                        hash: last_hash.clone(),
+                        last_hash: last_hash.clone(),
                     },
                     TestCase {
                         description: "Success: val2 is different.",
@@ -3592,6 +3717,8 @@ mod tests {
                         val1: SUCCESS_ECALL_VAL1,
                         val2: 1,
                         opcode: SUCCESS_ECALL_OPCODE,
+                        hash: last_hash.clone(),
+                        last_hash: last_hash.clone(),
                         expected_to_succeed: true,
                     },
                     TestCase {
@@ -3601,15 +3728,31 @@ mod tests {
                         val1: SUCCESS_ECALL_VAL1,
                         val2: SUCCESS_ECALL_VAL2,
                         opcode: 116,
+                        hash: last_hash.clone(),
+                        last_hash: last_hash.clone(),
                         expected_to_succeed: true,
                     },
                     TestCase {
-                        description: "Border case: Step is 0.",
-                        prover_step: 0,
-                        verifier_step: 0,
+                        description: "Success: hash is different.",
+                        prover_step: 100,
+                        verifier_step: 100,
+                        val1: SUCCESS_ECALL_VAL1,
+                        val2: SUCCESS_ECALL_VAL2,
+                        opcode: SUCCESS_ECALL_OPCODE,
+                        hash: wrong_hash.clone(),
+                        last_hash: last_hash.clone(),
+                        expected_to_succeed: true,
+                    },
+                    // this used to be "Step is 0." but we can't select the trace for that step.
+                    TestCase {
+                        description: "Border case: Step is 1.",
+                        prover_step: 1,
+                        verifier_step: 1,
                         val1: 94,
                         val2: 0,
                         opcode: 115,
+                        hash: last_hash.clone(),
+                        last_hash: last_hash.clone(),
                         expected_to_succeed: true,
                     },
                     TestCase {
@@ -3619,6 +3762,8 @@ mod tests {
                         val1: 94,
                         val2: 0,
                         opcode: 115,
+                        hash: last_hash.clone(),
+                        last_hash: last_hash.clone(),
                         expected_to_succeed: true,
                     },
                     TestCase {
@@ -3628,6 +3773,8 @@ mod tests {
                         val1: u32::MAX,
                         val2: u32::MAX,
                         opcode: u32::MAX,
+                        hash: last_hash.clone(),
+                        last_hash: last_hash.clone(),
                         expected_to_succeed: true,
                     },
                     // --- Failure Scenarios (Challenge should fail) ---
@@ -3638,6 +3785,8 @@ mod tests {
                         val1: SUCCESS_ECALL_VAL1,
                         val2: SUCCESS_ECALL_VAL2,
                         opcode: SUCCESS_ECALL_OPCODE,
+                        hash: last_hash.clone(),
+                        last_hash: last_hash.clone(),
                         expected_to_succeed: false,
                     },
                     TestCase {
@@ -3647,6 +3796,8 @@ mod tests {
                         val1: 94,
                         val2: 0,
                         opcode: 115,
+                        hash: last_hash.clone(),
+                        last_hash: last_hash.clone(),
                         expected_to_succeed: false,
                     },
                     TestCase {
@@ -3656,6 +3807,8 @@ mod tests {
                         val1: 94,
                         val2: 0,
                         opcode: 115,
+                        hash: last_hash.clone(),
+                        last_hash: last_hash.clone(),
                         expected_to_succeed: false,
                     },
                     TestCase {
@@ -3665,6 +3818,8 @@ mod tests {
                         val1: 94,
                         val2: 0,
                         opcode: 115,
+                        hash: last_hash.clone(),
+                        last_hash: last_hash.clone(),
                         expected_to_succeed: false,
                     },
                 ];
@@ -3676,6 +3831,8 @@ mod tests {
                         case.val1,
                         case.val2,
                         case.opcode,
+                        &case.hash,
+                        &case.last_hash,
                         case.expected_to_succeed,
                     );
                     assert!(

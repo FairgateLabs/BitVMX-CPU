@@ -1639,7 +1639,7 @@ pub fn split(stack: &mut StackTracker, tables: &StackTables, right_size: u8) {
     shift(stack, &tables.rshift, BITS_NIBBLE - right_size);
 }
 
-pub fn var_to_decisions_in_stack(
+pub fn var_to_decisions_in_altstack(
     stack: &mut StackTracker,
     tables: &StackTables,
     var: StackVariable,
@@ -1713,7 +1713,7 @@ pub fn var_to_decisions_in_stack(
     }
 }
 
-pub fn next_decision_in_stack(
+pub fn next_decision_in_altstack(
     stack: &mut StackTracker,
     decisions_bits: StackVariable,
     rounds: u8,
@@ -1741,7 +1741,7 @@ pub fn next_decision_in_stack(
 
     stack.end_if(overflow, no_overflow, 1, vec![], 2);
 
-    for _ in 1..rounds - 1 {
+    for _ in 1..rounds {
         stack.from_altstack();
         stack.number(1);
         stack.op_equal();
@@ -1772,8 +1772,13 @@ pub fn next_decision_in_stack(
     }
 
     stack.from_altstack();
-    stack.op_add();
-    stack.to_altstack();
+    stack.op_drop();
+}
+
+pub fn increment_var(stack: &mut StackTracker, var: StackVariable) -> StackVariable {
+    let nibbles = stack.get_size(var);
+    next_decision_in_altstack(stack, var, nibbles as u8, 15, 15);
+    stack.from_altstack_joined(nibbles, "inc")
 }
 
 #[cfg(test)]
@@ -2640,7 +2645,7 @@ mod tests {
         ));
     }
 
-    fn test_var_to_decisions_in_stack_aux(
+    fn test_var_to_decisions_in_altstack_aux(
         decisions: &[u32],
         step: u64,
         nary_last_round: u8,
@@ -2653,7 +2658,7 @@ mod tests {
             stack.number(*decision);
         }
         let var = stack.number_u64(step);
-        var_to_decisions_in_stack(
+        var_to_decisions_in_altstack(
             stack,
             tables,
             var,
@@ -2673,17 +2678,17 @@ mod tests {
     }
 
     #[test]
-    fn test_var_to_decisions_in_stack() {
-        test_var_to_decisions_in_stack_aux(&[4, 2, 4, 0], 1104, 4, 8);
-        test_var_to_decisions_in_stack_aux(&[4, 2, 4, 1], 1105, 4, 8);
-        test_var_to_decisions_in_stack_aux(&[4, 2, 4, 2], 1106, 4, 8);
-        test_var_to_decisions_in_stack_aux(&[4, 2, 4, 3], 1107, 4, 8);
+    fn test_var_to_decisions_in_altstack() {
+        test_var_to_decisions_in_altstack_aux(&[4, 2, 4, 0], 1104, 4, 8);
+        test_var_to_decisions_in_altstack_aux(&[4, 2, 4, 1], 1105, 4, 8);
+        test_var_to_decisions_in_altstack_aux(&[4, 2, 4, 2], 1106, 4, 8);
+        test_var_to_decisions_in_altstack_aux(&[4, 2, 4, 3], 1107, 4, 8);
 
-        test_var_to_decisions_in_stack_aux(&[0, 3, 0, 3], 99, 4, 8);
-        test_var_to_decisions_in_stack_aux(&[1, 3, 0, 3], 355, 4, 8);
+        test_var_to_decisions_in_altstack_aux(&[0, 3, 0, 3], 99, 4, 8);
+        test_var_to_decisions_in_altstack_aux(&[1, 3, 0, 3], 355, 4, 8);
     }
 
-    fn test_next_decision_aux(decision: u64, rounds: u8, nary: u8, nary_last_round: u8) {
+    fn test_increment_decision_aux(decision: u64, rounds: u8, nary: u8, nary_last_round: u8) {
         let stack = &mut StackTracker::new();
         let tables = &StackTables::new(stack, false, false, 0b111, 0b111, 0);
 
@@ -2695,9 +2700,9 @@ mod tests {
         };
 
         let decision_var = stack.number_u64(decision);
-        let next_decision_var = stack.number_u64(decision + 1);
+        let next_decision_var = stack.number_u64(decision.wrapping_add(1));
 
-        var_to_decisions_in_stack(
+        var_to_decisions_in_altstack(
             stack,
             tables,
             next_decision_var,
@@ -2706,17 +2711,22 @@ mod tests {
             rounds,
         );
 
-        var_to_decisions_in_stack(stack, tables, decision_var, nary_last_round, nary, rounds);
+        var_to_decisions_in_altstack(stack, tables, decision_var, nary_last_round, nary, rounds);
 
         let decision = stack.from_altstack_joined(rounds as u32, "decision_bits");
 
-        next_decision_in_stack(stack, decision, rounds, max_last_round, max_nary);
-        let next_decision_bits = stack.from_altstack_joined(rounds as u32, "decision_bits");
+        next_decision_in_altstack(stack, decision, rounds, max_last_round, max_nary);
+        let incremented_decision_bits = stack.from_altstack_joined(rounds as u32, "decision_bits");
 
         let expected_next_decision_bits =
             stack.from_altstack_joined(rounds as u32, "expected_decision_bits");
 
-        stack.equals(next_decision_bits, true, expected_next_decision_bits, true);
+        stack.equals(
+            incremented_decision_bits,
+            true,
+            expected_next_decision_bits,
+            true,
+        );
 
         tables.drop(stack);
         stack.op_true();
@@ -2725,10 +2735,10 @@ mod tests {
     }
     #[test]
     fn test_next_decision() {
-        test_next_decision_aux(100, 4, 8, 4);
-        test_next_decision_aux(302, 8, 8, 2);
-        test_next_decision_aux(38, 8, 2, 2);
-        test_next_decision_aux(892, 4, 8, 0);
+        test_increment_decision_aux(100, 4, 8, 4);
+        test_increment_decision_aux(302, 8, 8, 2);
+        test_increment_decision_aux(38, 8, 2, 2);
+        test_increment_decision_aux(892, 4, 8, 0);
     }
 
     mod fuzz_tests {

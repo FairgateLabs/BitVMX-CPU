@@ -379,6 +379,12 @@ enum Commands {
         #[arg(long)]
         fail_resign_hash: Option<u64>,
 
+        #[arg(long)]
+        fail_commitment_step: Option<u64>,
+
+        #[arg(long)]
+        fail_commitment_hash: bool,
+
         /// Memory dump at given step
         #[arg(short, long)]
         dump_mem: Option<u64>,
@@ -438,6 +444,8 @@ fn main() -> Result<(), EmulatorError> {
             fail_write: fail_write_args,
             fail_opcode: fail_opcode_args,
             fail_resign_hash,
+            fail_commitment_step,
+            fail_commitment_hash,
             dump_mem,
             fail_pc,
             save_non_checkpoint_steps,
@@ -511,6 +519,8 @@ fn main() -> Result<(), EmulatorError> {
                 fail_memory_protection: false,
                 fail_execute_only_protection: false,
                 fail_resign_hash: *fail_resign_hash,
+                fail_commitment_step: *fail_commitment_step,
+                fail_commitment_hash: *fail_commitment_hash,
             };
             let result = execute_program(
                 &mut program,

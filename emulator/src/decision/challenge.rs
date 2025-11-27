@@ -30,8 +30,15 @@ pub fn prover_execute(
     fail_config: Option<FailConfiguration>,
     save_non_checkpoint_steps: bool,
 ) -> Result<(ExecutionResult, u64, String), EmulatorError> {
+    let fail_last_step = fail_config
+        .as_ref()
+        .and_then(|fail| fail.fail_commitment_step);
+    let fail_last_hash = fail_config
+        .as_ref()
+        .is_some_and(|fail| fail.fail_commitment_hash);
+
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
-    let (result, last_step, last_hash) = program_def.get_execution_result(
+    let (result, mut last_step, mut last_hash) = program_def.get_execution_result(
         input.clone(),
         checkpoint_path,
         fail_config,
@@ -47,6 +54,12 @@ pub fn prover_execute(
             return Err(result)?;
         }
         error!("Execution with force. The claim will be commited on-chain.");
+    }
+
+    last_step = fail_last_step.unwrap_or(last_step);
+
+    if fail_last_hash {
+        last_hash = last_hash.chars().rev().collect();
     }
 
     ProverChallengeLog::new(
@@ -321,6 +334,7 @@ pub fn get_hashes(
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, EnumString, Display, EnumIter)]
 #[strum(serialize_all = "snake_case")]
 pub enum ForceChallenge {
+    Halt,
     EquivocationHash,
     EquivocationResign(EquivocationKind),
     CorrectHash,
@@ -430,7 +444,7 @@ pub fn verifier_choose_challenge(
         || force == ForceChallenge::TraceHash
         || force == ForceChallenge::TraceHashZero
     {
-        if trace.step_number == 1 {
+        if step == 0 {
             info!("Verifier choose to challenge TRACE_HASH_ZERO");
             return Ok(ChallengeType::TraceHashZero {
                 prover_trace: trace.trace_step,
@@ -444,6 +458,32 @@ pub fn verifier_choose_challenge(
             prover_step_hash,
             prover_trace: trace.trace_step,
             prover_next_hash,
+        });
+    }
+
+    let ExecutionLog {
+        last_hash: prover_claim_last_hash,
+        last_step: prover_claim_last_step,
+        result: _,
+    } = verifier_log.prover_claim_execution.clone();
+
+    if (step + 1 == prover_claim_last_step
+        && (prover_next_hash != prover_claim_last_hash
+            // halt opcode
+            || trace.read_1.value != 93
+            // exit code
+            || trace.read_2.value != 0
+            // syscall opcode
+            || trace.read_pc.opcode != 0x73)
+        && force == ForceChallenge::No)
+        || force == ForceChallenge::Halt
+    {
+        return Ok(ChallengeType::Halt {
+            prover_last_step: prover_claim_last_step,
+            prover_conflict_step_tk: step,
+            prover_trace: trace,
+            prover_next_hash,
+            prover_last_hash: prover_claim_last_hash,
         });
     }
 
@@ -516,7 +556,7 @@ pub fn verifier_choose_challenge(
         || force == ForceChallenge::EntryPoint
         || force == ForceChallenge::ProgramCounter
     {
-        if trace.step_number == 1 {
+        if step == 0 {
             info!("Verifier choose to challenge ENTRYPOINT");
             return Ok(ChallengeType::EntryPoint {
                 prover_read_pc: trace.read_pc,
@@ -2310,6 +2350,80 @@ mod tests {
             ForceCondition::ValidInputWrongStepOrHash,
             ForceChallenge::ReadValueNArySearch,
             ForceChallenge::EquivocationHash,
+        );
+    }
+
+    #[test]
+    fn test_challenge_halt_step() {
+        init_trace();
+
+        let fail_commitment_step = Some(FailConfiguration::new_fail_commitment_step(1498));
+
+        test_challenge_aux(
+            "53",
+            "hello-world.yaml",
+            17,
+            false,
+            fail_commitment_step.clone(),
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "54",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            None,
+            fail_commitment_step,
+            None,
+            false,
+            ForceCondition::Always,
+            ForceChallenge::Halt,
+            ForceChallenge::No,
+        );
+    }
+
+    #[test]
+    fn test_challenge_halt_hash() {
+        init_trace();
+
+        let fail_commitment_hash = Some(FailConfiguration::new_fail_commitment_hash());
+
+        test_challenge_aux(
+            "55",
+            "hello-world.yaml",
+            17,
+            false,
+            fail_commitment_hash.clone(),
+            None,
+            None,
+            None,
+            true,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "56",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            None,
+            fail_commitment_hash,
+            None,
+            false,
+            ForceCondition::Always,
+            ForceChallenge::Halt,
+            ForceChallenge::No,
         );
     }
 

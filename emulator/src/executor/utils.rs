@@ -228,12 +228,26 @@ pub struct FailConfiguration {
     pub fail_opcode: Option<FailOpcode>,
     pub fail_memory_protection: bool,
     pub fail_execute_only_protection: bool,
+    pub fail_commitment_step: Option<u64>,
+    pub fail_commitment_hash: bool,
 }
 
 impl FailConfiguration {
     pub fn new_fail_hash(fail_hash: u64) -> Self {
         Self {
             fail_hash: Some(fail_hash),
+            ..Default::default()
+        }
+    }
+    pub fn new_fail_commitment_step(last_step: u64) -> Self {
+        Self {
+            fail_commitment_step: Some(last_step),
+            ..Default::default()
+        }
+    }
+    pub fn new_fail_commitment_hash() -> Self {
+        Self {
+            fail_commitment_hash: true,
             ..Default::default()
         }
     }
