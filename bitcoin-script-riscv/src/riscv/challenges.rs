@@ -11,7 +11,7 @@ use crate::riscv::{
     memory_alignment::{is_aligned, load_lower_half_nibble_table, load_upper_half_nibble_table},
     script_utils::{
         address_in_sections, address_not_in_sections, get_selected_vars, increment_var,
-        is_lower_than, next_decision_in_altstack, var_to_decisions_in_altstack,
+        is_lower_than, increment_decisions_in_altstack, var_to_decisions_in_altstack,
         verify_wrong_chunk_value, witness_equals, StackTables,
     },
 };
@@ -697,7 +697,7 @@ pub fn equivocation_resign_challenge(
             nary_last_round - 1
         };
 
-        next_decision_in_altstack(stack, decisions_bits, rounds, max_nary, max_last_round);
+        increment_decisions_in_altstack(stack, decisions_bits, rounds, max_nary, max_last_round);
         decisions_bits = stack.from_altstack_joined(rounds as u32, "next_decisions_bits");
     }
 

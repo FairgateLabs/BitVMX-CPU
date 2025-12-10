@@ -1755,7 +1755,12 @@ pub fn var_to_decisions_in_altstack(
     }
 }
 
-pub fn next_decision_in_altstack(
+// Convert a sequence of decision bits selecting a step into the sequence of
+// decision bits selecting the next step, each containing numbers in the ranges
+// [0, max_last_round] for the last one or [0, max_nary] for the rest.
+// If max_last_round == max_nary, this is equivalent to incrementing a number
+// encoded in base 2^(max_nary + 1).
+pub fn increment_decisions_in_altstack(
     stack: &mut StackTracker,
     decisions_bits: StackVariable,
     rounds: u8,
@@ -1765,61 +1770,64 @@ pub fn next_decision_in_altstack(
     stack.move_var(decisions_bits);
     stack.explode(decisions_bits);
 
-    stack.op_dup();
-    stack.number(max_last_round as u32);
-    stack.op_equal();
+    // We carry arround the number we want to add in the top of the altstack
+    stack.number(1);
+    stack.to_altstack();
 
-    let (mut overflow, mut no_overflow) = stack.open_if();
-    no_overflow.op_1add();
-    no_overflow.to_altstack();
-    no_overflow.number(0);
-    no_overflow.to_altstack();
-
-    overflow.op_drop();
-    overflow.number(0);
-    overflow.to_altstack();
-    overflow.number(1);
-    overflow.to_altstack();
-
-    stack.end_if(overflow, no_overflow, 1, vec![], 2);
-
-    for _ in 1..rounds {
+    for round in (1..=rounds).rev() {
+        // Bring back the carry
         stack.from_altstack();
         stack.number(1);
         stack.op_equal();
 
         let (mut inc, mut no_inc) = stack.open_if();
+        // If we won't increment, then we can just push the current number to the altstack
         no_inc.to_altstack();
-        no_inc.number(0);
+        // And neither won't add to the next numbers
+        no_inc.number(0); // carry = 0
         no_inc.to_altstack();
 
+        // If we increment, we have to check if it will overflow
         inc.op_dup();
-        inc.number(max_nary as u32);
+        // It will overflow if the current number is equal to the maximum value allowed for this round
+        inc.number(if round == rounds {
+            max_last_round
+        } else {
+            max_nary
+        } as u32);
         inc.op_equal();
 
         let (mut overflow, mut no_overflow) = inc.open_if();
+        // No overflow, we can safely increment the number
         no_overflow.op_1add();
         no_overflow.to_altstack();
+
+        // No overflow, carry = 0
         no_overflow.number(0);
         no_overflow.to_altstack();
 
-        overflow.op_drop();
-        overflow.number(0);
+        // Overflow, the number wraps to 0
+        overflow.op_drop(); // first drop the number
+        overflow.number(0); // and replace it with zero
         overflow.to_altstack();
+
+        // Overflow, carry = 1
         overflow.number(1);
         overflow.to_altstack();
 
+        // In all branches we just consume the number in the top of the stack, and push 2 to the altstack (the incremented number and the carry)
         inc.end_if(overflow, no_overflow, 1, vec![], 2);
         stack.end_if(inc, no_inc, 1, vec![], 2);
     }
 
+    // At the end, there is still the carry in the altstack, we have to drop it
     stack.from_altstack();
     stack.op_drop();
 }
 
 pub fn increment_var(stack: &mut StackTracker, var: StackVariable) -> StackVariable {
     let nibbles = stack.get_size(var);
-    next_decision_in_altstack(stack, var, nibbles as u8, 15, 15);
+    increment_decisions_in_altstack(stack, var, nibbles as u8, 15, 15);
     stack.from_altstack_joined(nibbles, "inc")
 }
 
@@ -2766,9 +2774,22 @@ mod tests {
         );
     }
 
-    fn test_increment_decision_aux(decision: u64, rounds: u8, nary: u8, nary_last_round: u8) {
+    fn test_increment_decisions_aux(
+        decisions: &[u32],
+        expected_incremented_decisions: &[u32],
+        nary: u8,
+        nary_last_round: u8,
+    ) {
+        assert!(decisions.len() == expected_incremented_decisions.len());
+
+        let rounds = decisions.len() as u32;
         let stack = &mut StackTracker::new();
-        let tables = &StackTables::new(stack, false, false, 0b111, 0b111, 0);
+
+        for decision in decisions.iter() {
+            stack.number(*decision);
+        }
+
+        let decisions = stack.join_in_stack(rounds, None, Some("decisions"));
 
         let max_nary = nary - 1;
         let max_last_round = if nary_last_round == 0 {
@@ -2777,46 +2798,47 @@ mod tests {
             nary_last_round - 1
         };
 
-        let decision_var = stack.number_u64(decision);
-        let next_decision_var = stack.number_u64(decision + 1);
+        increment_decisions_in_altstack(stack, decisions, rounds as u8, max_nary, max_last_round);
+        let incremented_decisions =
+            stack.from_altstack_joined(rounds as u32, "incremented_decisions");
 
-        var_to_decisions_in_altstack(
-            stack,
-            tables,
-            next_decision_var,
-            nary,
-            nary_last_round,
-            rounds,
-        );
+        for decision in expected_incremented_decisions.iter() {
+            stack.number(*decision);
+        }
 
-        var_to_decisions_in_altstack(stack, tables, decision_var, nary, nary_last_round, rounds);
-
-        let decision = stack.from_altstack_joined(rounds as u32, "decision_bits");
-
-        next_decision_in_altstack(stack, decision, rounds, max_nary, max_last_round);
-        let incremented_decision_bits = stack.from_altstack_joined(rounds as u32, "decision_bits");
-
-        let expected_next_decision_bits =
-            stack.from_altstack_joined(rounds as u32, "expected_decision_bits");
+        let expected_incremented_decisions =
+            stack.join_in_stack(rounds, None, Some("expected_incremented_decisions"));
 
         stack.equals(
-            incremented_decision_bits,
+            incremented_decisions,
             true,
-            expected_next_decision_bits,
+            expected_incremented_decisions,
             true,
         );
 
-        tables.drop(stack);
         stack.op_true();
 
         assert!(stack.run().success);
     }
     #[test]
-    fn test_next_decision() {
-        test_increment_decision_aux(100, 4, 8, 4);
-        test_increment_decision_aux(302, 8, 8, 2);
-        test_increment_decision_aux(38, 8, 2, 2);
-        test_increment_decision_aux(892, 4, 8, 0);
+    fn test_increment_decisions() {
+        test_increment_decisions_aux(&[0, 0, 0, 0], &[0, 0, 0, 1], 16, 8);
+        test_increment_decisions_aux(&[0, 0, 0, 4], &[0, 0, 0, 5], 16, 8);
+
+        test_increment_decisions_aux(&[0, 0, 0, 7], &[0, 0, 1, 0], 16, 8);
+        test_increment_decisions_aux(&[0, 0, 2, 7], &[0, 0, 3, 0], 16, 8);
+
+        test_increment_decisions_aux(&[0, 15, 15, 7], &[1, 0, 0, 0], 16, 8);
+        test_increment_decisions_aux(&[1, 15, 15, 7], &[2, 0, 0, 0], 16, 8);
+
+        test_increment_decisions_aux(&[1, 15, 15, 15], &[2, 0, 0, 0], 16, 0);
+
+        test_increment_decisions_aux(&[2, 1, 3, 1], &[2, 2, 0, 0], 4, 2);
+
+        // This happens if conflict_step == max_step and it is not allowed since conflict_step is one less than the actual
+        // step the verifier asks the trace for. So it is actually selectiong the 'max_step+1' step, and the prover can
+        // challenge this since it will also be bigger than his last_step
+        test_increment_decisions_aux(&[15, 15, 15, 15], &[0, 0, 0, 0], 16, 0);
     }
 
     mod fuzz_tests {
