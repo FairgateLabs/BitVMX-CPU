@@ -1639,6 +1639,13 @@ pub fn split(stack: &mut StackTracker, tables: &StackTables, right_size: u8) {
     shift(stack, &tables.rshift, BITS_NIBBLE - right_size);
 }
 
+// Convert a number_u64 into a sequence of decision bits, each containing
+// either 'nary_last_round' bits for the last one or 'nary' bits for the rest.
+//
+// It accumulates bits into a temporary variable, and once enough bits are
+// collected for one output decision, the decision is pushed to the altstack.
+// 'remaining_bits': how many bits are still needed for the current decision.
+// 'start_position': where in the accumulator the next nibble fragment lands.
 pub fn var_to_decisions_in_altstack(
     stack: &mut StackTracker,
     tables: &StackTables,
@@ -1657,57 +1664,92 @@ pub fn var_to_decisions_in_altstack(
 
     stack.move_var(var);
     stack.explode(var);
-    stack.number(0);
-    let nibbles_needed =
-        (remaining_bits + bits_nary_round * (rounds - 1) + BITS_NIBBLE - 1) / BITS_NIBBLE;
+    stack.number(0); // set accumulator to 0
 
-    for _ in 0..nibbles_needed {
+    let mut nibbles_used = 0;
+    let mut remaining_rounds = rounds;
+
+    while remaining_rounds > 0 {
+        nibbles_used += 1;
+        // Case 1: nibble has less bits than we need
         if remaining_bits > BITS_NIBBLE {
+            // Directly add full nibble into accumulator at start_position
             stack.op_swap();
             shift(stack, &tables.lshift, start_position);
             stack.op_add();
+
+            // Since we added the current nibble of 'BITS_NIBBLE' bits
+            // we should update the variables accordingly
             start_position += BITS_NIBBLE;
             remaining_bits -= BITS_NIBBLE;
-        } else if remaining_bits == BITS_NIBBLE {
+        }
+        // Case 2: nibble exactly fills the remaining bits
+        else if remaining_bits == BITS_NIBBLE {
+            // Directly add full nibble into accumulator at start_position
             stack.op_swap();
             shift(stack, &tables.lshift, start_position);
             stack.op_add();
+
+            // Accumulator is now complete we should push it to altstack
+            // and reset the variables
             start_position = 0;
             remaining_bits = bits_nary_round;
+            remaining_rounds -= 1;
             stack.to_altstack();
+            // Reset accumulator
             stack.number(0);
-        } else {
-            let times_needed =
-                1 + (BITS_NIBBLE - remaining_bits + bits_nary_round - 1) / bits_nary_round;
+        }
+        // Case 3: nibble contains more bits than we need, this nibble will span at least 2 rounds
+        else {
+            // How many bits of the current nibble are still unprocessed
             let mut current_bits = BITS_NIBBLE;
-            for _ in 0..times_needed {
+            while current_bits > 0 && remaining_rounds > 0 {
                 stack.op_swap();
+
+                // Split nibble into high and low fragments:
+                // low = remaining_bits; high = rest
+                // high fragment is used in the next iteration and will be splited again
                 split(stack, tables, remaining_bits);
+
+                // Add low fragment at correct position into accumulator
                 shift(stack, &tables.lshift, start_position);
                 stack.op_rot();
                 stack.op_add();
 
                 if remaining_bits <= current_bits {
+                    // We used remaining_bits of our current_bits and compleated a round
                     current_bits -= remaining_bits;
                     remaining_bits = bits_nary_round;
                     start_position = 0;
+
+                    // Push completed accumulator to altstack
+                    remaining_rounds -= 1;
                     stack.to_altstack();
+                    // Reset accumulator
                     stack.number(0);
                 } else {
+                    // We used remaining_bits of our current_bits but it wasn't enough to complete a round
+                    // we update the tracking variables so the next nibble completes the round
                     remaining_bits -= current_bits;
                     start_position += current_bits;
+                    current_bits = 0;
                 }
             }
+
+            // the last high fragment is still in the stack and it should be 0 since 
+            // we used all the bits of the nibble or all rounds have beed completed
             stack.op_swap();
             stack.number(0);
             stack.op_equalverify();
         }
     }
 
+    // last unfilled accumulator is still in the stack and it should be 0
     stack.number(0);
     stack.op_equalverify();
 
-    for _ in 0..(16 - nibbles_needed) {
+    // the rest of the unused nibbles should be 0 too
+    for _ in 0..(16 - nibbles_used) {
         stack.number(0);
         stack.op_equalverify();
     }
@@ -1791,7 +1833,11 @@ pub fn verify_challenge_step(
 ) {
     let tables = &StackTables::new(stack, false, false, 0b111, 0b111, 0);
     var_to_decisions_in_altstack(stack, tables, step, nary_last_round, nary, rounds);
-    let converted_step = stack.from_altstack_joined(rounds as u32, "converted_step");
+    let converted_step = if rounds == 1 {
+        stack.from_altstack()
+    } else {
+        stack.from_altstack_joined(rounds as u32, "converted_step")
+    };
     stack.equals(decisions, true, converted_step, true);
     tables.drop(stack);
 }
@@ -2685,13 +2731,29 @@ mod tests {
 
     #[test]
     fn test_var_to_decisions_in_altstack() {
-        test_var_to_decisions_in_altstack_aux(&[4, 2, 4, 0], 1104, 4, 8);
-        test_var_to_decisions_in_altstack_aux(&[4, 2, 4, 1], 1105, 4, 8);
-        test_var_to_decisions_in_altstack_aux(&[4, 2, 4, 2], 1106, 4, 8);
-        test_var_to_decisions_in_altstack_aux(&[4, 2, 4, 3], 1107, 4, 8);
+        test_var_to_decisions_in_altstack_aux(&[0b100, 0b010, 0b100, 0b00], 0b100_010_100_00, 4, 8);
+        test_var_to_decisions_in_altstack_aux(&[0b100, 0b010, 0b100, 0b01], 0b100_010_100_01, 4, 8);
+        test_var_to_decisions_in_altstack_aux(&[0b100, 0b010, 0b100, 0b10], 0b100_010_100_10, 4, 8);
+        test_var_to_decisions_in_altstack_aux(&[0b100, 0b010, 0b100, 0b11], 0b100_010_100_11, 4, 8);
+        test_var_to_decisions_in_altstack_aux(&[0b010, 0b001, 0b111, 0b01], 0b010_001_111_01, 4, 8);
 
-        test_var_to_decisions_in_altstack_aux(&[0, 3, 0, 3], 99, 4, 8);
-        test_var_to_decisions_in_altstack_aux(&[1, 3, 0, 3], 355, 4, 8);
+        test_var_to_decisions_in_altstack_aux(&[0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0], 0b011010010110, 0, 2);
+
+        test_var_to_decisions_in_altstack_aux(&[0], 0, 0, 2);
+        test_var_to_decisions_in_altstack_aux(&[1], 1, 0, 2);
+
+        test_var_to_decisions_in_altstack_aux(&[0b1010, 0b1101, 0b0010, 0b0101], 0b1010_1101_0010_0101, 0, 16);
+
+        test_var_to_decisions_in_altstack_aux(&[0b11, 0b11, 0b11, 0b1], 0b11_11_11_1, 2, 4);
+        test_var_to_decisions_in_altstack_aux(&[0, 0, 0, 0, 0, 0, 0, 0], 0, 2, 16);
+        test_var_to_decisions_in_altstack_aux(
+            &[
+                0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf,
+            ],
+            0xffff_ffff_ffff_ffff,
+            0,
+            16,
+        );
     }
 
     fn test_increment_decision_aux(decision: u64, rounds: u8, nary: u8, nary_last_round: u8) {
