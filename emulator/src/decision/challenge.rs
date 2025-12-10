@@ -2428,6 +2428,99 @@ mod tests {
     }
 
     #[test]
+    fn test_challenge_equivocation_resign_step_hash_second_nary() {
+        init_trace();
+        let fail_read_args = vec!["1106", "0xaa000000", "0x11111100", "0xaa000000", "769"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+
+        let fail_config = Some(FailConfiguration::new_fail_reads(FailReads::new(
+            None,
+            Some(&fail_read_args),
+        )));
+
+        let fail_resign = Some(FailConfiguration::new_fail_resign_hash(768));
+
+        test_challenge_aux(
+            "57",
+            "hello-world.yaml",
+            17,
+            false,
+            fail_config.clone(),
+            fail_resign.clone(),
+            None,
+            None,
+            true,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "58",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            None,
+            fail_config,
+            fail_resign,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
+            ForceChallenge::EquivocationResign(EquivocationKind::StepHash),
+        );
+    }
+
+    #[test]
+    fn test_challenge_equivocation_resign_next_hash_second_nary() {
+        init_trace();
+        let fail_read_args = vec!["1106", "0xaa000000", "0x11111100", "0xaa000000", "769"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+
+        let fail_config = Some(FailConfiguration::new_fail_reads(FailReads::new(
+            None,
+            Some(&fail_read_args),
+        )));
+
+        let fail_resign = Some(FailConfiguration::new_fail_resign_hash(769));
+
+        test_challenge_aux(
+            "57",
+            "hello-world.yaml",
+            17,
+            false,
+            fail_config.clone(),
+            fail_resign.clone(),
+            None,
+            None,
+            true,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
+            ForceChallenge::No,
+        );
+
+        test_challenge_aux(
+            "58",
+            "hello-world.yaml",
+            17,
+            false,
+            None,
+            None,
+            fail_config,
+            fail_resign,
+            false,
+            ForceCondition::ValidInputWrongStepOrHash,
+            ForceChallenge::No,
+            ForceChallenge::EquivocationResign(EquivocationKind::NextHash),
+        );
+    }
+
+
+    #[test]
     fn test_challenge_pc_read_from_non_code() {
         init_trace();
 
