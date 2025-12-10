@@ -179,9 +179,8 @@ pub fn program_counter_challenge(stack: &mut StackTracker) {
     stack.equals(result, true, prover_prev_hash, true);
 }
 
-// When the prover commits the final step as halt but it's is not a halt-success instruction the verifier can challenge it.
-// TODO CHECK: The opcode needs to be provided and compared with the static opcode given by the PC on the proper leaf when expanding the trace
-// WOTS_PROVER_FINAL_STEP:16 == WOTS_PROVER_TRACE_STEP:16 && ( WOTS_PROVER_READ_VALUE_1:8 | WOTS_PROVER_READ_VALUE_2:8 | WOTS_PROVER_OPCODE:8 !=  93 | 0 | 115 )
+// When the prover commits the final step as halt but it's is not a halt-success instruction or the hash is different, the verifier can challenge it.
+// WOTS_PROVER_FINAL_STEP:16 == WOTS_PROVER_TRACE_STEP:16 && ( WOTS_PROVER_READ_VALUE_1:8 | WOTS_PROVER_READ_VALUE_2:8 | WOTS_PROVER_OPCODE:8 | WOTS_PROVER_NEXT_HASH_TK !=  93 | 0 | 115 | WOTS_PROVER_FINAL_HASH )
 pub fn halt_challenge(stack: &mut StackTracker) {
     stack.clear_definitions();
 
