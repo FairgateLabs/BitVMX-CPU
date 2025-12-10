@@ -636,25 +636,44 @@ pub fn future_read_challenge(stack: &mut StackTracker) {
     stack.op_verify();
 }
 
-fn get_round_and_index(stack: &mut StackTracker, decisions_bits: StackVariable, round: u8) {
-    if round == 0 {
+// We can get the round the selected hash was provided by counting from the end
+// how many consecutive zeros we have.
+// The first non zero is the index counting from 1.
+// Example: 
+// [4,0,2,0,0]: the hash was provided in the third round, in the second index.
+// [4,0,2,0,1]: the hash was provided in the fifth round, in the first index.
+// Edge case:
+// [0,0,0,0,0]: here our algorithm will say it was in the 0 round 0 index which
+// doesn't exist (we start rounds and indices from 1), this points to the 
+// initial step hash which was never provided, it is already known and we can't
+// challenge it in the resign challenge, we should use trace_hash_zero for that
+//
+// The 'rounds' parameter is the number of rounds in the nary search, but it will
+// also be used to call the function recursively and track which round we are
+// currently looking at.
+fn get_round_and_index(stack: &mut StackTracker, decisions_bits: StackVariable, rounds: u8) {
+    if rounds == 0 { 
+        // If we reach the round 0 then we are at the invalid edge case
         stack.number(0);
         stack.number(0);
     } else {
-        stack.copy_var_sub_n(decisions_bits, round as u32 - 1);
+        stack.copy_var_sub_n(decisions_bits, rounds as u32 - 1);
         stack.number(0);
         stack.op_equal();
 
-        let (mut if_true, mut if_false) = stack.open_if_with_debug();
+        let (mut is_zero, mut is_not_zero) = stack.open_if_with_debug();
 
-        if_false.number(round as u32);
-        if_false.copy_var_sub_n(decisions_bits, round as u32 - 1);
+        // If the current bits aren't zero then this is where the hash was provided
+        // (assuming that we got here because all the previous one were zero)
+        is_not_zero.number(rounds as u32);
+        is_not_zero.copy_var_sub_n(decisions_bits, rounds as u32 - 1);
 
-        get_round_and_index(&mut if_true, decisions_bits, round - 1);
+        // If they are zero, then we call recursively for the previous round.
+        get_round_and_index(&mut is_zero, decisions_bits, rounds - 1);
 
         stack.end_if(
-            if_true,
-            if_false,
+            is_zero,
+            is_not_zero,
             0,
             vec![
                 (1, "calculated_round".to_string()),
