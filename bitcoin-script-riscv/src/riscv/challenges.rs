@@ -685,7 +685,7 @@ pub fn equivocation_resign_challenge(
 
     // TODO: Optimize this...
     let tables = &StackTables::new(stack, false, false, 0b111, 0b111, 0);
-    var_to_decisions_in_altstack(stack, tables, step, nary_last_round, nary, rounds);
+    var_to_decisions_in_altstack(stack, tables, step, nary, nary_last_round, rounds);
     tables.drop(stack);
     let mut decisions_bits = stack.from_altstack_joined(rounds as u32, "decisions_bits");
 
@@ -697,7 +697,7 @@ pub fn equivocation_resign_challenge(
             nary_last_round - 1
         };
 
-        next_decision_in_altstack(stack, decisions_bits, rounds, max_last_round, max_nary);
+        next_decision_in_altstack(stack, decisions_bits, rounds, max_nary, max_last_round);
         decisions_bits = stack.from_altstack_joined(rounds as u32, "next_decisions_bits");
     }
 

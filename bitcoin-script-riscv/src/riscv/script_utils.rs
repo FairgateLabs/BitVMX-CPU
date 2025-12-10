@@ -1650,8 +1650,8 @@ pub fn var_to_decisions_in_altstack(
     stack: &mut StackTracker,
     tables: &StackTables,
     var: StackVariable,
-    nary_last_round: u8,
     nary: u8,
+    nary_last_round: u8,
     rounds: u8,
 ) {
     let bits_nary_round = f64::log2(nary as f64) as u8;
@@ -1736,7 +1736,7 @@ pub fn var_to_decisions_in_altstack(
                 }
             }
 
-            // the last high fragment is still in the stack and it should be 0 since 
+            // the last high fragment is still in the stack and it should be 0 since
             // we used all the bits of the nibble or all rounds have beed completed
             stack.op_swap();
             stack.number(0);
@@ -1759,8 +1759,8 @@ pub fn next_decision_in_altstack(
     stack: &mut StackTracker,
     decisions_bits: StackVariable,
     rounds: u8,
-    max_last_round: u8,
     max_nary: u8,
+    max_last_round: u8,
 ) {
     stack.move_var(decisions_bits);
     stack.explode(decisions_bits);
@@ -1832,7 +1832,7 @@ pub fn verify_challenge_step(
     rounds: u8,
 ) {
     let tables = &StackTables::new(stack, false, false, 0b111, 0b111, 0);
-    var_to_decisions_in_altstack(stack, tables, step, nary_last_round, nary, rounds);
+    var_to_decisions_in_altstack(stack, tables, step, nary, nary_last_round, rounds);
     let converted_step = if rounds == 1 {
         stack.from_altstack()
     } else {
@@ -2709,8 +2709,8 @@ mod tests {
     fn test_var_to_decisions_in_altstack_aux(
         decisions: &[u32],
         step: u64,
-        nary_last_round: u8,
         nary: u8,
+        nary_last_round: u8,
     ) {
         let rounds = decisions.len();
         let stack = &mut StackTracker::new();
@@ -2731,28 +2731,38 @@ mod tests {
 
     #[test]
     fn test_var_to_decisions_in_altstack() {
-        test_var_to_decisions_in_altstack_aux(&[0b100, 0b010, 0b100, 0b00], 0b100_010_100_00, 4, 8);
-        test_var_to_decisions_in_altstack_aux(&[0b100, 0b010, 0b100, 0b01], 0b100_010_100_01, 4, 8);
-        test_var_to_decisions_in_altstack_aux(&[0b100, 0b010, 0b100, 0b10], 0b100_010_100_10, 4, 8);
-        test_var_to_decisions_in_altstack_aux(&[0b100, 0b010, 0b100, 0b11], 0b100_010_100_11, 4, 8);
-        test_var_to_decisions_in_altstack_aux(&[0b010, 0b001, 0b111, 0b01], 0b010_001_111_01, 4, 8);
+        test_var_to_decisions_in_altstack_aux(&[0b100, 0b010, 0b100, 0b00], 0b100_010_100_00, 8, 4);
+        test_var_to_decisions_in_altstack_aux(&[0b100, 0b010, 0b100, 0b01], 0b100_010_100_01, 8, 4);
+        test_var_to_decisions_in_altstack_aux(&[0b100, 0b010, 0b100, 0b10], 0b100_010_100_10, 8, 4);
+        test_var_to_decisions_in_altstack_aux(&[0b100, 0b010, 0b100, 0b11], 0b100_010_100_11, 8, 4);
+        test_var_to_decisions_in_altstack_aux(&[0b010, 0b001, 0b111, 0b01], 0b010_001_111_01, 8, 4);
 
-        test_var_to_decisions_in_altstack_aux(&[0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0], 0b011010010110, 0, 2);
+        test_var_to_decisions_in_altstack_aux(
+            &[0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0],
+            0b011010010110,
+            2,
+            0,
+        );
 
-        test_var_to_decisions_in_altstack_aux(&[0], 0, 0, 2);
-        test_var_to_decisions_in_altstack_aux(&[1], 1, 0, 2);
+        test_var_to_decisions_in_altstack_aux(&[0], 0, 2, 0);
+        test_var_to_decisions_in_altstack_aux(&[1], 1, 2, 0);
 
-        test_var_to_decisions_in_altstack_aux(&[0b1010, 0b1101, 0b0010, 0b0101], 0b1010_1101_0010_0101, 0, 16);
+        test_var_to_decisions_in_altstack_aux(
+            &[0b1010, 0b1101, 0b0010, 0b0101],
+            0b1010_1101_0010_0101,
+            16,
+            0,
+        );
 
-        test_var_to_decisions_in_altstack_aux(&[0b11, 0b11, 0b11, 0b1], 0b11_11_11_1, 2, 4);
-        test_var_to_decisions_in_altstack_aux(&[0, 0, 0, 0, 0, 0, 0, 0], 0, 2, 16);
+        test_var_to_decisions_in_altstack_aux(&[0b11, 0b11, 0b11, 0b1], 0b11_11_11_1, 4, 2);
+        test_var_to_decisions_in_altstack_aux(&[0, 0, 0, 0, 0, 0, 0, 0], 0, 16, 2);
         test_var_to_decisions_in_altstack_aux(
             &[
                 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf,
             ],
             0xffff_ffff_ffff_ffff,
-            0,
             16,
+            0,
         );
     }
 
@@ -2768,22 +2778,22 @@ mod tests {
         };
 
         let decision_var = stack.number_u64(decision);
-        let next_decision_var = stack.number_u64(decision.wrapping_add(1));
+        let next_decision_var = stack.number_u64(decision + 1);
 
         var_to_decisions_in_altstack(
             stack,
             tables,
             next_decision_var,
-            nary_last_round,
             nary,
+            nary_last_round,
             rounds,
         );
 
-        var_to_decisions_in_altstack(stack, tables, decision_var, nary_last_round, nary, rounds);
+        var_to_decisions_in_altstack(stack, tables, decision_var, nary, nary_last_round, rounds);
 
         let decision = stack.from_altstack_joined(rounds as u32, "decision_bits");
 
-        next_decision_in_altstack(stack, decision, rounds, max_last_round, max_nary);
+        next_decision_in_altstack(stack, decision, rounds, max_nary, max_last_round);
         let incremented_decision_bits = stack.from_altstack_joined(rounds as u32, "decision_bits");
 
         let expected_next_decision_bits =
