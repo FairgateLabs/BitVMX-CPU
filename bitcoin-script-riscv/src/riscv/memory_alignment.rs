@@ -61,10 +61,7 @@ pub fn verify_alignment(stack: &mut StackTracker, mem_address: StackVariable) {
     stack.drop(lower_half_nibble_table);
 }
 
-pub fn clear_least_significant_bit(
-    stack: &mut StackTracker,
-    mem_address: StackVariable,
-) -> StackVariable {
+pub fn clear_least_significant_bit(stack: &mut StackTracker, mem_address: StackVariable) -> StackVariable {
     let parts = stack.explode(mem_address);
     let table = load_clear_lsb_table(stack);
 

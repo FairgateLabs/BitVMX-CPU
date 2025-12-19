@@ -1,7 +1,6 @@
 use bitvmx_cpu_definitions::trace::{hash_to_string, TraceRWStep};
 use config::Config;
 use serde::Deserialize;
-use std::cmp::min;
 
 use thiserror::Error;
 use tracing::info;
@@ -147,9 +146,8 @@ impl ProgramDefinition {
         Ok((result, last_step, last_hash))
     }
 
-    // If the base is higher that the reported last step, we cap it to the last step
-    // so the prover can still generate hashes. 
-    // After the nary search finishes, the prover can challenge this.
+    //TODO: Check that the base is not higher that the reported finish step
+    //it might be necessary to enforce this in bitcoin script
     pub fn get_round_hashes(
         &self,
         checkpoint_path: &str,
@@ -157,12 +155,7 @@ impl ProgramDefinition {
         round: u8,
         base: u64,
         fail_config: Option<FailConfiguration>,
-        last_step: Option<u64>,
     ) -> Result<Vec<String>, EmulatorError> {
-        let base = match last_step {
-            Some(last_step) => min(last_step, base),
-            None => base,
-        };
         let mut steps = self.nary_def().required_steps(round, base);
         info!(
             "Getting hashes for round: {} with steps: {:?}",

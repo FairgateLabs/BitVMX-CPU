@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{decision::nary_search::NArySearchType, EmulatorError, ExecutionResult};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ExecutionLog {
     pub result: ExecutionResult,
     pub last_step: u64,

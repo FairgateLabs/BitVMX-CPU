@@ -155,9 +155,7 @@ pub fn execute_program(
             }
         }
 
-        let limit_step_reached = limit_step.is_some_and(|limit_step| limit_step == program.step);
-
-        if print_trace || trace.is_err() || program.halt || limit_step_reached {
+        if print_trace || trace.is_err() || program.halt {
             if trace_set.is_none() || trace_set.as_ref().unwrap().contains(&program.step) {
                 let hash_hex = hash_to_string(&program.hash);
                 traces.push((
@@ -205,8 +203,10 @@ pub fn execute_program(
             break ExecutionResult::Halt(program.registers.get(REGISTER_A0 as u32), program.step);
         }
 
-        if limit_step_reached {
-            break ExecutionResult::LimitStepReached(program.step);
+        if let Some(limit_step) = limit_step {
+            if limit_step == program.step {
+                break ExecutionResult::LimitStepReached(limit_step);
+            }
         }
     };
 
@@ -301,12 +301,9 @@ pub fn execute_step(
         Slli(x) | Srli(x) | Srai(x) => op_shift_imm(&instruction, &x, program),
         Slti(x) | Sltiu(x) => op_sl_imm(&instruction, &x, program),
         Sb(x) | Sh(x) | Sw(x) => op_store(&instruction, &x, program)?,
-        Lbu(x) | Lb(x) | Lh(x) | Lhu(x) | Lw(x) => op_load(
-            &instruction,
-            &x,
-            program,
-            fail_config.fail_execute_only_protection,
-        )?,
+        Lbu(x) | Lb(x) | Lh(x) | Lhu(x) | Lw(x) => {
+            op_load(&instruction, &x, program, fail_config.fail_execute_only_protection)?
+        }
         Auipc(x) | Lui(x) => op_upper(&instruction, &x, program),
         Beq(x) | Bne(x) | Blt(x) | Bge(x) | Bltu(x) | Bgeu(x) => {
             op_conditional(&instruction, &x, program)
