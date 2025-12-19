@@ -5,8 +5,8 @@ use emulator::{
     constants::REGISTERS_BASE_ADDRESS,
     decision::{
         challenge::{
-            prover_execute, prover_final_trace, prover_get_hashes_for_round,
-            verifier_check_execution, verifier_choose_challenge,
+            prover_execute, prover_final_trace, prover_get_hashes_and_step,
+            prover_get_hashes_for_round, verifier_check_execution, verifier_choose_challenge,
             verifier_choose_challenge_for_read_challenge, verifier_choose_segment, ForceChallenge,
             ForceCondition,
         },
@@ -183,6 +183,27 @@ enum Commands {
         command_file: String,
     },
 
+    ProverGetHashesAndStep {
+        #[arg(short, long, value_name = "FILE")]
+        pdf: String,
+
+        /// Checkpoint prover path
+        #[arg(short, long, value_name = "CHECKPOINT_PROVER_PATH")]
+        checkpoint_prover_path: String,
+
+        /// Verifier decision
+        #[arg(short, long, value_name = "VERIFIER_DECISION")]
+        v_decision: u32,
+
+        /// Command File to write the result
+        #[arg(short, long, value_name = "COMMAND_PATH")]
+        command_file: String,
+
+        // Fail Configuration
+        #[arg(short, long, value_name = "FailConfigProver")]
+        fail_config_prover: Option<FailConfiguration>,
+    },
+
     VerifierChooseChallenge {
         /// Yaml file to load
         #[arg(short, long, value_name = "FILE")]
@@ -207,6 +228,12 @@ enum Commands {
         /// Command File to write the result
         #[arg(short, long, value_name = "COMMAND_PATH")]
         command_file: String,
+
+        #[arg(short, long, value_name = "RESIGNED_STEP_HASH")]
+        resigned_step_hash: String,
+
+        #[arg(short, long, value_name = "RESIGNED_NEXT_HASH")]
+        resigned_next_hash: String,
     },
 
     VerifierChooseChallengeForReadChallenge {
@@ -229,6 +256,12 @@ enum Commands {
         /// Command File to write the result
         #[arg(short, long, value_name = "COMMAND_PATH")]
         command_file: String,
+
+        #[arg(short, long, value_name = "RESIGNED_STEP_HASH")]
+        resigned_step_hash: String,
+
+        #[arg(short, long, value_name = "RESIGNED_NEXT_HASH")]
+        resigned_next_hash: String,
     },
 
     ///Generate the instruction mapping
@@ -342,6 +375,18 @@ enum Commands {
         #[arg(long, value_names = &["step", "opcode"], num_args = 2)]
         fail_opcode: Option<Vec<String>>,
 
+        /// Fail resign hash at a given step
+        #[arg(long)]
+        fail_resign_hash: Option<u64>,
+
+        /// Fail last_step commitment
+        #[arg(long)]
+        fail_commitment_step: Option<u64>,
+
+        /// Fail hash commitment
+        #[arg(long)]
+        fail_commitment_hash: bool,
+
         /// Memory dump at given step
         #[arg(short, long)]
         dump_mem: Option<u64>,
@@ -400,6 +445,9 @@ fn main() -> Result<(), EmulatorError> {
             fail_read_2: fail_read_2_args,
             fail_write: fail_write_args,
             fail_opcode: fail_opcode_args,
+            fail_resign_hash,
+            fail_commitment_step,
+            fail_commitment_hash,
             dump_mem,
             fail_pc,
             save_non_checkpoint_steps,
@@ -472,6 +520,11 @@ fn main() -> Result<(), EmulatorError> {
                 fail_opcode,
                 fail_memory_protection: false,
                 fail_execute_only_protection: false,
+                fail_resign_hash: *fail_resign_hash,
+                fail_commitment_step: *fail_commitment_step,
+                fail_commitment_hash: *fail_commitment_hash,
+                fail_selection_bits: None,
+                fail_prover_challenge_step: false,
             };
             let result = execute_program(
                 &mut program,
@@ -623,18 +676,17 @@ fn main() -> Result<(), EmulatorError> {
             fail_config_prover,
             command_file,
         }) => {
-            let result: TraceRWStep = prover_final_trace(
+            let prover_final_trace = prover_final_trace(
                 pdf,
                 checkpoint_prover_path,
                 *v_decision,
                 fail_config_prover.clone(),
             )?;
-            info!("Prover final trace: {:?}", result);
+            info!("Prover final trace: {:?}", prover_final_trace);
 
-            let result = EmulatorResultType::ProverFinalTraceResult {
-                final_trace: result.clone(),
-            }
-            .to_value()?;
+            let result =
+                EmulatorResultType::ProverFinalTraceResult { prover_final_trace }.to_value()?;
+
             let mut file = create_or_open_file(command_file);
             file.write_all(result.to_string().as_bytes())
                 .expect("Failed to write JSON to file");
@@ -643,6 +695,8 @@ fn main() -> Result<(), EmulatorError> {
             pdf,
             checkpoint_verifier_path,
             prover_final_trace,
+            resigned_step_hash,
+            resigned_next_hash,
             force,
             fail_config_verifier,
             command_file,
@@ -651,6 +705,8 @@ fn main() -> Result<(), EmulatorError> {
                 pdf,
                 checkpoint_verifier_path,
                 prover_final_trace.clone(),
+                resigned_step_hash,
+                resigned_next_hash,
                 force.clone(),
                 fail_config_verifier.clone(),
                 false,
@@ -669,19 +725,47 @@ fn main() -> Result<(), EmulatorError> {
             pdf,
             checkpoint_verifier_path,
             fail_config_verifier,
+            resigned_step_hash,
+            resigned_next_hash,
             force,
             command_file,
         }) => {
             let result = verifier_choose_challenge_for_read_challenge(
                 pdf,
                 checkpoint_verifier_path,
+                resigned_step_hash,
+                resigned_next_hash,
                 fail_config_verifier.clone(),
                 force.clone(),
+                false,
             )?;
             info!("Verifier choose challenge: {:?}", result);
 
             let result = EmulatorResultType::VerifierChooseChallengeResult {
                 challenge: result.clone(),
+            }
+            .to_value()?;
+            let mut file = create_or_open_file(command_file);
+            file.write_all(result.to_string().as_bytes())
+                .expect("Failed to write JSON to file");
+        }
+        Some(Commands::ProverGetHashesAndStep {
+            pdf,
+            checkpoint_prover_path,
+            v_decision,
+            command_file,
+            fail_config_prover,
+        }) => {
+            let prover_hashes_and_step = prover_get_hashes_and_step(
+                pdf,
+                &checkpoint_prover_path,
+                NArySearchType::ReadValueChallenge,
+                Some(*v_decision),
+                fail_config_prover.clone(),
+            )?;
+
+            let result = EmulatorResultType::ProverGetHashesAndStepResult {
+                prover_hashes_and_step,
             }
             .to_value()?;
             let mut file = create_or_open_file(command_file);

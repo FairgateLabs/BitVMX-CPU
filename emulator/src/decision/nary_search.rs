@@ -2,6 +2,7 @@ use std::{collections::HashMap, str::FromStr};
 
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
+use std::cmp::{max, min};
 use tracing::{error, info};
 
 #[derive(Clone, Copy, PartialEq, ValueEnum, Serialize, Deserialize, Debug)]
@@ -145,6 +146,15 @@ impl NArySearchDefinition {
         info!("Mapping: {:?}", mapping);
         mapping
     }
+
+    pub fn step_from_decision_bits(&self, decision_bits: &Vec<u32>) -> u64 {
+        decision_bits
+            .iter()
+            .enumerate()
+            .fold(0, |res, (round, bits)| {
+                (res << self.bits_for_round(round as u8 + 1)) + *bits as u64
+            })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -185,6 +195,7 @@ pub fn choose_segment(
     prover_hashes: &ExecutionHashes,
     my_hashes: &ExecutionHashes,
     nary_type: NArySearchType,
+    conflict_step: Option<u64>,
 ) -> (u32, u64, u64) {
     if prover_hashes.hashes.len() != my_hashes.hashes.len() {
         error!("Prover and my hashes should have the same length");
@@ -194,7 +205,7 @@ pub fn choose_segment(
     let mut selection = if nary_type == NArySearchType::ConflictStep {
         prover_hashes.hashes.len() + 1
     } else {
-        1
+        0
     };
     for i in 0..prover_hashes.hashes.len() {
         let prover_hash = &prover_hashes.hashes[i];
@@ -209,25 +220,18 @@ pub fn choose_segment(
 
     // first mismatch step
     //println!("Selection: {}", selection);
-    let mismatch_step = nary_defs.step_from_base_and_bits(round, base_step, selection as u32) - 1;
+    let mismatch_step = nary_defs.step_from_base_and_bits(round, base_step, selection as u32);
     //println!("Mismatch step: {}", mismatch_step);
-    let (lower_limit_bits, choice) = if selected_step < mismatch_step {
-        if nary_type == NArySearchType::ConflictStep {
-            (
-                nary_defs.step_bits_for_round(round, selected_step),
-                selected_step,
-            )
-        } else {
-            (selection as u32, mismatch_step + 1)
+    let (lower_limit_bits, choice) = match nary_type {
+        NArySearchType::ConflictStep => {
+            let choice = min(selected_step, mismatch_step - 1);
+            (nary_defs.step_bits_for_round(round, choice), choice)
         }
-    } else {
-        if nary_type == NArySearchType::ConflictStep {
-            (selection as u32 - 1, mismatch_step)
-        } else {
-            (
-                nary_defs.step_bits_for_round(round, selected_step),
-                selected_step,
-            )
+        _ => {
+            let conflict = conflict_step.unwrap();
+            let base = max(selected_step, mismatch_step);
+            let choice = min(base, conflict);
+            (nary_defs.step_bits_for_round(round, choice), choice)
         }
     };
 
@@ -379,6 +383,7 @@ mod tests {
             &prover_hashes.into(),
             &my_hashes.into(),
             NArySearchType::ConflictStep,
+            None,
         );
         assert_eq!(bits, exp_bits);
         assert_eq!(base, exp_step);
@@ -421,5 +426,21 @@ mod tests {
         test_selection_aux(8, 128, 0, 9, 1, Some(0), 0, 0, 9);
         test_selection_aux(8, 128, 0, 9, 2, Some(1), 1, 2, 3);
         test_selection_aux(8, 128, 2, 3, 3, Some(0), 0, 2, 2);
+    }
+
+    fn test_step_from_all_bits_aux(max_steps: u64, nary: u8, bits: &Vec<u32>, expected_step: u64) {
+        let nary_search = NArySearchDefinition::new(max_steps, nary);
+        assert_eq!(bits.len(), nary_search.total_rounds() as usize);
+        assert_eq!(nary_search.step_from_decision_bits(bits), expected_step);
+    }
+
+    #[test]
+    fn test_step_from_all_bits() {
+        test_step_from_all_bits_aux(128, 8, &vec![0, 0, 0], 0);
+        test_step_from_all_bits_aux(128, 8, &vec![0, 0, 1], 1);
+        test_step_from_all_bits_aux(2000, 8, &vec![4, 2, 4, 0], 1104);
+        test_step_from_all_bits_aux(2000, 8, &vec![4, 2, 4, 1], 1105);
+        test_step_from_all_bits_aux(2000, 8, &vec![4, 2, 4, 2], 1106);
+        test_step_from_all_bits_aux(2000, 8, &vec![4, 2, 4, 3], 1107);
     }
 }

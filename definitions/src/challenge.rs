@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use strum_macros::{EnumIter, EnumString};
 use thiserror::Error;
 
 use crate::{
@@ -8,50 +9,197 @@ use crate::{
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ChallengeType {
-    TraceHash(String, TraceStep, String), // PROVER_PREV_HASH, PROVER_TRACE_STEP, PROVER_STEP_HASH
-    TraceHashZero(TraceStep, String),     // PROVER_TRACE_STEP, PROVER_STEP_HASH
-    EntryPoint(TraceReadPC, u64, Option<u32>), // (PROVER_READ_PC, PROVER_READ_MICRO), PROVER_TRACE_STEP, ENTRYPOINT (only used on test)
-    ProgramCounter(String, TraceStep, String, TraceReadPC),
-    Opcode(TraceReadPC, u32, Option<Chunk>), // (PROVER_PC, PROVER_OPCODE), CHUNK_INDEX, CHUNK_BASE_ADDRESS, OPCODES_CHUNK
-    InputData(TraceRead, TraceRead, u32, u32),
-    InitializedData(TraceRead, TraceRead, u32, u32, Option<Chunk>),
-    UninitializedData(TraceRead, TraceRead, u32, Option<SectionDefinition>),
-    RomData(TraceRead, TraceRead, u32, u32),
-    AddressesSections(
-        TraceRead,
-        TraceRead,
-        TraceWrite,
-        MemoryWitness,
-        ProgramCounter,
-        Option<SectionDefinition>, // read write sections
-        Option<SectionDefinition>, // read only sections
-        Option<SectionDefinition>, // register sections
-        Option<SectionDefinition>, // code sections
-    ),
+    Halt {
+        prover_last_step: u64,
+        prover_conflict_step_tk: u64,
+        prover_trace: TraceRWStep,
+        prover_next_hash: String,
+        prover_last_hash: String,
+    },
+    TraceHash {
+        prover_step_hash: String,
+        prover_trace: TraceStep,
+        prover_next_hash: String,
+    },
+    TraceHashZero {
+        prover_trace: TraceStep,
+        prover_next_hash: String,
+        prover_conflict_step_tk: u64,
+    },
+    EntryPoint {
+        prover_read_pc: TraceReadPC,
+        prover_conflict_step_tk: u64,
+        real_entry_point: Option<u32>,
+    },
+    ProgramCounter {
+        pre_hash: String,
+        trace: TraceStep,
+        prover_step_hash: String,
+        prover_pc_read: TraceReadPC,
+    },
+    Opcode {
+        prover_pc_read: TraceReadPC,
+        chunk_index: u32,
+        chunk: Option<Chunk>,
+    },
+    InputData {
+        prover_read_1: TraceRead,
+        prover_read_2: TraceRead,
+        address: u32,
+        input_for_address: u32,
+    },
+    InitializedData {
+        prover_read_1: TraceRead,
+        prover_read_2: TraceRead,
+        read_selector: u32,
+        chunk_index: u32,
+        chunk: Option<Chunk>,
+    },
+    UninitializedData {
+        prover_read_1: TraceRead,
+        prover_read_2: TraceRead,
+        read_selector: u32,
+        sections: Option<SectionDefinition>,
+    },
+    RomData {
+        prover_read_1: TraceRead,
+        prover_read_2: TraceRead,
+        address: u32,
+        input_for_address: u32,
+    },
+    AddressesSections {
+        prover_read_1: TraceRead,
+        prover_read_2: TraceRead,
+        prover_write: TraceWrite,
+        prover_witness: MemoryWitness,
+        prover_pc: ProgramCounter,
+        read_write_sections: Option<SectionDefinition>,
+        read_only_sections: Option<SectionDefinition>,
+        register_sections: Option<SectionDefinition>,
+        code_sections: Option<SectionDefinition>,
+    },
     FutureRead {
-        step: u64,
-        read_step_1: u64,
-        read_step_2: u64,
+        prover_conflict_step_tk: u64,
+        prover_read_step_1: u64,
+        prover_read_step_2: u64,
         read_selector: u32,
     },
-    ReadValueNArySearch(u32),
+    ReadValueNArySearch {
+        bits: u32,
+    },
     ReadValue {
-        read_1: TraceRead,
-        read_2: TraceRead,
+        prover_read_1: TraceRead,
+        prover_read_2: TraceRead,
         read_selector: u32,
-        step_hash: String,
+        prover_hash: String,
         trace: TraceStep,
-        next_hash: String,
-        write_step: u64,
-        conflict_step: u64,
+        prover_next_hash: String,
+        prover_write_step_tk: u64,
+        prover_conflict_step_tk: u64,
     },
     CorrectHash {
-        prover_hash: String,
+        prover_step_hash: String,
         verifier_hash: String,
         trace: TraceStep,
-        next_hash: String,
+        prover_next_hash: String,
+    },
+    EquivocationResign {
+        prover_true_hash: String,
+        prover_wrong_hash: String,
+        prover_challenge_step_tk: u64,
+        kind: EquivocationKind,
+        expected_round: u8,
+        expected_index: u8,
+        rounds: Option<u8>,
+        nary: Option<u8>,
+        nary_last_round: Option<u8>,
+    },
+    EquivocationHash {
+        prover_step_hash1: String,
+        prover_step_hash2: String,
+        prover_write_step_tk: u64,
+        prover_conflict_step_tk: u64,
     },
     No,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, EnumString, EnumIter, Default)]
+pub enum EquivocationKind {
+    #[default]
+    StepHash,
+    NextHash,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum ProverFinalTraceType {
+    FinalTraceWithHashesAndStep {
+        trace: TraceRWStep,
+        step_hash: String,
+        next_hash: String,
+        step: u64,
+    },
+    ChallengeStep,
+}
+
+impl ProverFinalTraceType {
+    pub fn as_final_trace_with_hashes_and_step(
+        &self,
+    ) -> Result<(TraceRWStep, String, String, u64), EmulatorResultError> {
+        match self {
+            Self::FinalTraceWithHashesAndStep {
+                trace,
+                step_hash,
+                next_hash,
+                step,
+            } => Ok((trace.clone(), step_hash.clone(), next_hash.clone(), *step)),
+            _ => Err(EmulatorResultError::GenericError(
+                "Expected FinalTraceWithHashesAndStep".to_string(),
+            )),
+        }
+    }
+
+    pub fn as_challenge_step(&self) -> Result<(), EmulatorResultError> {
+        match self {
+            Self::ChallengeStep => Ok(()),
+            _ => Err(EmulatorResultError::GenericError(
+                "Expected ChallengeStep".to_string(),
+            )),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum ProverHashesAndStepType {
+    HashesAndStep {
+        step_hash: String,
+        next_hash: String,
+        step: u64,
+    },
+    ChallengeStep,
+}
+
+impl ProverHashesAndStepType {
+    pub fn as_hashes_with_step(&self) -> Result<(String, String, u64), EmulatorResultError> {
+        match self {
+            Self::HashesAndStep {
+                step_hash,
+                next_hash,
+                step,
+            } => Ok((step_hash.clone(), next_hash.clone(), *step)),
+            _ => Err(EmulatorResultError::GenericError(
+                "Expected HashesAndStep".to_string(),
+            )),
+        }
+    }
+
+    pub fn as_challenge_step(&self) -> Result<(), EmulatorResultError> {
+        match self {
+            Self::ChallengeStep => Ok(()),
+            _ => Err(EmulatorResultError::GenericError(
+                "Expected ChallengeStep".to_string(),
+            )),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -75,7 +223,10 @@ pub enum EmulatorResultType {
         round: u8,
     },
     ProverFinalTraceResult {
-        final_trace: TraceRWStep,
+        prover_final_trace: ProverFinalTraceType,
+    },
+    ProverGetHashesAndStepResult {
+        prover_hashes_and_step: ProverHashesAndStepType,
     },
     VerifierChooseChallengeResult {
         challenge: ChallengeType,
@@ -90,8 +241,9 @@ pub enum EmulatorResultError {
 
 impl EmulatorResultType {
     pub fn from_value(value: serde_json::Value) -> Result<Self, EmulatorResultError> {
-        serde_json::from_value(value)
-            .map_err(|e| EmulatorResultError::GenericError(format!("Failed to deserialize: {}", e)))
+        serde_json::from_value(value.clone()).map_err(|e| {
+            EmulatorResultError::GenericError(format!("Failed to deserialize: {} | {:?}", e, value))
+        })
     }
 
     pub fn to_value(&self) -> Result<serde_json::Value, EmulatorResultError> {
@@ -145,11 +297,24 @@ impl EmulatorResultType {
         }
     }
 
-    pub fn as_final_trace(&self) -> Result<TraceRWStep, EmulatorResultError> {
+    pub fn as_final_trace(&self) -> Result<ProverFinalTraceType, EmulatorResultError> {
         match self {
-            EmulatorResultType::ProverFinalTraceResult { final_trace } => Ok(final_trace.clone()),
+            EmulatorResultType::ProverFinalTraceResult { prover_final_trace } => {
+                Ok(prover_final_trace.clone())
+            }
             _ => Err(EmulatorResultError::GenericError(
                 "Expected ProverFinalTraceResult".to_string(),
+            )),
+        }
+    }
+
+    pub fn as_hashes_and_step(&self) -> Result<ProverHashesAndStepType, EmulatorResultError> {
+        match self {
+            EmulatorResultType::ProverGetHashesAndStepResult {
+                prover_hashes_and_step,
+            } => Ok(prover_hashes_and_step.clone()),
+            _ => Err(EmulatorResultError::GenericError(
+                "Expected ProverGetCosignedBitsAndHashesResult".to_string(),
             )),
         }
     }
