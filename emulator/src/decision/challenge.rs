@@ -1,5 +1,5 @@
 use bitvmx_cpu_definitions::{
-    challenge::{ChallengeType, EquivocationKind},
+    challenge::{ChallengeType, EquivocationKind, ProverFinalTraceType, ProverHashesAndStepType},
     constants::{CHUNK_SIZE, LAST_STEP_INIT},
     memory::Chunk,
     trace::{generate_initial_step_hash, hashvec_to_string, validate_step_hash, TraceRWStep},
@@ -15,7 +15,7 @@ use crate::{
         execution_log::VerifierChallengeLog,
         nary_search::{choose_segment, ExecutionHashes, NArySearchType},
     },
-    executor::utils::FailConfiguration,
+    executor::utils::{FailConfiguration, FailSelectionBits},
     loader::program_definition::ProgramDefinition,
     EmulatorError, ExecutionResult,
 };
@@ -80,6 +80,7 @@ pub fn prover_get_hashes_for_round(
     nary_type: NArySearchType,
 ) -> Result<Vec<String>, EmulatorError> {
     let mut challenge_log = ProverChallengeLog::load(checkpoint_path)?;
+    let last_step = challenge_log.execution.last_step;
     let input = challenge_log.input.clone();
     let nary_log = challenge_log.get_nary_log(nary_type);
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
@@ -100,6 +101,7 @@ pub fn prover_get_hashes_for_round(
         round,
         nary_log.base_step,
         fail_config,
+        Some(last_step),
     )?;
     nary_log.hash_rounds.push(hashes.clone());
     // at the first round the verifier hasn't decided anything yet
@@ -202,7 +204,8 @@ pub fn verifier_choose_segment(
         input,
         round,
         nary_log.base_step,
-        fail_config,
+        fail_config.clone(),
+        None,
     )?;
 
     let claim_hashes = ExecutionHashes::from_hexstr(&prover_last_hashes);
@@ -227,6 +230,21 @@ pub fn verifier_choose_segment(
 
     info!("Verifier selects bits: {bits} base: {base} selection: {new_selected}");
 
+    let fail_selection = fail_config.and_then(|fail_config| {
+        fail_config
+            .fail_selection_bits
+            .and_then(|fail_selection_bits| match fail_selection_bits {
+                FailSelectionBits::Round { round, bits } => Some((round, bits)),
+                _ => None,
+            })
+    });
+
+    if let Some((fail_round, fail_bits)) = fail_selection {
+        if fail_round == round {
+            return Ok(fail_bits as u32);
+        }
+    }
+
     Ok(bits)
 }
 
@@ -235,7 +253,7 @@ pub fn prover_final_trace(
     checkpoint_path: &str,
     final_bits: u32,
     fail_config: Option<FailConfiguration>,
-) -> Result<(TraceRWStep, String, String, u64), EmulatorError> {
+) -> Result<ProverFinalTraceType, EmulatorError> {
     let mut challenge_log = ProverChallengeLog::load(checkpoint_path)?;
     let input = challenge_log.input.clone();
     let nary_log = challenge_log.get_nary_log(NArySearchType::ConflictStep);
@@ -248,22 +266,35 @@ pub fn prover_final_trace(
 
     nary_log.base_step = final_step;
     nary_log.verifier_decisions.push(final_bits - 1);
-
-    info!("The prover needs to provide the full trace for the selected step {final_step}");
-    let final_trace =
-        program_def.get_trace_step(checkpoint_path, input, final_step, fail_config.clone())?;
-    nary_log.final_trace = final_trace.clone();
     challenge_log.save(checkpoint_path)?;
 
-    let (step_hash, next_hash, conflict_step) = prover_get_hashes_and_step(
+    if let ProverHashesAndStepType::HashesAndStep {
+        step_hash,
+        next_hash,
+        step,
+    } = prover_get_hashes_and_step(
         program_definition_file,
         checkpoint_path,
         NArySearchType::ConflictStep,
         None,
-        fail_config,
-    )?;
+        fail_config.clone(),
+    )? {
+        info!("The prover needs to provide the full trace for the selected step {final_step}");
+        let final_trace =
+            program_def.get_trace_step(checkpoint_path, input, final_step, fail_config)?;
+        let nary_log = challenge_log.get_nary_log(NArySearchType::ConflictStep);
+        nary_log.final_trace = final_trace.clone();
+        challenge_log.save(checkpoint_path)?;
 
-    Ok((final_trace, step_hash, next_hash, conflict_step))
+        Ok(ProverFinalTraceType::FinalTraceWithHashesAndStep {
+            trace: final_trace,
+            step_hash,
+            next_hash,
+            step,
+        })
+    } else {
+        Ok(ProverFinalTraceType::ChallengeStep)
+    }
 }
 
 pub fn prover_get_hashes_and_step(
@@ -272,8 +303,10 @@ pub fn prover_get_hashes_and_step(
     nary_type: NArySearchType,
     final_bits: Option<u32>,
     fail_config: Option<FailConfiguration>,
-) -> Result<(String, String, u64), EmulatorError> {
+) -> Result<ProverHashesAndStepType, EmulatorError> {
     let mut challenge_log = ProverChallengeLog::load(checkpoint_path)?;
+    let last_step = challenge_log.execution.last_step;
+    let conflict_step = challenge_log.conflict_step_log.base_step - 1;
     let nary_log = challenge_log.get_nary_log(nary_type);
 
     let program_def = ProgramDefinition::from_config(program_definition_file)?;
@@ -281,15 +314,24 @@ pub fn prover_get_hashes_and_step(
 
     let total_rounds = nary_def.total_rounds();
 
-    let final_step = match nary_type {
-        NArySearchType::ConflictStep => nary_log.base_step - 1,
+    let (final_step, max_step) = match nary_type {
+        NArySearchType::ConflictStep => (conflict_step, last_step - 1),
         _ => {
             let final_bits = final_bits.unwrap();
             nary_log.verifier_decisions.push(final_bits);
-            nary_def.step_from_base_and_bits(total_rounds, nary_log.base_step, final_bits)
+            let final_step =
+                nary_def.step_from_base_and_bits(total_rounds, nary_log.base_step, final_bits);
+            (final_step, conflict_step)
         }
     };
 
+    if final_step > max_step
+        || fail_config
+            .as_ref()
+            .is_some_and(|fail_config| fail_config.fail_prover_challenge_step)
+    {
+        return Ok(ProverHashesAndStepType::ChallengeStep);
+    }
     let (mut step_hash, mut next_hash) = get_hashes(
         &nary_def.step_mapping(&nary_log.verifier_decisions),
         &nary_log.hash_rounds,
@@ -304,7 +346,11 @@ pub fn prover_get_hashes_and_step(
         }
     }
 
-    Ok((step_hash, next_hash, final_step))
+    Ok(ProverHashesAndStepType::HashesAndStep {
+        step_hash,
+        next_hash,
+        step: final_step,
+    })
 }
 
 pub fn get_hashes(
@@ -500,7 +546,7 @@ pub fn verifier_choose_challenge(
             checkpoint_path,
             verifier_log.input.clone(),
             Some(steps),
-            fail_config,
+            fail_config.clone(),
             false,
         )?
         .1;
@@ -698,7 +744,7 @@ pub fn verifier_choose_challenge(
                 conflict_last_step.max(my_conflict_last_step)
             };
 
-            let bits = nary_def.step_bits_for_round(1, step_to_challenge - 1);
+            let mut bits = nary_def.step_bits_for_round(1, step_to_challenge - 1);
 
             let read_challenge_log = &mut verifier_log.read_challenge_log;
             read_challenge_log.step_to_challenge = step_to_challenge - 1;
@@ -716,6 +762,19 @@ pub fn verifier_choose_challenge(
             verifier_log.read_step = step_to_challenge - 1;
             verifier_log.read_selector = read_selector;
             verifier_log.save(checkpoint_path)?;
+
+            let fail_selection = fail_config.and_then(|fail_config| {
+                fail_config
+                    .fail_selection_bits
+                    .and_then(|fail_selection_bits| match fail_selection_bits {
+                        FailSelectionBits::Challenge { bits } => Some(bits),
+                        _ => None,
+                    })
+            });
+
+            if let Some(fail_bits) = fail_selection {
+                bits = fail_bits as u32;
+            }
 
             return Ok(ChallengeType::ReadValueNArySearch { bits });
         }
@@ -1039,7 +1098,10 @@ mod tests {
         //PROVER PROVIDES EXECUTE STEP (and reveals full_trace)
         //Use v_desision + 1 as v_decision defines the last agreed step
         let (final_trace, step_hash, next_hash, _) =
-            prover_final_trace(pdf, chk_prover_path, v_decision + 1, fail_config_prover).unwrap();
+            prover_final_trace(pdf, chk_prover_path, v_decision + 1, fail_config_prover)
+                .unwrap()
+                .as_final_trace_with_hashes_and_step()
+                .unwrap();
         info!("Prover final trace: {:?}", final_trace.to_csv());
 
         let result = verify_script(&final_trace, REGISTERS_BASE_ADDRESS, &None);
@@ -1099,6 +1161,8 @@ mod tests {
                     Some(v_decision),
                     fail_config_prover_read_challenge,
                 )
+                .unwrap()
+                .as_hashes_with_step()
                 .unwrap();
 
                 verifier_choose_challenge_for_read_challenge(
@@ -2489,7 +2553,7 @@ mod tests {
         let fail_resign = Some(FailConfiguration::new_fail_resign_hash(769));
 
         test_challenge_aux(
-            "57",
+            "59",
             "hello-world.yaml",
             17,
             false,
@@ -2504,7 +2568,7 @@ mod tests {
         );
 
         test_challenge_aux(
-            "58",
+            "60",
             "hello-world.yaml",
             17,
             false,
@@ -2518,7 +2582,6 @@ mod tests {
             ForceChallenge::EquivocationResign(EquivocationKind::NextHash),
         );
     }
-
 
     #[test]
     fn test_challenge_pc_read_from_non_code() {

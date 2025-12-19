@@ -216,6 +216,21 @@ impl FailOpcode {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum FailSelectionBits {
+    Round { round: u8, bits: u8 },
+    Challenge { bits: u8 },
+}
+
+impl FailSelectionBits {
+    pub fn new(round: Option<u8>, bits: u8) -> Self {
+        round.map_or_else(
+            || Self::Challenge { bits },
+            |round| Self::Round { round, bits },
+        )
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct FailConfiguration {
     pub fail_hash: Option<u64>,
@@ -230,6 +245,8 @@ pub struct FailConfiguration {
     pub fail_execute_only_protection: bool,
     pub fail_commitment_step: Option<u64>,
     pub fail_commitment_hash: bool,
+    pub fail_selection_bits: Option<FailSelectionBits>,
+    pub fail_prover_challenge_step: bool,
 }
 
 impl FailConfiguration {
@@ -239,9 +256,21 @@ impl FailConfiguration {
             ..Default::default()
         }
     }
+    pub fn new_fail_selection_bits(round: Option<u8>, bits: u8) -> Self {
+        Self {
+            fail_selection_bits: Some(FailSelectionBits::new(round, bits)),
+            ..Default::default()
+        }
+    }
     pub fn new_fail_commitment_step(last_step: u64) -> Self {
         Self {
             fail_commitment_step: Some(last_step),
+            ..Default::default()
+        }
+    }
+    pub fn new_fail_prover_challenge_step() -> Self {
+        Self {
+            fail_prover_challenge_step: true,
             ..Default::default()
         }
     }

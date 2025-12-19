@@ -34,7 +34,7 @@ fn test_nary_search_trace_aux(input: u8, expect_err: bool, checkpoint_path: &str
     for round in 1..defs.total_rounds() + 1 {
         info!("Prover gets the steps required by the n-ary search round: {round}");
         let reply_hashes = program_def
-            .get_round_hashes(checkpoint_path, input.clone(), round, base, None)
+            .get_round_hashes(checkpoint_path, input.clone(), round, base, None, None)
             .unwrap(); //get_hashes(&bad_trace, &steps);
         info!("Hashes: {:?}", reply_hashes);
 

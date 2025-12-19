@@ -130,6 +130,78 @@ pub enum EquivocationKind {
     NextHash,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum ProverFinalTraceType {
+    FinalTraceWithHashesAndStep {
+        trace: TraceRWStep,
+        step_hash: String,
+        next_hash: String,
+        step: u64,
+    },
+    ChallengeStep,
+}
+
+impl ProverFinalTraceType {
+    pub fn as_final_trace_with_hashes_and_step(
+        &self,
+    ) -> Result<(TraceRWStep, String, String, u64), EmulatorResultError> {
+        match self {
+            Self::FinalTraceWithHashesAndStep {
+                trace,
+                step_hash,
+                next_hash,
+                step,
+            } => Ok((trace.clone(), step_hash.clone(), next_hash.clone(), *step)),
+            _ => Err(EmulatorResultError::GenericError(
+                "Expected FinalTraceWithHashesAndStep".to_string(),
+            )),
+        }
+    }
+
+    pub fn as_challenge_step(&self) -> Result<(), EmulatorResultError> {
+        match self {
+            Self::ChallengeStep => Ok(()),
+            _ => Err(EmulatorResultError::GenericError(
+                "Expected ChallengeStep".to_string(),
+            )),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum ProverHashesAndStepType {
+    HashesAndStep {
+        step_hash: String,
+        next_hash: String,
+        step: u64,
+    },
+    ChallengeStep,
+}
+
+impl ProverHashesAndStepType {
+    pub fn as_hashes_with_step(&self) -> Result<(String, String, u64), EmulatorResultError> {
+        match self {
+            Self::HashesAndStep {
+                step_hash,
+                next_hash,
+                step,
+            } => Ok((step_hash.clone(), next_hash.clone(), *step)),
+            _ => Err(EmulatorResultError::GenericError(
+                "Expected HashesAndStep".to_string(),
+            )),
+        }
+    }
+
+    pub fn as_challenge_step(&self) -> Result<(), EmulatorResultError> {
+        match self {
+            Self::ChallengeStep => Ok(()),
+            _ => Err(EmulatorResultError::GenericError(
+                "Expected ChallengeStep".to_string(),
+            )),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum EmulatorResultType {
@@ -151,15 +223,10 @@ pub enum EmulatorResultType {
         round: u8,
     },
     ProverFinalTraceResult {
-        final_trace: TraceRWStep,
-        resigned_step_hash: String,
-        resigned_next_hash: String,
-        conflict_step: u64,
+        prover_final_trace: ProverFinalTraceType,
     },
     ProverGetHashesAndStepResult {
-        resigned_step_hash: String,
-        resigned_next_hash: String,
-        write_step: u64,
+        prover_hashes_and_step: ProverHashesAndStepType,
     },
     VerifierChooseChallengeResult {
         challenge: ChallengeType,
@@ -174,8 +241,9 @@ pub enum EmulatorResultError {
 
 impl EmulatorResultType {
     pub fn from_value(value: serde_json::Value) -> Result<Self, EmulatorResultError> {
-        serde_json::from_value(value)
-            .map_err(|e| EmulatorResultError::GenericError(format!("Failed to deserialize: {}", e)))
+        serde_json::from_value(value.clone()).map_err(|e| {
+            EmulatorResultError::GenericError(format!("Failed to deserialize: {} | {:?}", e, value))
+        })
     }
 
     pub fn to_value(&self) -> Result<serde_json::Value, EmulatorResultError> {
@@ -229,38 +297,22 @@ impl EmulatorResultType {
         }
     }
 
-    pub fn as_final_trace(
-        &self,
-    ) -> Result<(TraceRWStep, String, String, u64), EmulatorResultError> {
+    pub fn as_final_trace(&self) -> Result<ProverFinalTraceType, EmulatorResultError> {
         match self {
-            EmulatorResultType::ProverFinalTraceResult {
-                final_trace,
-                resigned_step_hash,
-                resigned_next_hash,
-                conflict_step,
-            } => Ok((
-                final_trace.clone(),
-                resigned_step_hash.to_string(),
-                resigned_next_hash.to_string(),
-                *conflict_step,
-            )),
+            EmulatorResultType::ProverFinalTraceResult { prover_final_trace } => {
+                Ok(prover_final_trace.clone())
+            }
             _ => Err(EmulatorResultError::GenericError(
                 "Expected ProverFinalTraceResult".to_string(),
             )),
         }
     }
 
-    pub fn as_hashes_and_step(&self) -> Result<(String, String, u64), EmulatorResultError> {
+    pub fn as_hashes_and_step(&self) -> Result<ProverHashesAndStepType, EmulatorResultError> {
         match self {
             EmulatorResultType::ProverGetHashesAndStepResult {
-                resigned_step_hash,
-                resigned_next_hash,
-                write_step,
-            } => Ok((
-                resigned_step_hash.to_string(),
-                resigned_next_hash.to_string(),
-                *write_step,
-            )),
+                prover_hashes_and_step,
+            } => Ok(prover_hashes_and_step.clone()),
             _ => Err(EmulatorResultError::GenericError(
                 "Expected ProverGetCosignedBitsAndHashesResult".to_string(),
             )),

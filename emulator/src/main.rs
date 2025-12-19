@@ -379,9 +379,11 @@ enum Commands {
         #[arg(long)]
         fail_resign_hash: Option<u64>,
 
+        /// Fail last_step commitment
         #[arg(long)]
         fail_commitment_step: Option<u64>,
 
+        /// Fail hash commitment
         #[arg(long)]
         fail_commitment_hash: bool,
 
@@ -521,6 +523,8 @@ fn main() -> Result<(), EmulatorError> {
                 fail_resign_hash: *fail_resign_hash,
                 fail_commitment_step: *fail_commitment_step,
                 fail_commitment_hash: *fail_commitment_hash,
+                fail_selection_bits: None,
+                fail_prover_challenge_step: false,
             };
             let result = execute_program(
                 &mut program,
@@ -672,25 +676,17 @@ fn main() -> Result<(), EmulatorError> {
             fail_config_prover,
             command_file,
         }) => {
-            let (final_trace, resigned_step_hash, resigned_next_hash, conflict_step) =
-                prover_final_trace(
-                    pdf,
-                    checkpoint_prover_path,
-                    *v_decision,
-                    fail_config_prover.clone(),
-                )?;
-            info!("Prover final trace: {:?}", final_trace);
-            info!("Prover resigned step hash: {:?}", resigned_step_hash);
-            info!("Prover resigned next hash: {:?}", resigned_next_hash);
-            info!("Prover conflict step: {:?}", conflict_step);
+            let prover_final_trace = prover_final_trace(
+                pdf,
+                checkpoint_prover_path,
+                *v_decision,
+                fail_config_prover.clone(),
+            )?;
+            info!("Prover final trace: {:?}", prover_final_trace);
 
-            let result = EmulatorResultType::ProverFinalTraceResult {
-                final_trace,
-                resigned_step_hash,
-                resigned_next_hash,
-                conflict_step,
-            }
-            .to_value()?;
+            let result =
+                EmulatorResultType::ProverFinalTraceResult { prover_final_trace }.to_value()?;
+
             let mut file = create_or_open_file(command_file);
             file.write_all(result.to_string().as_bytes())
                 .expect("Failed to write JSON to file");
@@ -760,7 +756,7 @@ fn main() -> Result<(), EmulatorError> {
             command_file,
             fail_config_prover,
         }) => {
-            let (resigned_step_hash, resigned_next_hash, write_step) = prover_get_hashes_and_step(
+            let prover_hashes_and_step = prover_get_hashes_and_step(
                 pdf,
                 &checkpoint_prover_path,
                 NArySearchType::ReadValueChallenge,
@@ -769,9 +765,7 @@ fn main() -> Result<(), EmulatorError> {
             )?;
 
             let result = EmulatorResultType::ProverGetHashesAndStepResult {
-                resigned_step_hash,
-                resigned_next_hash,
-                write_step,
+                prover_hashes_and_step,
             }
             .to_value()?;
             let mut file = create_or_open_file(command_file);
