@@ -8,10 +8,10 @@ edition = "2021"
 [dependencies]
 bitcoin-script-stack = { git = "https://github.com/FairgateLabs/rust-bitcoin-script-stack", features = [
     "interactive",
-], branch = "merge-bitvm" }
-bitcoin-script-functions = { git = "https://github.com/FairgateLabs/rust-bitcoin-script-functions", branch = "merge-bitvm" }
+], branch = "v2" }
+bitcoin-script-functions = { git = "https://github.com/FairgateLabs/rust-bitcoin-script-functions"}
 bitcoin = "=0.32.6"
-bitcoin-script = { git = "https://github.com/FairgateLabs/rust-bitcoin-script", branch = "merge-bitvm" }
+bitcoin-script = { git = "https://github.com/FairgateLabs/rust-bitcoin-script", branch = "bitvmx" }
 riscv-decode = "0.2.1"
 thiserror = "1.0.61"
 bitvmx-cpu-definitions = { path = "../definitions" }
