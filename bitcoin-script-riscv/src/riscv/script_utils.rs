@@ -1,7 +1,6 @@
 use bitcoin_script_stack::stack::{StackTracker, StackVariable};
 
-pub use bitcoin_script::{define_pushable, script};
-define_pushable!();
+pub use bitcoin_script::script;
 pub use bitcoin::ScriptBuf as Script;
 use bitvmx_cpu_definitions::memory::{Chunk, MemoryAccessType, SectionDefinition};
 
@@ -58,7 +57,7 @@ pub fn nib_to_bin(stack: &mut StackTracker) {
                     0
                 OP_ENDIF
                 OP_TOALTSTACK
-            },
+            }.compile(),
             1,
             false,
             1,
@@ -180,7 +179,7 @@ pub fn if_greater(stack: &mut StackTracker, than: u8, then: u8, else_: u8) -> St
                 OP_ELSE
                     { else_}
                 OP_ENDIF
-            },
+            }.compile(),
             1,
             true,
             0,
@@ -200,7 +199,7 @@ pub fn if_less(stack: &mut StackTracker, than: u8, then: u8, else_: u8) -> Stack
                 OP_ELSE
                     { else_}
                 OP_ENDIF
-            },
+            }.compile(),
             1,
             true,
             0,
@@ -226,7 +225,7 @@ pub fn sub_1_if_positive(stack: &mut StackTracker) -> StackVariable {
                     0
                 OP_ENDIF
                 OP_TOALTSTACK
-            },
+            }.compile(),
             0,
             true,
             0,
@@ -249,7 +248,7 @@ pub fn choose(stack: &mut StackTracker) -> StackVariable {
                 OP_ROLL
                 OP_SWAP
                 OP_DROP
-            },
+            }.compile(),
             3,
             true,
             0,
@@ -689,7 +688,7 @@ pub fn is_lower_than(
                             { -n }
                         OP_ENDIF
                     OP_ENDIF
-                },
+                }.compile(),
                 3,
                 true,
                 0,
@@ -718,7 +717,7 @@ pub fn is_lower_than(
                             { -n }
                         OP_ENDIF
                     OP_ENDIF
-                },
+                }.compile(),
                 3,
                 true,
                 0,
@@ -767,7 +766,7 @@ pub fn mask_value(
                     OP_DROP
                     0
                 OP_ENDIF
-            },
+            }.compile(),
             2,
             true,
             0,
@@ -850,7 +849,7 @@ pub fn left_rotate(
             for _ in 0..4 {
                 OP_2DROP
             }
-        },
+        }.compile(),
         17,
         false,
         8,
@@ -1077,7 +1076,7 @@ pub fn mulh(
         stack.op_rot(); //a1 b1 b1 a1
         stack.op_add(); //a1 b1 a1+b1
         stack
-            .custom(script! { 1 OP_EQUAL }, 1, true, 0, "result_neg")
+            .custom(script! { 1 OP_EQUAL }.compile(), 1, true, 0, "result_neg")
             .unwrap();
         stack.to_altstack(); //a1 b1 | a1+b1
     }
