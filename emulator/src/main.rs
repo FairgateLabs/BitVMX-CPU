@@ -43,11 +43,11 @@ enum Commands {
         input: String,
 
         /// Checkpoint input path
-        #[arg(short, long, value_name = "CHECKPOINT_PROVER_PATH")]
+        #[arg(short, long, value_name = "CHECKPOINT_PROVER_INPUT_PATH")]
         checkpoint_input_prover_path: String,
 
         /// Checkpoint output path
-        #[arg(short, long, value_name = "CHECKPOINT_PROVER_PATH")]
+        #[arg(short, long, value_name = "CHECKPOINT_PROVER_OUTPUT_PATH")]
         checkpoint_output_prover_path: String,
 
         /// Force
