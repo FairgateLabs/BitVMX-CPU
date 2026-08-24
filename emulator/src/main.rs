@@ -42,9 +42,13 @@ enum Commands {
         #[arg(short, long, value_name = "INPUT (hex)")]
         input: String,
 
-        /// Checkpoint path
-        #[arg(short, long, value_name = "CHECKPOINT_PROVER_PATH")]
-        checkpoint_prover_path: String,
+        /// Checkpoint input path
+        #[arg(short, long, value_name = "CHECKPOINT_PROVER_INPUT_PATH")]
+        checkpoint_input_prover_path: String,
+
+        /// Checkpoint output path
+        #[arg(short, long, value_name = "CHECKPOINT_PROVER_OUTPUT_PATH")]
+        checkpoint_output_prover_path: String,
 
         /// Force
         #[arg(short, long, default_value = "true")]
@@ -72,9 +76,13 @@ enum Commands {
         #[arg(short, long, value_name = "INPUT (hex)")]
         input: String,
 
-        /// Checkpoint path
-        #[arg(short, long, value_name = "CHECKPOINT_VERIFIER_PATH")]
-        checkpoint_verifier_path: String,
+        /// Checkpoint input path
+        #[arg(short, long, value_name = "CHECKPOINT_VERIFIER_INPUT_PATH")]
+        checkpoint_verifier_input_path: String,
+
+        /// Checkpoint output path
+        #[arg(short, long, value_name = "CHECKPOINT_VERIFIER_OUTPUT_PATH")]
+        checkpoint_verifier_output_path: String,
 
         /// Claim last step
         #[arg(short, long, value_name = "CLAIM_LAST_STEP")]
@@ -106,9 +114,13 @@ enum Commands {
         #[arg(short, long, value_name = "FILE")]
         pdf: String,
 
-        /// Checkpoint prover path
-        #[arg(short, long, value_name = "CHECKPOINT_PROVER_PATH")]
-        checkpoint_prover_path: String,
+        /// Checkpoint input path
+        #[arg(short, long, value_name = "CHECKPOINT_PROVER_INPUT_PATH")]
+        checkpoint_input_prover_path: String,
+
+        /// Checkpoint output path
+        #[arg(short, long, value_name = "CHECKPOINT_PROVER_OUTPUT_PATH")]
+        checkpoint_output_prover_path: String,
 
         /// Round number
         #[arg(short, long, value_name = "ROUND_NUMBER")]
@@ -136,9 +148,13 @@ enum Commands {
         #[arg(short, long, value_name = "FILE")]
         pdf: String,
 
-        /// Checkpoint verifier path
-        #[arg(short, long, value_name = "CHECKPOINT_VERIFIER_PATH")]
-        checkpoint_verifier_path: String,
+        /// Checkpoint verifier input path
+        #[arg(short, long, value_name = "CHECKPOINT_VERIFIER_INPUT_PATH")]
+        checkpoint_verifier_input_path: String,
+
+        /// Checkpoint verifier output path
+        #[arg(short, long, value_name = "CHECKPOINT_VERIFIER_OUTPUT_PATH")]
+        checkpoint_verifier_output_path: String,
 
         /// Round number
         #[arg(short, long, value_name = "ROUND_NUMBER")]
@@ -166,9 +182,13 @@ enum Commands {
         #[arg(short, long, value_name = "FILE")]
         pdf: String,
 
-        /// Checkpoint prover path
-        #[arg(short, long, value_name = "CHECKPOINT_PROVER_PATH")]
-        checkpoint_prover_path: String,
+        /// Checkpoint prover input path
+        #[arg(short, long, value_name = "CHECKPOINT_PROVER_INPUT_PATH")]
+        checkpoint_input_prover_path: String,
+
+        /// Checkpoint prover output path
+        #[arg(short, long, value_name = "CHECKPOINT_PROVER_OUTPUT_PATH")]
+        checkpoint_output_prover_path: String,
 
         /// Verifier decision
         #[arg(short, long, value_name = "VERIFIER_DECISION")]
@@ -209,9 +229,13 @@ enum Commands {
         #[arg(short, long, value_name = "FILE")]
         pdf: String,
 
-        /// Checkpoint verifier path
-        #[arg(short, long, value_name = "CHECKPOINT_VERIFIER_PATH")]
-        checkpoint_verifier_path: String,
+        /// Checkpoint verifier input path
+        #[arg(short, long, value_name = "CHECKPOINT_VERIFIER_INPUT_PATH")]
+        checkpoint_verifier_input_path: String,
+
+        /// Checkpoint verifier output path
+        #[arg(short, long, value_name = "CHECKPOINT_VERIFIER_OUTPUT_PATH")]
+        checkpoint_verifier_output_path: String,
 
         /// Prover final trace
         #[arg(short, long, value_name = "PROVER_FINAL_TRACE")]
@@ -241,9 +265,13 @@ enum Commands {
         #[arg(short, long, value_name = "FILE")]
         pdf: String,
 
-        /// Checkpoint verifier path
-        #[arg(short, long, value_name = "CHECKPOINT_VERIFIER_PATH")]
-        checkpoint_verifier_path: String,
+        /// Checkpoint verifier input path
+        #[arg(short, long, value_name = "CHECKPOINT_VERIFIER_INPUT_PATH")]
+        checkpoint_verifier_input_path: String,
+
+        /// Checkpoint verifier output path
+        #[arg(short, long, value_name = "CHECKPOINT_VERIFIER_OUTPUT_PATH")]
+        checkpoint_verifier_output_path: String,
 
         /// Fail Configuration
         #[arg(short, long, value_name = "FailConfigVerifier")]
@@ -333,9 +361,13 @@ enum Commands {
         #[arg(long)]
         sections: bool,
 
-        /// Checkpoint path
+        /// Checkpoint input path
         #[arg(short, long)]
-        checkpoint_path: Option<String>,
+        checkpoint_input_path: Option<String>,
+
+        /// Checkpoint output path
+        #[arg(short, long)]
+        checkpoint_output_path: Option<String>,
 
         /// Fail producing hash for a specific step
         #[arg(long)]
@@ -436,7 +468,8 @@ fn main() -> Result<(), EmulatorError> {
             stdout,
             debug,
             sections,
-            checkpoint_path,
+            checkpoint_input_path,
+            checkpoint_output_path, 
             fail_hash,
             fail_hash_until,
             fail_execute: fail_execute_args,
@@ -475,7 +508,7 @@ fn main() -> Result<(), EmulatorError> {
                 }
                 None => {
                     let step = step.expect("Step is expected");
-                    let path = checkpoint_path
+                    let path = checkpoint_input_path
                         .as_ref()
                         .expect("Checkpoint path is expected");
                     let program = Program::deserialize_from_file(path, step)?;
@@ -531,7 +564,7 @@ fn main() -> Result<(), EmulatorError> {
                 input,
                 &input_section.clone().unwrap_or(".input".to_string()),
                 *input_as_little,
-                &checkpoint_path,
+                &checkpoint_output_path,
                 *limit,
                 *trace,
                 *verify,
@@ -550,7 +583,8 @@ fn main() -> Result<(), EmulatorError> {
         Some(Commands::ProverExecute {
             pdf,
             input,
-            checkpoint_prover_path,
+            checkpoint_input_prover_path,
+            checkpoint_output_prover_path,
             force,
             fail_config_prover,
             command_file,
@@ -560,7 +594,8 @@ fn main() -> Result<(), EmulatorError> {
             let result = prover_execute(
                 pdf,
                 input_bytes.clone(),
-                checkpoint_prover_path,
+                checkpoint_input_prover_path,
+                checkpoint_output_prover_path,
                 *force,
                 fail_config_prover.clone(),
                 *save_non_checkpoint_steps,
@@ -586,7 +621,8 @@ fn main() -> Result<(), EmulatorError> {
         Some(Commands::VerifierCheckExecution {
             pdf,
             input,
-            checkpoint_verifier_path,
+            checkpoint_verifier_input_path,
+            checkpoint_verifier_output_path,
             claim_last_step,
             claim_last_hash,
             force,
@@ -598,7 +634,8 @@ fn main() -> Result<(), EmulatorError> {
             let result = verifier_check_execution(
                 pdf,
                 input_bytes.clone(),
-                checkpoint_verifier_path,
+                checkpoint_verifier_input_path,
+                checkpoint_verifier_output_path,
                 *claim_last_step,
                 claim_last_hash,
                 force.clone(),
@@ -615,7 +652,8 @@ fn main() -> Result<(), EmulatorError> {
         }
         Some(Commands::ProverGetHashesForRound {
             pdf,
-            checkpoint_prover_path,
+            checkpoint_input_prover_path,
+            checkpoint_output_prover_path,
             round_number,
             v_decision,
             fail_config_prover,
@@ -624,7 +662,8 @@ fn main() -> Result<(), EmulatorError> {
         }) => {
             let result = prover_get_hashes_for_round(
                 pdf,
-                checkpoint_prover_path,
+                checkpoint_input_prover_path,
+                checkpoint_output_prover_path,
                 *round_number,
                 *v_decision,
                 fail_config_prover.clone(),
@@ -643,7 +682,8 @@ fn main() -> Result<(), EmulatorError> {
         }
         Some(Commands::VerifierChooseSegment {
             pdf,
-            checkpoint_verifier_path,
+            checkpoint_verifier_input_path,
+            checkpoint_verifier_output_path,
             round_number,
             hashes,
             fail_config_verifier,
@@ -652,7 +692,8 @@ fn main() -> Result<(), EmulatorError> {
         }) => {
             let result = verifier_choose_segment(
                 pdf,
-                checkpoint_verifier_path,
+                checkpoint_verifier_input_path,
+                checkpoint_verifier_output_path,
                 *round_number,
                 hashes.clone(),
                 fail_config_verifier.clone(),
@@ -671,14 +712,16 @@ fn main() -> Result<(), EmulatorError> {
         }
         Some(Commands::ProverFinalTrace {
             pdf,
-            checkpoint_prover_path,
+            checkpoint_input_prover_path,
+            checkpoint_output_prover_path,
             v_decision,
             fail_config_prover,
             command_file,
         }) => {
             let prover_final_trace = prover_final_trace(
                 pdf,
-                checkpoint_prover_path,
+                checkpoint_input_prover_path,
+                checkpoint_output_prover_path,
                 *v_decision,
                 fail_config_prover.clone(),
             )?;
@@ -693,7 +736,8 @@ fn main() -> Result<(), EmulatorError> {
         }
         Some(Commands::VerifierChooseChallenge {
             pdf,
-            checkpoint_verifier_path,
+            checkpoint_verifier_input_path,
+            checkpoint_verifier_output_path,
             prover_final_trace,
             resigned_step_hash,
             resigned_next_hash,
@@ -703,7 +747,8 @@ fn main() -> Result<(), EmulatorError> {
         }) => {
             let result = verifier_choose_challenge(
                 pdf,
-                checkpoint_verifier_path,
+                checkpoint_verifier_input_path,
+                checkpoint_verifier_output_path,
                 prover_final_trace.clone(),
                 resigned_step_hash,
                 resigned_next_hash,
@@ -723,7 +768,8 @@ fn main() -> Result<(), EmulatorError> {
         }
         Some(Commands::VerifierChooseChallengeForReadChallenge {
             pdf,
-            checkpoint_verifier_path,
+            checkpoint_verifier_input_path,
+            checkpoint_verifier_output_path,
             fail_config_verifier,
             resigned_step_hash,
             resigned_next_hash,
@@ -732,7 +778,8 @@ fn main() -> Result<(), EmulatorError> {
         }) => {
             let result = verifier_choose_challenge_for_read_challenge(
                 pdf,
-                checkpoint_verifier_path,
+                checkpoint_verifier_input_path,
+                checkpoint_verifier_output_path,
                 resigned_step_hash,
                 resigned_next_hash,
                 fail_config_verifier.clone(),
