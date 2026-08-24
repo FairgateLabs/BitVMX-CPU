@@ -41,7 +41,6 @@ jobs:
       run: cargo fmt --all -- --check
 
     - name: Lint with Clippy
-      if: ${{ inputs.clippy }}
       continue-on-error: true
       working-directory: ${{ inputs.submodule_path }}
       run: cargo clippy --all-targets --all-features -- -D warnings
