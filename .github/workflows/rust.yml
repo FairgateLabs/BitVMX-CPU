@@ -26,21 +26,41 @@ jobs:
       with:
         submodules: 'true'
 
+    - name: Install cargo-audit
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-audit
+
+    - name: Audit dependencies
+      working-directory: ${{ inputs.submodule_path }}
+      run: cargo audit
+
+    - name: Lint with rustfmt
+      continue-on-error: true
+      working-directory: ${{ inputs.submodule_path }}
+      run: cargo fmt --all -- --check
+
+    - name: Lint with Clippy
+      if: ${{ inputs.clippy }}
+      continue-on-error: true
+      working-directory: ${{ inputs.submodule_path }}
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
     - name: Build project
       run: cargo build --verbose
 
     - name: Run tests
       run: cargo test --verbose
-  
+
   test-with-coverage:
     if: contains(github.event.pull_request.title, '[cov]')
     runs-on: ubuntu-latest
-    
+
     permissions:
       contents: write
       pull-requests: write
       repository-projects: write
-    
+
     defaults:
       run:
         working-directory: ./emulator
