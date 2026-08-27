@@ -9,7 +9,7 @@ edition = "2021"
 elf = "0.7.4"
 riscv-decode = "0.2.1"
 hex = "0.4.3"
-thiserror = "1.0.61"
+thiserror = "2.0.20"
 blake3 = "1.6.1"
 bitcoin-script-riscv = { path = "../bitcoin-script-riscv" }
 bitvmx-cpu-definitions = { path = "../definitions" }
