@@ -1605,7 +1605,7 @@ mod tests {
 
     mod fuzz_tests {
         use super::*;
-        use rand::Rng;
+        use rand::RngExt;
         use rand_pcg::Pcg32;
         use std::panic;
         use std::panic::AssertUnwindSafe;

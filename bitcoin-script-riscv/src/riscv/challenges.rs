@@ -10,9 +10,9 @@ use bitvmx_cpu_definitions::{
 use crate::riscv::{
     memory_alignment::{is_aligned, load_lower_half_nibble_table, load_upper_half_nibble_table},
     script_utils::{
-        address_in_sections, address_not_in_sections, get_selected_vars, increment_var,
-        is_lower_than, increment_decisions_in_altstack, var_to_decisions_in_altstack,
-        verify_wrong_chunk_value, witness_equals, StackTables,
+        address_in_sections, address_not_in_sections, get_selected_vars,
+        increment_decisions_in_altstack, increment_var, is_lower_than,
+        var_to_decisions_in_altstack, verify_wrong_chunk_value, witness_equals, StackTables,
     },
 };
 
@@ -639,12 +639,12 @@ pub fn future_read_challenge(stack: &mut StackTracker) {
 // We can get the round the selected hash was provided by counting from the end
 // how many consecutive zeros we have.
 // The first non zero is the index counting from 1.
-// Example: 
+// Example:
 // [4,0,2,0,0]: the hash was provided in the third round, in the second index.
 // [4,0,2,0,1]: the hash was provided in the fifth round, in the first index.
 // Edge case:
 // [0,0,0,0,0]: here our algorithm will say it was in the 0 round 0 index which
-// doesn't exist (we start rounds and indices from 1), this points to the 
+// doesn't exist (we start rounds and indices from 1), this points to the
 // initial step hash which was never provided, it is already known and we can't
 // challenge it in the resign challenge, we should use trace_hash_zero for that
 //
@@ -652,7 +652,7 @@ pub fn future_read_challenge(stack: &mut StackTracker) {
 // also be used to call the function recursively and track which round we are
 // currently looking at.
 fn get_round_and_index(stack: &mut StackTracker, decisions_bits: StackVariable, rounds: u8) {
-    if rounds == 0 { 
+    if rounds == 0 {
         // If we reach the round 0 then we are at the invalid edge case
         stack.number(0);
         stack.number(0);
@@ -1048,6 +1048,7 @@ mod tests {
     };
 
     use super::*;
+    use rand::RngExt;
 
     fn test_entry_point_challenge_aux(
         wots_prover_pc: u32,
@@ -2733,7 +2734,6 @@ mod tests {
 
         mod fuzz_test {
             use super::*;
-            use rand::Rng;
             use rand_pcg::Pcg32;
             use std::panic;
             use std::panic::AssertUnwindSafe;

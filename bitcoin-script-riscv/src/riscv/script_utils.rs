@@ -1,7 +1,7 @@
 use bitcoin_script_stack::stack::{StackTracker, StackVariable};
 
-pub use bitcoin_script::script;
 pub use bitcoin::ScriptBuf as Script;
+pub use bitcoin_script::script;
 use bitvmx_cpu_definitions::memory::{Chunk, MemoryAccessType, SectionDefinition};
 
 use super::operations::{sort_nibbles, sub};
@@ -57,7 +57,8 @@ pub fn nib_to_bin(stack: &mut StackTracker) {
                     0
                 OP_ENDIF
                 OP_TOALTSTACK
-            }.compile(),
+            }
+            .compile(),
             1,
             false,
             1,
@@ -179,7 +180,8 @@ pub fn if_greater(stack: &mut StackTracker, than: u8, then: u8, else_: u8) -> St
                 OP_ELSE
                     { else_}
                 OP_ENDIF
-            }.compile(),
+            }
+            .compile(),
             1,
             true,
             0,
@@ -199,7 +201,8 @@ pub fn if_less(stack: &mut StackTracker, than: u8, then: u8, else_: u8) -> Stack
                 OP_ELSE
                     { else_}
                 OP_ENDIF
-            }.compile(),
+            }
+            .compile(),
             1,
             true,
             0,
@@ -225,7 +228,8 @@ pub fn sub_1_if_positive(stack: &mut StackTracker) -> StackVariable {
                     0
                 OP_ENDIF
                 OP_TOALTSTACK
-            }.compile(),
+            }
+            .compile(),
             0,
             true,
             0,
@@ -248,7 +252,8 @@ pub fn choose(stack: &mut StackTracker) -> StackVariable {
                 OP_ROLL
                 OP_SWAP
                 OP_DROP
-            }.compile(),
+            }
+            .compile(),
             3,
             true,
             0,
@@ -688,7 +693,8 @@ pub fn is_lower_than(
                             { -n }
                         OP_ENDIF
                     OP_ENDIF
-                }.compile(),
+                }
+                .compile(),
                 3,
                 true,
                 0,
@@ -717,7 +723,8 @@ pub fn is_lower_than(
                             { -n }
                         OP_ENDIF
                     OP_ENDIF
-                }.compile(),
+                }
+                .compile(),
                 3,
                 true,
                 0,
@@ -766,7 +773,8 @@ pub fn mask_value(
                     OP_DROP
                     0
                 OP_ENDIF
-            }.compile(),
+            }
+            .compile(),
             2,
             true,
             0,
@@ -849,7 +857,8 @@ pub fn left_rotate(
             for _ in 0..4 {
                 OP_2DROP
             }
-        }.compile(),
+        }
+        .compile(),
         17,
         false,
         8,
@@ -2842,7 +2851,7 @@ mod tests {
 
     mod fuzz_tests {
         use super::*;
-        use rand::Rng;
+        use rand::RngExt;
         use rand_pcg::Pcg32;
         use std::panic;
         use std::panic::AssertUnwindSafe;

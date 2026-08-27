@@ -289,8 +289,13 @@ pub fn prover_final_trace(
         fail_config.clone(),
     )? {
         info!("The prover needs to provide the full trace for the selected step {final_step}");
-        let final_trace =
-            program_def.get_trace_step(input_checkpoint_path, output_checkpoint_path, input, final_step, fail_config)?;
+        let final_trace = program_def.get_trace_step(
+            input_checkpoint_path,
+            output_checkpoint_path,
+            input,
+            final_step,
+            fail_config,
+        )?;
         let nary_log = challenge_log.get_nary_log(NArySearchType::ConflictStep);
         nary_log.final_trace = final_trace.clone();
         challenge_log.save(output_checkpoint_path)?;
@@ -1114,11 +1119,16 @@ mod tests {
 
         //PROVER PROVIDES EXECUTE STEP (and reveals full_trace)
         //Use v_desision + 1 as v_decision defines the last agreed step
-        let (final_trace, step_hash, next_hash, _) =
-            prover_final_trace(pdf, chk_prover_path, chk_prover_path, v_decision + 1, fail_config_prover)
-                .unwrap()
-                .as_final_trace_with_hashes_and_step()
-                .unwrap();
+        let (final_trace, step_hash, next_hash, _) = prover_final_trace(
+            pdf,
+            chk_prover_path,
+            chk_prover_path,
+            v_decision + 1,
+            fail_config_prover,
+        )
+        .unwrap()
+        .as_final_trace_with_hashes_and_step()
+        .unwrap();
         info!("Prover final trace: {:?}", final_trace.to_csv());
 
         let result = verify_script(&final_trace, REGISTERS_BASE_ADDRESS, &None);

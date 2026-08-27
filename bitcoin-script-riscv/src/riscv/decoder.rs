@@ -67,7 +67,8 @@ pub fn mask_4bit(stack: &mut StackTracker) -> StackVariable {
                     0x8
                     OP_SUB
                 OP_ENDIF
-            }.compile(),
+            }
+            .compile(),
             1,
             true,
             0,
@@ -124,7 +125,8 @@ pub fn decode_i_type(
                     OP_1
                 OP_ENDIF
                 OP_VERIFY
-            }.compile(),
+            }
+            .compile(),
             1,
             false,
             0,
@@ -190,7 +192,8 @@ pub fn decode_b_type(
                 0
                 OP_TOALTSTACK
             ENDIF
-        }.compile(),
+        }
+        .compile(),
         1,
         false,
         1,

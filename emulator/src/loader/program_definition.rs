@@ -151,7 +151,7 @@ impl ProgramDefinition {
     }
 
     // If the base is higher that the reported last step, we cap it to the last step
-    // so the prover can still generate hashes. 
+    // so the prover can still generate hashes.
     // After the nary search finishes, the prover can challenge this.
     pub fn get_round_hashes(
         &self,
@@ -231,8 +231,14 @@ impl ProgramDefinition {
         fail_config: Option<FailConfiguration>,
     ) -> Result<TraceRWStep, EmulatorError> {
         let steps = vec![step];
-        let (_result, trace) =
-            self.execute_helper(input_checkpoint_path, output_checkpoint_path, input, Some(steps), fail_config, false)?;
+        let (_result, trace) = self.execute_helper(
+            input_checkpoint_path,
+            output_checkpoint_path,
+            input,
+            Some(steps),
+            fail_config,
+            false,
+        )?;
         // at least the base step should be present
         if trace.len() == 0 {
             return Err(EmulatorError::CantObtainTrace);

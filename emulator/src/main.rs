@@ -469,7 +469,7 @@ fn main() -> Result<(), EmulatorError> {
             debug,
             sections,
             checkpoint_input_path,
-            checkpoint_output_path, 
+            checkpoint_output_path,
             fail_hash,
             fail_hash_until,
             fail_execute: fail_execute_args,
