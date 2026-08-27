@@ -8,7 +8,7 @@ use emulator::{
     loader::program::{load_elf, Program, Registers, Section},
     EmulatorError, ExecutionResult,
 };
-use rand::Rng;
+use rand::RngExt;
 use riscv_decode::types::{BType, IType, JType, RType, SType, ShiftType, UType};
 use std::ops::RangeInclusive;
 use tracing::info;
@@ -84,8 +84,8 @@ pub fn get_new_section() -> Section {
 }
 
 pub fn rnd_range() -> u32 {
-    let mut rng = rand::thread_rng();
-    rng.gen_range(PROGRAM_REG_RANGE)
+    let mut rng = rand::rng();
+    rng.random_range(PROGRAM_REG_RANGE)
 }
 
 pub fn verify_file(

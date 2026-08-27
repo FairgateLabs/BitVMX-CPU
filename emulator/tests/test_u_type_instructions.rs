@@ -1,8 +1,8 @@
 use emulator::executor::fetcher::*;
-use rand::Rng;
 use riscv_decode::Instruction;
 use rstest::rstest;
 mod utils;
+use rand::RngExt;
 use utils::common::{create_utype_from, get_new_program};
 
 #[test]
@@ -21,8 +21,8 @@ fn test_utype() {
 
 // Upper UType
 #[rstest]
-#[case(0x3, rand::thread_rng().gen_range(0..0x80000) << 12, 0, "Lui", imm_value)]
-#[case(0x3, rand::thread_rng().gen_range(0..0x80000) << 12, 0x1000, "Auipc", imm_value + pc)]
+#[case(0x3, rand::rng().random_range(0..0x80000) << 12, 0, "Lui", imm_value)]
+#[case(0x3, rand::rng().random_range(0..0x80000) << 12, 0x1000, "Auipc", imm_value + pc)]
 fn test_upper_instructions(
     #[case] rd: u32,
     #[case] imm_value: u32,
