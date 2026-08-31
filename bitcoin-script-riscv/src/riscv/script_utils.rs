@@ -1559,7 +1559,8 @@ pub fn get_selected_vars<const N: usize>(
 
     stack
         .end_if(chose_var_1, chose_var_2, consumes, output, 0)
-        .try_into().expect("Vec length does not match expected array size")
+        .try_into()
+        .expect("Vec length does not match expected array size")
 }
 
 pub fn address_in_range(stack: &mut StackTracker, range: &(u32, u32), address: &StackVariable) {

@@ -141,10 +141,8 @@ pub fn deserialize_challenge_log<T: for<'a> Deserialize<'a>>(
     let serialized = std::fs::read(&fname).map_err(|e| {
         EmulatorError::ChallengeError(format!("Error loading file: {} {}", e, fname))
     })?;
-    let serialized_str = std::str::from_utf8(&serialized).map_err(|e| {
-        EmulatorError::ChallengeError(format!("Error parsing file: {}", e))
-    })?;
-    serde_json::from_str(serialized_str).map_err(|e| {
-        EmulatorError::ChallengeError(format!("Error deserializing file: {}", e))
-    })
+    let serialized_str = std::str::from_utf8(&serialized)
+        .map_err(|e| EmulatorError::ChallengeError(format!("Error parsing file: {}", e)))?;
+    serde_json::from_str(serialized_str)
+        .map_err(|e| EmulatorError::ChallengeError(format!("Error deserializing file: {}", e)))
 }
