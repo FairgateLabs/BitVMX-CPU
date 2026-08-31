@@ -139,7 +139,7 @@ impl ProgramDefinition {
             save_non_checkpoint_steps,
         )?;
 
-        if trace.len() == 0 {
+        if trace.is_empty() {
             return Err(EmulatorError::CantObtainTrace);
         }
 
@@ -153,6 +153,7 @@ impl ProgramDefinition {
     // If the base is higher that the reported last step, we cap it to the last step
     // so the prover can still generate hashes.
     // After the nary search finishes, the prover can challenge this.
+    #[allow(clippy::too_many_arguments)]
     pub fn get_round_hashes(
         &self,
         input_checkpoint_path: &str,
@@ -184,7 +185,7 @@ impl ProgramDefinition {
             false,
         )?;
         // at least the base step should be present
-        if trace.len() == 0 {
+        if trace.is_empty() {
             return Err(EmulatorError::CantObtainTrace);
         }
 
@@ -240,7 +241,7 @@ impl ProgramDefinition {
             false,
         )?;
         // at least the base step should be present
-        if trace.len() == 0 {
+        if trace.is_empty() {
             return Err(EmulatorError::CantObtainTrace);
         }
 

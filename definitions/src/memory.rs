@@ -18,9 +18,9 @@ pub enum MemoryAccessType {
     Unused,
 }
 
-impl Into<u8> for MemoryAccessType {
-    fn into(self) -> u8 {
-        match self {
+impl From<MemoryAccessType> for u8 {
+    fn from(value: MemoryAccessType) -> Self {
+        match value {
             MemoryAccessType::Register => memory_access_type::REGISTER,
             MemoryAccessType::Memory => memory_access_type::MEMORY,
             MemoryAccessType::Unused => memory_access_type::UNUSED,

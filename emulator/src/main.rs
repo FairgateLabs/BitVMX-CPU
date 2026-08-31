@@ -528,7 +528,7 @@ fn main() -> Result<(), EmulatorError> {
                 None => None,
             };
 
-            let fail_execute = fail_execute_args.as_ref().map(FailExecute::new);
+            let fail_execute = fail_execute_args.as_deref().map(FailExecute::new);
 
             let fail_reads = if fail_read_1_args.is_some() || fail_read_2_args.is_some() {
                 Some(FailReads::new(
@@ -539,8 +539,8 @@ fn main() -> Result<(), EmulatorError> {
                 None
             };
 
-            let fail_write = fail_write_args.as_ref().map(FailWrite::new);
-            let fail_opcode = fail_opcode_args.as_ref().map(FailOpcode::new);
+            let fail_write = fail_write_args.as_deref().map(FailWrite::new);
+            let fail_opcode = fail_opcode_args.as_deref().map(FailOpcode::new);
 
             let debugvar = *debug;
             let fail_config = FailConfiguration {
@@ -564,7 +564,7 @@ fn main() -> Result<(), EmulatorError> {
                 input,
                 &input_section.clone().unwrap_or(".input".to_string()),
                 *input_as_little,
-                &checkpoint_output_path,
+                checkpoint_output_path,
                 *limit,
                 *trace,
                 *verify,
@@ -610,7 +610,7 @@ fn main() -> Result<(), EmulatorError> {
             let result = EmulatorResultType::ProverExecuteResult {
                 last_step: result.1,
                 last_hash: result.2,
-                halt: halt,
+                halt,
             }
             .to_value()?;
 
@@ -702,7 +702,7 @@ fn main() -> Result<(), EmulatorError> {
             info!("Verifier choose segment: {:?}", result);
 
             let result = EmulatorResultType::VerifierChooseSegmentResult {
-                v_decision: result.clone(),
+                v_decision: result,
                 round: *round_number,
             }
             .to_value()?;
@@ -805,7 +805,7 @@ fn main() -> Result<(), EmulatorError> {
         }) => {
             let prover_hashes_and_step = prover_get_hashes_and_step(
                 pdf,
-                &checkpoint_prover_path,
+                checkpoint_prover_path,
                 NArySearchType::ReadValueChallenge,
                 Some(*v_decision),
                 fail_config_prover.clone(),

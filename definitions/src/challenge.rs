@@ -251,6 +251,7 @@ impl EmulatorResultType {
             .map_err(|e| EmulatorResultError::GenericError(format!("Failed to serialize: {}", e)))
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn as_prover_execute(
         &self,
     ) -> Result<(u64, String, Option<(u32, u64)>), EmulatorResultError> {
@@ -259,7 +260,7 @@ impl EmulatorResultType {
                 last_step,
                 last_hash,
                 halt,
-            } => Ok((*last_step, last_hash.clone(), halt.clone())),
+            } => Ok((*last_step, last_hash.clone(), *halt)),
             _ => Err(EmulatorResultError::GenericError(
                 "Expected ProverExecuteResult".to_string(),
             )),
@@ -268,7 +269,7 @@ impl EmulatorResultType {
 
     pub fn as_verifier_check(&self) -> Result<Option<u64>, EmulatorResultError> {
         match self {
-            EmulatorResultType::VerifierCheckExecutionResult { step } => Ok(step.clone()),
+            EmulatorResultType::VerifierCheckExecutionResult { step } => Ok(*step),
             _ => Err(EmulatorResultError::GenericError(
                 "Expected VerifierCheckExecutionResult".to_string(),
             )),
@@ -278,7 +279,7 @@ impl EmulatorResultType {
     pub fn as_prover_hashes(&self) -> Result<(Vec<String>, u8), EmulatorResultError> {
         match self {
             EmulatorResultType::ProverGetHashesForRoundResult { hashes, round } => {
-                Ok((hashes.clone(), round.clone()))
+                Ok((hashes.clone(), *round))
             }
             _ => Err(EmulatorResultError::GenericError(
                 "Expected ProverGetHashesForRoundResult".to_string(),
@@ -289,7 +290,7 @@ impl EmulatorResultType {
     pub fn as_v_decision(&self) -> Result<(u32, u8), EmulatorResultError> {
         match self {
             EmulatorResultType::VerifierChooseSegmentResult { v_decision, round } => {
-                Ok((*v_decision, round.clone()))
+                Ok((*v_decision, *round))
             }
             _ => Err(EmulatorResultError::GenericError(
                 "Expected VerifierChooseSegmentResult".to_string(),
