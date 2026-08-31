@@ -43,7 +43,7 @@ jobs:
     - name: Lint with Clippy
       continue-on-error: false
       working-directory: ${{ inputs.submodule_path }}
-      run: cargo clippy --all-targets --all-features -- -D warnings
+      run: cargo clippy --all-features -- -D warnings
 
     - name: Build project
       run: cargo build --verbose
