@@ -23,9 +23,9 @@ jobs:
   test:
     uses: FairgateLabs/BitVMX-CI/.github/workflows/ci_local_template.yml@main
     with:
-      repo: 'FairgateLabs/rust-bitvmx-workspace'
-      submodule_path: 'rust-bitvmx-settings'
-      cargo_lock_path: 'rust-bitvmx-settings/Cargo.lock'
-      target_path: 'rust-bitvmx-settings/target'
+      repo: 'FairgateLabs/BitVMX-CPU'
+      submodule_path: 'BitVMX-CPU'
+      cargo_lock_path: 'BitVMX-CPU/Cargo.lock'
+      target_path: 'BitVMX-CPU/target'
       clippy: true
     secrets: inherit
