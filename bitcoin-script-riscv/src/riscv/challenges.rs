@@ -283,6 +283,7 @@ pub fn trace_hash_zero_challenge(stack: &mut StackTracker) {
     stack.not_equal(result, true, hash, true);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn is_invalid_read(
     stack: &mut StackTracker,
     half_nibble_table: &StackVariable,

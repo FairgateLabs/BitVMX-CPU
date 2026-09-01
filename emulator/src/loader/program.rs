@@ -514,7 +514,7 @@ impl Program {
         if cfg!(target_endian = "big") {
             panic!("Big endian machine not supported");
         }
-        if address % 4 != 0 {
+        if !address.is_multiple_of(4) {
             return Err(ExecutionResult::UnalignedRead(address));
         }
         let section = self.find_section(address)?;
@@ -534,7 +534,7 @@ impl Program {
     }
 
     pub fn write_mem(&mut self, address: u32, value: u32) -> Result<(), ExecutionResult> {
-        if address % 4 != 0 {
+        if !address.is_multiple_of(4) {
             return Err(ExecutionResult::UnalignedWrite(address));
         }
 
@@ -594,7 +594,7 @@ impl Program {
             .ranges
             .iter()
             .any(|&(start, end)| start <= address && address <= end - 3)
-            && address % 4 == 0
+            && address.is_multiple_of(4)
     }
 
     pub fn is_valid_mem(
@@ -841,10 +841,12 @@ pub fn generate_rom_commitment(program: &Program) -> Result<RomCommitment, Emula
                 let position = section.start + i * 4;
                 let data = program.read_mem(position, false)?;
 
-                let instruction = riscv_decode::decode(data).expect(&format!(
-                    "code section with undecodeable instruction: 0x{:08x} at position: 0x{:08x}",
-                    data, position
-                ));
+                let instruction = riscv_decode::decode(data).unwrap_or_else(|_| {
+                    panic!(
+                        "code section with undecodeable instruction: 0x{:08x} at position: 0x{:08x}",
+                        data, position
+                    )
+                });
                 let micros = get_required_microinstruction(&instruction);
                 for micro in 0..micros {
                     let key = get_key_from_instruction_and_micro(&instruction, micro);
@@ -854,9 +856,9 @@ pub fn generate_rom_commitment(program: &Program) -> Result<RomCommitment, Emula
                     );
                     rom_commitment.code.push(Code {
                         address: position,
-                        micro: micro,
+                        micro,
                         opcode: data,
-                        key: key,
+                        key,
                     });
                 }
             }

@@ -9,7 +9,7 @@ pub fn verify_script(
     instruction_mapping: &Option<InstructionMapping>,
 ) -> Result<(), ExecutionResult> {
     let program = ProgramSpec::new(base_register_address);
-    let result = verify(instruction_mapping, program, trace)?;
+    verify(instruction_mapping, program, trace)?;
 
-    Ok(result)
+    Ok(())
 }

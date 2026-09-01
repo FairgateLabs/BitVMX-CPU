@@ -1,0 +1,31 @@
+name: 'Settings Test Action'
+
+on:
+  push:
+    branches: [ "main", "dev" ]
+  pull_request:
+    branches: [ "main", "dev" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  actions: read
+  checks: write
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  test:
+    uses: FairgateLabs/BitVMX-CI/.github/workflows/ci_local_template.yml@main
+    with:
+      repo: 'FairgateLabs/BitVMX-CPU'
+      submodule_path: 'BitVMX-CPU'
+      cargo_lock_path: 'BitVMX-CPU/Cargo.lock'
+      target_path: 'BitVMX-CPU/target'
+      clippy: true
+    secrets: inherit

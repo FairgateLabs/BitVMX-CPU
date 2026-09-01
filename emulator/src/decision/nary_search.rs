@@ -10,11 +10,11 @@ pub enum NArySearchType {
     ConflictStep,
     ReadValueChallenge,
 }
-impl ToString for NArySearchType {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for NArySearchType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            NArySearchType::ConflictStep => "conflict-step".to_string(),
-            NArySearchType::ReadValueChallenge => "read-value-challenge".to_string(),
+            NArySearchType::ConflictStep => write!(f, "conflict-step"),
+            NArySearchType::ReadValueChallenge => write!(f, "read-value-challenge"),
         }
     }
 }
@@ -129,7 +129,7 @@ impl NArySearchDefinition {
         }
     }
 
-    pub fn step_mapping(&self, bits: &Vec<u32>) -> HashMap<u64, (u8, u8)> {
+    pub fn step_mapping(&self, bits: &[u32]) -> HashMap<u64, (u8, u8)> {
         assert_eq!(bits.len(), self.total_rounds() as usize);
         let mut base = 0;
         let mut mapping: HashMap<u64, (u8, u8)> = HashMap::new();
@@ -147,7 +147,7 @@ impl NArySearchDefinition {
         mapping
     }
 
-    pub fn step_from_decision_bits(&self, decision_bits: &Vec<u32>) -> u64 {
+    pub fn step_from_decision_bits(&self, decision_bits: &[u32]) -> u64 {
         decision_bits
             .iter()
             .enumerate()
@@ -180,13 +180,14 @@ impl ExecutionHashes {
     }
 }
 
-impl Into<ExecutionHashes> for Vec<Vec<u8>> {
-    fn into(self) -> ExecutionHashes {
-        ExecutionHashes::new(self)
+impl From<Vec<Vec<u8>>> for ExecutionHashes {
+    fn from(hashes: Vec<Vec<u8>>) -> Self {
+        ExecutionHashes::new(hashes)
     }
 }
 
 // we assume that the previous hash to the list provided is agreed by both parties
+#[allow(clippy::too_many_arguments)]
 pub fn choose_segment(
     nary_defs: &NArySearchDefinition,
     base_step: u64,

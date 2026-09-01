@@ -868,6 +868,7 @@ pub fn left_rotate(
     stack.from_altstack_joined(8, "left_rotated")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn multiply_nib(
     stack: &mut StackTracker,
     logic_table: &StackLogicTables,
@@ -930,9 +931,8 @@ pub fn multiply(
         let end_i = if k >= n { k - n + 1 } else { 0 };
 
         let elements_in_diag = (start_i - end_i) + 1;
-        let mut count = 0;
 
-        for i in (end_i..=start_i).rev() {
+        for (count, i) in (end_i..=start_i).rev().enumerate() {
             let j = k - i;
             multiply_nib(
                 stack,
@@ -946,7 +946,6 @@ pub fn multiply(
                 elements_in_diag > 1 && count > 0,
             );
             total_count += 1;
-            count += 1;
         }
     }
 
@@ -1245,9 +1244,9 @@ pub fn div_by_zero_case(
     stack_true.drop(remainder);
     stack_true.drop(quotient);
     stack_true.drop(divisor);
-    if result.is_some() {
+    if let Some(result) = result {
         stack_true.drop(dividend);
-        stack_true.number_u32(result.unwrap());
+        stack_true.number_u32(result);
     }
 
     (stack_true, stack_false)
@@ -1261,8 +1260,8 @@ pub fn overflow_case(
     remainder: StackVariable,
     result: Option<u32>,
 ) -> (StackTracker, StackTracker) {
-    let minus_one = stack.number_u32(-1 as i32 as u32);
-    let min_i32 = stack.number_u32(std::i32::MIN as u32);
+    let minus_one = stack.number_u32(-1_i32 as u32);
+    let min_i32 = stack.number_u32(i32::MIN as u32);
     is_equal_to(stack, &minus_one, &divisor);
     is_equal_to(stack, &min_i32, &dividend);
     stack.op_booland();
@@ -1275,14 +1274,15 @@ pub fn overflow_case(
     stack_true.drop(remainder);
     stack_true.drop(quotient);
     stack_true.drop(divisor);
-    if result.is_some() {
+    if let Some(result) = result {
         stack_true.drop(dividend);
-        stack_true.number_u32(result.unwrap());
+        stack_true.number_u32(result);
     }
 
     (stack_true, stack_false)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn division_and_remainder(
     stack: &mut StackTracker,
     tables: &StackTables,
@@ -1348,7 +1348,7 @@ pub fn divu(
         divisor,
         quotient,
         remainder,
-        Some(std::u32::MAX),
+        Some(u32::MAX),
         false,
     )
 }
@@ -1366,6 +1366,7 @@ pub fn remu(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn division_and_remainder_signed(
     stack: &mut StackTracker,
     tables: &StackTables,
@@ -1456,8 +1457,8 @@ pub fn div(
         divisor,
         quotient,
         remainder,
-        Some(-1 as i32 as u32),
-        Some(std::i32::MIN as u32),
+        Some(-1_i32 as u32),
+        Some(i32::MIN as u32),
         false,
     )
 }
@@ -1510,7 +1511,7 @@ pub fn verify_wrong_chunk_value(
     let chunk_table = WordTable::new(stack, chunk.data.clone());
 
     let base_addr = stack.number_u32(chunk.base_addr);
-    let offset = sub(stack, &tables, address, base_addr);
+    let offset = sub(stack, tables, address, base_addr);
 
     let index = static_right_shift_2(stack, tables, offset);
 
@@ -1548,7 +1549,7 @@ pub fn get_selected_vars<const N: usize>(
     stack.op_equal();
     let (mut chose_var_1, mut chose_var_2) = stack.open_if();
 
-    for (var_1, var_2) in vars_1.into_iter().zip(vars_2.into_iter()) {
+    for (var_1, var_2) in vars_1.into_iter().zip(vars_2) {
         chose_var_1.move_var(var_2);
         chose_var_1.drop(var_2);
 
@@ -1559,7 +1560,6 @@ pub fn get_selected_vars<const N: usize>(
     stack
         .end_if(chose_var_1, chose_var_2, consumes, output, 0)
         .try_into()
-        .ok()
         .expect("Vec length does not match expected array size")
 }
 

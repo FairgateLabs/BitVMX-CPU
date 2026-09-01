@@ -254,6 +254,7 @@ pub fn op_conditional(
     trace
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn store_if_not_zero(
     stack: &mut StackTracker,
     tables: &StackTables,
@@ -787,7 +788,7 @@ pub fn execute_step(
     program: ProgramSpec,
 ) -> Result<STraceStep, ScriptValidation> {
     match instruction {
-        Fence(_) | Ebreak => Ok(op_nop(stack, &trace_read)),
+        Fence(_) | Ebreak => Ok(op_nop(stack, trace_read)),
 
         Ecall => Ok(op_ecall(stack, trace_read, program.base_register_address)),
 
@@ -860,7 +861,7 @@ pub fn execute_step(
         Mul(x) | Mulh(x) | Mulhsu(x) | Mulhu(x) | Div(x) | Divu(x) | Rem(x) | Remu(x) | Xor(x)
         | And(x) | Or(x) | Slt(x) | Sltu(x) | Sll(x) | Srl(x) | Sra(x) | Add(x) | Sub(x) => {
             if x.rd() == 0 {
-                Ok(op_nop(stack, &trace_read))
+                Ok(op_nop(stack, trace_read))
             } else {
                 Ok(op_arithmetic(
                     instruction,
@@ -948,7 +949,7 @@ pub fn verify_execution(
     let instruction = riscv_decode::decode(opcode).unwrap();
     println!("instruction to verify: {:?}", instruction);
     // println!("instruction to hex: {:2x}", instruction.into());
-    let mut result_step = execute_step(
+    let result_step = execute_step(
         stack,
         &trace_read,
         &trace_step,
@@ -957,7 +958,7 @@ pub fn verify_execution(
         micro,
         program,
     )?;
-    compare_trace_step(stack, &trace_step, &mut result_step);
+    compare_trace_step(stack, &trace_step, &result_step);
 
     Ok(())
 }

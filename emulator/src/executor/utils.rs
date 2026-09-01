@@ -18,8 +18,8 @@ where
     T: std::fmt::Debug,
     <T as std::str::FromStr>::Err: std::fmt::Debug,
 {
-    if value.starts_with("0x") {
-        T::from_str_radix(&value[2..], 16).unwrap_or_else(|_| panic!("Invalid hexadecimal value"))
+    if let Some(hex) = value.strip_prefix("0x") {
+        T::from_str_radix(hex, 16).unwrap_or_else(|_| panic!("Invalid hexadecimal value"))
     } else {
         value.parse::<T>().expect("Invalid decimal value")
     }
@@ -44,9 +44,8 @@ impl FailRead {
             T: std::fmt::Debug,
             <T as std::str::FromStr>::Err: std::fmt::Debug,
         {
-            if value.starts_with("0x") {
-                T::from_str_radix(&value[2..], 16)
-                    .unwrap_or_else(|_| panic!("Invalid hexadecimal value"))
+            if let Some(hex) = value.strip_prefix("0x") {
+                T::from_str_radix(hex, 16).unwrap_or_else(|_| panic!("Invalid hexadecimal value"))
             } else {
                 value.parse::<T>().expect("Invalid decimal value")
             }
@@ -92,7 +91,6 @@ impl FailRead {
             program
                 .write_mem(self.address_original, self.value)
                 .unwrap();
-            return;
         }
     }
 }
@@ -150,7 +148,7 @@ pub struct FailWrite {
 }
 
 impl FailWrite {
-    pub fn new(args: &Vec<String>) -> Self {
+    pub fn new(args: &[String]) -> Self {
         Self {
             step: parse_value::<u64>(&args[0]),
             address_original: parse_value::<u32>(&args[1]),
@@ -193,7 +191,7 @@ pub struct FailExecute {
 }
 
 impl FailExecute {
-    pub fn new(args: &Vec<String>) -> Self {
+    pub fn new(args: &[String]) -> Self {
         Self {
             step: parse_value::<u64>(&args[0]) - 1,
             fake_trace: TraceRWStep::from_str(&args[1]).unwrap(),
@@ -208,7 +206,7 @@ pub struct FailOpcode {
 }
 
 impl FailOpcode {
-    pub fn new(args: &Vec<String>) -> Self {
+    pub fn new(args: &[String]) -> Self {
         Self {
             step: parse_value(&args[0]),
             opcode: parse_value(&args[1]),
@@ -344,9 +342,11 @@ impl FromStr for FailConfiguration {
     }
 }
 
-impl ToString for FailConfiguration {
-    fn to_string(&self) -> String {
-        serde_json::to_string(self).unwrap_or_else(|_| "Failed to serialize".to_string())
+impl std::fmt::Display for FailConfiguration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let serialized =
+            serde_json::to_string(self).unwrap_or_else(|_| "Failed to serialize".to_string());
+        write!(f, "{}", serialized)
     }
 }
 

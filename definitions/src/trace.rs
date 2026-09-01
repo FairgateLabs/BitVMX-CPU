@@ -98,7 +98,7 @@ impl TraceStep {
     ) -> TraceStep {
         TraceStep {
             write_1: TraceWrite::new(write_address, write_value),
-            write_pc: ProgramCounter::new(program_counter as u32, micro),
+            write_pc: ProgramCounter::new(program_counter, micro),
         }
     }
 
@@ -198,7 +198,7 @@ impl FromStr for TraceRWStep {
 pub fn compute_step_hash(
     hasher: &mut Hasher,
     previous_hash: &[u8; 20],
-    write_trace: &Vec<u8>,
+    write_trace: &[u8],
 ) -> [u8; 20] {
     // Compute the Blake3 hash
     hasher.reset();

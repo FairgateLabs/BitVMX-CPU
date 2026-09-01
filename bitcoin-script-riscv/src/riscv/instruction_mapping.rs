@@ -58,10 +58,7 @@ fn name_or_nop_with_micro<X: RdZero>(x: &X, name: &str, micro: u8) -> String {
 }
 
 pub fn requires_witness(instruction: &Instruction) -> bool {
-    match instruction {
-        Div(_) | Divu(_) | Rem(_) | Remu(_) => true,
-        _ => false,
-    }
+    matches!(instruction, Div(_) | Divu(_) | Rem(_) | Remu(_))
 }
 
 pub fn get_key_from_instruction_and_micro(instruction: &Instruction, micro: u8) -> String {
@@ -224,17 +221,17 @@ pub fn generate_verification_script(
     };
 
     let trace_read = STraceRead::define(&mut stack);
-    let mut result = execute_step(
+    let result = execute_step(
         &mut stack,
         &trace_read,
         &trace_step,
         witness,
-        &instruction,
+        instruction,
         micro,
         program,
     )
     .unwrap();
-    compare_trace_step(&mut stack, &trace_step, &mut result);
+    compare_trace_step(&mut stack, &trace_step, &result);
     stack.get_script()
 }
 

@@ -16,6 +16,7 @@ use tracing::{error, info};
 pub type TraceStepResult = (TraceRWStep, String);
 pub type FullTrace = Vec<TraceStepResult>;
 
+#[allow(clippy::too_many_arguments)]
 pub fn execute_program(
     program: &mut Program,
     input: Vec<u8>,
@@ -123,13 +124,13 @@ pub fn execute_program(
             }
         }
 
-        if trace.is_ok() {
+        if let Ok(trace) = trace.as_mut() {
             if let Some(fr) = &fail_config.fail_reads {
-                fr.patch_trace_reads(trace.as_mut().unwrap(), should_patch); // patches trace reads only at the right step
+                fr.patch_trace_reads(trace, should_patch); // patches trace reads only at the right step
             }
 
             if let Some(fw) = &fail_config.fail_write {
-                fw.patch_trace_write(trace.as_mut().unwrap(), should_patch_write);
+                fw.patch_trace_write(trace, should_patch_write);
             }
         }
 
@@ -157,48 +158,50 @@ pub fn execute_program(
 
         let limit_step_reached = limit_step.is_some_and(|limit_step| limit_step == program.step);
 
-        if print_trace || trace.is_err() || program.halt || limit_step_reached {
-            if trace_set.is_none() || trace_set.as_ref().unwrap().contains(&program.step) {
-                let hash_hex = hash_to_string(&program.hash);
-                traces.push((
-                    trace
-                        .as_ref()
-                        .unwrap_or(&TraceRWStep::from_step(program.step))
-                        .clone(),
-                    hash_hex.clone(),
-                ));
-                if debug {
-                    info!(
-                        "{};{}",
-                        trace.as_ref().unwrap_or(&TraceRWStep::default()).to_csv(),
-                        hash_hex
-                    );
-                }
+        if (print_trace || trace.is_err() || program.halt || limit_step_reached)
+            && (trace_set.is_none() || trace_set.as_ref().unwrap().contains(&program.step))
+        {
+            let hash_hex = hash_to_string(&program.hash);
+            traces.push((
+                trace
+                    .as_ref()
+                    .unwrap_or(&TraceRWStep::from_step(program.step))
+                    .clone(),
+                hash_hex.clone(),
+            ));
+            if debug {
+                info!(
+                    "{};{}",
+                    trace.as_ref().unwrap_or(&TraceRWStep::default()).to_csv(),
+                    hash_hex
+                );
             }
         }
 
         if let Some(path) = &checkpoint_path {
-            if program.step % CHECKPOINT_SIZE == 0
+            if program.step.is_multiple_of(CHECKPOINT_SIZE)
                 || ((trace.is_err() || program.halt) && save_non_checkpoint_steps)
             {
                 program.serialize_to_file(path);
             }
         }
 
-        if trace.is_ok() && verify_on_chain {
-            let validation_result = verify_script(
-                trace.as_ref().unwrap(),
-                program.registers.get_base_address(),
-                &instruction_mapping,
-            );
-            if validation_result.is_err() {
-                break validation_result.unwrap_err();
+        if verify_on_chain {
+            if let Ok(trace) = trace.as_ref() {
+                let validation_result = verify_script(
+                    trace,
+                    program.registers.get_base_address(),
+                    &instruction_mapping,
+                );
+                if let Err(err) = validation_result {
+                    break err;
+                }
+                count += 1;
             }
-            count += 1;
         }
 
-        if trace.is_err() {
-            break trace.unwrap_err();
+        if let Err(err) = trace {
+            break err;
         }
 
         if program.halt {
@@ -321,7 +324,7 @@ pub fn execute_step(
     };
 
     let new_pc = program.pc.get_address();
-    if !fail_config.fail_memory_protection && new_pc % 4 != 0 {
+    if !fail_config.fail_memory_protection && !new_pc.is_multiple_of(4) {
         return Err(ExecutionResult::UnalignedJump(new_pc));
     }
 
@@ -534,22 +537,16 @@ pub fn op_arithmetic(
 
     let witness = match instruction {
         Rem(_) => Some(match (value_1 as i32, value_2 as i32) {
-            (_, 0) => (-1 as i32) as u32,
-            (std::i32::MIN, -1) => std::i32::MIN as u32,
+            (_, 0) => -1_i32 as u32,
+            (i32::MIN, -1) => i32::MIN as u32,
             _ => (value_1 as i32 / value_2 as i32) as u32,
         }),
         Div(_) => Some(match (value_1 as i32, value_2 as i32) {
             (_, 0) => value_1,
-            (std::i32::MIN, -1) => 0,
+            (i32::MIN, -1) => 0,
             _ => (value_1 as i32 % value_2 as i32) as u32,
         }),
-        Remu(_) => Some({
-            if value_2 == 0 {
-                std::u32::MAX
-            } else {
-                value_1 / value_2
-            }
-        }),
+        Remu(_) => Some(value_1.checked_div(value_2).unwrap_or(u32::MAX)),
         Divu(_) => Some({
             if value_2 == 0 {
                 value_1
@@ -578,20 +575,14 @@ pub fn op_arithmetic(
             (result >> 32) as u32 // High 32 bits
         }
         Div(_) => match (value_1 as i32, value_2 as i32) {
-            (_, 0) => (-1 as i32) as u32,
-            (std::i32::MIN, -1) => std::i32::MIN as u32,
+            (_, 0) => -1_i32 as u32,
+            (i32::MIN, -1) => i32::MIN as u32,
             _ => (value_1 as i32 / value_2 as i32) as u32,
         },
-        Divu(_) => {
-            if value_2 == 0 {
-                std::u32::MAX
-            } else {
-                value_1 / value_2
-            }
-        }
+        Divu(_) => value_1.checked_div(value_2).unwrap_or(u32::MAX),
         Rem(_) => match (value_1 as i32, value_2 as i32) {
             (_, 0) => value_1,
-            (std::i32::MIN, -1) => 0,
+            (i32::MIN, -1) => 0,
             _ => (value_1 as i32 % value_2 as i32) as u32,
         },
         Remu(_) => {

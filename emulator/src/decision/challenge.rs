@@ -53,7 +53,7 @@ pub fn prover_execute(
         );
         // TODO: Enable this in production to avoid commiting a failed claim
         if !force {
-            return Err(result)?;
+            return Err(result.into());
         }
         error!("Execution with force. The claim will be commited on-chain.");
     }
@@ -123,6 +123,7 @@ pub fn prover_get_hashes_for_round(
     Ok(hashes)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn verifier_check_execution(
     program_definition_file: &str,
     input: Vec<u8>,
@@ -369,7 +370,7 @@ pub fn prover_get_hashes_and_step(
 
 pub fn get_hashes(
     mapping: &HashMap<u64, (u8, u8)>,
-    hashes: &Vec<Vec<String>>,
+    hashes: &[Vec<String>],
     challenge_step: u64,
 ) -> (String, String) {
     let next_step = challenge_step + 1;
@@ -429,6 +430,7 @@ fn find_chunk_index(chunks: &[Chunk], address: u32) -> Option<usize> {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn verifier_choose_challenge(
     program_definition_file: &str,
     input_checkpoint_path: &str,
@@ -717,8 +719,8 @@ pub fn verifier_choose_challenge(
                 let value = program.read_mem(conflict_address, false)?;
 
                 return Ok(ChallengeType::InputData {
-                    prover_read_1: prover_read_1,
-                    prover_read_2: prover_read_2,
+                    prover_read_1,
+                    prover_read_2,
                     address: conflict_address,
                     input_for_address: value,
                 });
@@ -799,6 +801,7 @@ pub fn verifier_choose_challenge(
     Ok(ChallengeType::No)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn verifier_choose_challenge_for_read_challenge(
     program_definition_file: &str,
     input_checkpoint_path: &str,
