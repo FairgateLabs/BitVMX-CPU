@@ -95,3 +95,5 @@ Every one of these decisions must be **provable by an on-chain script** (`bitcoi
 | [EMU-014](tickets/EMU-014-client-rom-leaf-count.md) | Client `rom` leaves are dead code and their counter can shift every later challenge leaf by one (latent) | Confirmed (code reading) | Medium |
 
 The client-side checks that do (or don't) mitigate each ticket are analysed in [client-mitigations.md](client-mitigations.md).
+
+Findings in the on-chain scripts (`bitcoin-script-riscv`, the instruction leaves and their mapping) are in the separate [script audit](../script-audit/README.md) (SCR-001..007).

@@ -1,0 +1,221 @@
+diff --git a/bitcoin-script-riscv/src/riscv/instructions.rs b/bitcoin-script-riscv/src/riscv/instructions.rs
+index a5e2e85..37db7aa 100644
+--- a/bitcoin-script-riscv/src/riscv/instructions.rs
++++ b/bitcoin-script-riscv/src/riscv/instructions.rs
+@@ -54,7 +54,61 @@ pub fn verify_memory_witness(
+     stack.equals(mem_witness, true, witness, true);
+ }
+ 
++// Asserts that the opcode is one of the encodings the emulator executes as a nop:
++// rd == x0 for OP-IMM (0x13), OP (0x33), LUI (0x37), AUIPC (0x17) at micro 0,
++// rd == x0 for LOAD (0x03) at micro 2 (the misaligned load ends early), FENCE (0x0f), or EBREAK.
++pub fn verify_nop_opcode(stack: &mut StackTracker, trace_read: &STraceRead) {
++    let ebreak = stack.number_u32(0x0010_0073);
++    is_equal_to(stack, &trace_read.opcode, &ebreak);
++    stack.to_altstack();
++    stack.drop(ebreak);
++
++    stack.copy_var_sub_n(trace_read.opcode, 5);
++    stack.copy_var_sub_n(trace_read.opcode, 6);
++    stack.copy_var_sub_n(trace_read.opcode, 7);
++    stack.copy_var(trace_read.micro);
++    stack.custom(
++        script! {
++            OP_TOALTSTACK                               // n5 n6 n7 | micro
++            OP_SWAP                                     // n5 n7 n6
++            OP_DUP 8 OP_LESSTHAN OP_TOALTSTACK          // n5 n7 n6 | micro (rd bit 0 == 0)
++            OP_DUP OP_ADD OP_DUP OP_ADD OP_DUP OP_ADD OP_DUP OP_ADD
++            OP_ADD                                      // n5 major_opcode
++            OP_SWAP 0 OP_EQUAL
++            OP_FROMALTSTACK OP_BOOLAND                  // major rd_is_zero
++            OP_SWAP OP_FROMALTSTACK OP_SWAP             // rd_is_zero micro major
++            OP_DUP 0x13 OP_EQUAL
++            OP_OVER 0x33 OP_EQUAL OP_BOOLOR
++            OP_OVER 0x37 OP_EQUAL OP_BOOLOR
++            OP_OVER 0x17 OP_EQUAL OP_BOOLOR
++            OP_OVER 0x0f OP_EQUAL OP_BOOLOR             // rd_is_zero micro major nop_class
++            2 OP_PICK 0 OP_EQUAL OP_BOOLAND             // rd_is_zero micro major (nop_class && micro == 0)
++            OP_SWAP 0x03 OP_EQUAL                       // rd_is_zero micro a is_load
++            OP_ROT 2 OP_EQUAL OP_BOOLAND                // rd_is_zero a (is_load && micro == 2)
++            OP_BOOLOR OP_BOOLAND
++        }
++        .compile(),
++        4,
++        true,
++        0,
++        "is_nop_opcode",
++    );
++    stack.from_altstack();
++    stack.op_boolor();
++    stack.op_verify();
++}
++
++pub fn verify_rd_not_zero(stack: &mut StackTracker, rd: StackVariable) {
++    let copy = stack.copy_var(rd);
++    stack.explode(copy);
++    stack.op_add();
++    stack.number(0);
++    stack.op_greaterthan();
++    stack.op_verify();
++}
++
+ pub fn op_nop(stack: &mut StackTracker, trace_read: &STraceRead) -> STraceStep {
++    verify_nop_opcode(stack, trace_read);
+     verify_memory_witness(stack, trace_read.mem_witness, MemoryWitness::default());
+ 
+     move_and_drop(stack, trace_read.opcode);
+@@ -96,8 +150,8 @@ pub fn op_ecall(
+ 
+     let (mut stack_halt, mut stack_if_false) = stack.open_if();
+ 
+-    //any opcode other than halt (93) is treated as a nop
+-    op_nop(&mut stack_if_false, trace_read);
++    //any syscall other than halt (93) is treated as a nop, but a7 is still read (so its value can be challenged)
++    op_ecall_continue(&mut stack_if_false, trace_read, base_register_address);
+ 
+     //verify the memory witness
+     verify_memory_witness(
+@@ -161,6 +215,44 @@ pub fn op_ecall(
+     STraceStep::new(ret[0], ret[1], ret[2], ret[3])
+ }
+ 
++fn op_ecall_continue(
++    stack: &mut StackTracker,
++    trace_read: &STraceRead,
++    base_register_address: u32,
++) -> STraceStep {
++    verify_memory_witness(
++        stack,
++        trace_read.mem_witness,
++        MemoryWitness::new(
++            MemoryAccessType::Register,
++            MemoryAccessType::Unused,
++            MemoryAccessType::Unused,
++        ),
++    );
++    let ecall = stack.number_u32(0x00000073);
++    stack.equals(trace_read.opcode, true, ecall, true);
++    move_and_drop(stack, trace_read.micro);
++    stack.to_altstack(); // pc
++    move_and_drop(stack, trace_read.read_2_value);
++    move_and_drop(stack, trace_read.read_2_add);
++    move_and_drop(stack, trace_read.read_1_value);
++    let add_ra7 = stack.number_u32(base_register_address + (REGISTER_A7_ECALL_ARG as u32) * 4);
++    stack.equals(trace_read.read_1_add, true, add_ra7, true);
++
++    let write_add = stack.number_u32(0);
++    let write_value = stack.number_u32(0);
++
++    let tables = StackTables::new(stack, true, true, 0, 0, 0);
++    stack.from_altstack();
++    let pc = pc_next(stack, &tables, trace_read.program_counter);
++    stack.to_altstack();
++    tables.drop(stack);
++    stack.from_altstack();
++
++    let micro = stack.number(0);
++    STraceStep::new(write_add, write_value, pc, micro)
++}
++
+ pub fn op_conditional(
+     instruction: &Instruction,
+     stack: &mut StackTracker,
+@@ -438,6 +530,8 @@ pub fn op_arithmetic_imm(
+ 
+     let (imm, rs1, rd, bit_extension) =
+         decode_i_type(stack, &tables, trace_read.opcode, func3, 0x13, func7);
++    // rd == x0 is executed as a nop and proven with the nop leaf
++    verify_rd_not_zero(stack, rd);
+ 
+     //these value are not used. can be droped or we can avoid to commit them
+     move_and_drop(stack, trace_read.read_2_add);
+@@ -540,6 +634,8 @@ pub fn op_arithmetic(
+         R_TYPE_OPCODE,
+         func7,
+     );
++    // rd == x0 is executed as a nop and proven with the nop leaf
++    verify_rd_not_zero(stack, rd);
+ 
+     verify_memory_witness(stack, trace_read.mem_witness, MemoryWitness::registers());
+ 
+@@ -717,6 +813,8 @@ pub fn op_upper(
+     };
+ 
+     let (imm, rd) = decode_u_type(stack, &tables, trace_read.opcode, expected_opcode);
++    // rd == x0 is executed as a nop and proven with the nop leaf
++    verify_rd_not_zero(stack, rd);
+ 
+     // These value are not used
+     move_and_drop(stack, trace_read.read_2_add);
+diff --git a/bitcoin-script-riscv/src/riscv/instructions_load.rs b/bitcoin-script-riscv/src/riscv/instructions_load.rs
+index 4d746d5..51ef69f 100644
+--- a/bitcoin-script-riscv/src/riscv/instructions_load.rs
++++ b/bitcoin-script-riscv/src/riscv/instructions_load.rs
+@@ -5,7 +5,7 @@ use riscv_decode::Instruction::{self, *};
+ use crate::riscv::{decoder::decode_i_type, operations::*, script_utils::*};
+ 
+ use super::{
+-    instructions::{validate_register_address, verify_memory_witness},
++    instructions::{validate_register_address, verify_memory_witness, verify_rd_not_zero},
+     memory_alignment::*,
+     trace::{STraceRead, STraceStep},
+ };
+@@ -386,6 +386,8 @@ pub fn op_load_micro_2(
+     stack.equals(trace_read.micro, true, expected_micro, true);
+ 
+     move_and_drop(stack, rs1);
++    // rd == x0 ends the misaligned load at micro 2 (nop leaf)
++    verify_rd_not_zero(stack, rd);
+     move_and_drop(stack, rd);
+     move_and_drop(stack, imm);
+     move_and_drop(stack, bit_extension);
+@@ -442,6 +444,7 @@ pub fn op_load_micro_3(
+         decode_i_type(stack, &tables, trace_read.opcode, func3, 0x3, None);
+ 
+     verify_memory_witness(stack, trace_read.mem_witness, MemoryWitness::rur());
++    verify_rd_not_zero(stack, rd);
+     stack.to_altstack(); // save rd
+     stack.drop(rs1);
+     stack.drop(bit_extension);
+diff --git a/emulator/src/executor/fetcher.rs b/emulator/src/executor/fetcher.rs
+index 8750b67..c887f88 100644
+--- a/emulator/src/executor/fetcher.rs
++++ b/emulator/src/executor/fetcher.rs
+@@ -361,11 +361,16 @@ pub fn op_ecall(
+             }
+             program.pc.next_address();
+             //treat any syscall as a nop
++            // a7 is read so the script can prove this is not a halt
+             (
+-                TraceRead::default(),
++                read_1,
+                 TraceRead::default(),
+                 TraceWrite::default(),
+-                MemoryWitness::default(),
++                MemoryWitness::new(
++                    MemoryAccessType::Register,
++                    MemoryAccessType::Unused,
++                    MemoryAccessType::Unused,
++                ),
+             )
+         }
+         93 => {
+@@ -393,11 +398,16 @@ pub fn op_ecall(
+         _ => {
+             error!("Unimplemented syscall: {}", syscall);
+             program.pc.next_address();
++            // a7 is read so the script can prove this is not a halt
+             (
+-                TraceRead::default(),
++                read_1,
+                 TraceRead::default(),
+                 TraceWrite::default(),
+-                MemoryWitness::default(),
++                MemoryWitness::new(
++                    MemoryAccessType::Register,
++                    MemoryAccessType::Unused,
++                    MemoryAccessType::Unused,
++                ),
+             )
+         }
+     }

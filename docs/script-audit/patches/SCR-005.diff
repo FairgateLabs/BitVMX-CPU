@@ -1,0 +1,17 @@
+diff --git a/bitcoin-script-riscv/src/riscv/script_utils.rs b/bitcoin-script-riscv/src/riscv/script_utils.rs
+index 8c1cdc1..cb054ff 100644
+--- a/bitcoin-script-riscv/src/riscv/script_utils.rs
++++ b/bitcoin-script-riscv/src/riscv/script_utils.rs
+@@ -1140,6 +1140,12 @@ pub fn div_check(
+ 
+     // asserts dividend = divisor * quotient + remainder
+     let div_round = stack.from_altstack_joined(8, "dividen_round");
++    // asserts divisor * quotient <= dividend, so the subtraction below can't wrap around
++    let div_round_copy = stack.copy_var(div_round);
++    let dividend_copy = stack.copy_var(dividend);
++    is_lower_than(stack, dividend_copy, div_round_copy, true);
++    stack.op_not();
++    stack.op_verify();
+     let diff = sub(stack, tables, dividend, div_round);
+     stack.move_var(remainder);
+     is_equal_to(stack, &remainder, &diff);
