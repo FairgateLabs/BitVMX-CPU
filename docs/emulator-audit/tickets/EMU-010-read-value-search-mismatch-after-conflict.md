@@ -22,3 +22,9 @@ See the "Findings" section of [EMU-005](EMU-005-round-hash-padding-after-halt.md
 ## Findings
 
 _(already investigated under EMU-005; split out for tracking)_
+
+## Client-side check (rust-bitvmx-client `dispute/*`)
+
+**Not mitigated.** The read-search `challenge_step_script` (`mod.rs:1324-1354`) only lets the prover object when the verifier's 2nd-search selection is *after* the conflict step. A search pulled exactly to the conflict step is accepted on-chain, the verifier has no challenge to post, and the cheating prover wins.
+
+See [client-mitigations.md](../client-mitigations.md).

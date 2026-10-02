@@ -155,3 +155,9 @@ Risks and side effects:
 * Round 1 of each n-ary search still needs nearly the whole execution, so only later rounds and final queries benefit from the fix. If round-1 latency matters, cache the round-1 hashes during the single full run in `prover_execute` / `verifier_check_execution`.
 * When the prover's input doesn't halt, the fix already avoids running every job to `max_steps`: each job stops at its last requested step. If needed, the verifier could also persist its own result and last step and cap queries at `my_last_step`.
 * Consider giving each emulator job in the client a wall-clock or step budget, compared against the remaining timelock and raising an alert, so liveness problems surface before the deadline.
+
+## Client-side check (rust-bitvmx-client `dispute/*`)
+
+**Not mitigated.** Each round has its own `timelock_blocks` deadline (default 15). This is fine at mainnet block times, but tight with short test timelocks or very large `max_steps`.
+
+See [client-mitigations.md](../client-mitigations.md).

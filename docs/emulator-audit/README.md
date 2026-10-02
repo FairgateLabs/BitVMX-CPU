@@ -91,3 +91,7 @@ Every one of these decisions must be **provable by an on-chain script** (`bitcoi
 | [EMU-010](tickets/EMU-010-read-value-search-mismatch-after-conflict.md) | Read-value search pulled to conflict step by mismatches after it → cheating prover wins (split from EMU-005) | Confirmed | High |
 | [EMU-011](tickets/EMU-011-get-chunks-base-addr-unit.md) | `get_chunks` labels chunk `base_addr` in words instead of bytes → opcode/initialized chunks mislabeled, malicious verifier wins against honest prover | Confirmed | Critical |
 | [EMU-012](tickets/EMU-012-registers-as-initialized-data.md) | Preferred fix for EMU-002: commit initial register values as initialized data (all 34 registers, no new challenge type, no client code change) | Fix validated | Critical |
+| [EMU-013](tickets/EMU-013-input-leaf-byte-order.md) | Client `input` leaves compare input words in the wrong byte order: a malicious verifier wins against an honest prover on any non-palindromic input word (found in the client review) | Confirmed, fix validated | Critical |
+| [EMU-014](tickets/EMU-014-client-rom-leaf-count.md) | Client `rom` leaves are dead code and their counter can shift every later challenge leaf by one (latent) | Confirmed (code reading) | Medium |
+
+The client-side checks that do (or don't) mitigate each ticket are analysed in [client-mitigations.md](client-mitigations.md).

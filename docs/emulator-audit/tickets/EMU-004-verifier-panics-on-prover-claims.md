@@ -191,3 +191,9 @@ Risks / side effects:
 * Make `ExecutionHashes::from_hexstr` and `validate_step_hash` return errors (use `hex::decode`) instead of `unwrap`/`expect`. Make `get_hashes` return `Result`.
 * Guard `final_bits == 0` in `prover_final_trace` (`:278`) for direct CLI use.
 * Consider `MemoryWitness::read_1/read_2/write` returning `Result` (or `TryFrom`) instead of panicking.
+
+## Client-side check (rust-bitvmx-client `dispute/*`)
+
+Confirmed again: `get_validate_last_step_script` (`mod.rs:1535-1551`) enforces `last_step != 0 && last_step <= max_steps`. The `<=` is what makes `last_step == max_steps` (power-of-two panic) reachable. A client-only alternative to the CPU fix is to make that check strict (`<`).
+
+See [client-mitigations.md](../client-mitigations.md).

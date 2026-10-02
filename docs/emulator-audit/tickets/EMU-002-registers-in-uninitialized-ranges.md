@@ -252,3 +252,9 @@ Risks and side effects:
 * `generate_rom_commitment` (`program.rs:877-887`, CLI only) also lists the whole register section as `zero_initialized`. Apply the same exclusion, or list SP as a constant.
 * EMU-006 also modifies `get_uninitialized_ranges` (input edge case). Coordinate the two diffs.
 * Verifier strategy: `choose_segment` always goes to the first mismatch. That is correct here, but any future "unprovable at the first mismatch" case also lets a lying prover win. Consider a systematic test that every `ChallengeType` the emulator picks in the `FailConfiguration` scenarios is accepted by `execute_challenge`.
+
+## Client-side check (rust-bitvmx-client `dispute/*`)
+
+**Not mitigated.** The `uninitialized` leaf is built from `get_uninitialized_ranges` (`challenge.rs:603`), and the `initialized` leaves from `get_initialized_chunks` (`:492`).
+
+See [client-mitigations.md](../client-mitigations.md).

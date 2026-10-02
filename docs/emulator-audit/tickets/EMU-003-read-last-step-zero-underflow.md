@@ -340,3 +340,14 @@ An alternative that is not recommended: map `last_step == 0` to the static-data 
 * Related verifier panics on prover-controlled data, which belong to EMU-004: `get_hashes` / `mapping.get(..).unwrap()` (`challenge.rs:379-388, 844, 862`) should return errors instead of panicking.
 * Unrelated observation (EMU-002): in the control test's `UninitializedData` ranges, the register section `0xF0000000-0xF0000087` is listed as uninitialised.
 
+
+## Client-side check (rust-bitvmx-client `dispute/*`)
+
+**Not mitigated.** The DRP does **not** reject a read `last_step = 0` by script:
+* the COMMITMENT check (`1 <= prover_last_step <= max_steps`) is on the program's final step, not on the read last steps;
+* in EXECUTE, `prover_read_1_last_step` and `prover_read_2_last_step` are dropped without any check (`mod.rs:1182-1185`), and no instruction script sees them;
+* the only leaf that uses them is `future_read`.
+
+The client's read-search rule (`challenge_step_script`, `mod.rs:1324-1354`) makes the release-build outcome deterministic. The wrapped `u64::MAX` target usually puts the verifier's 2nd-search selection after the conflict step, so the prover posts the GET_HASHES_AND_STEP challenge-step leaf and wins on-chain. The fix above (FUTURE_READ leaf with `prover_mem_witness`) is still required.
+
+See [client-mitigations.md](../client-mitigations.md).

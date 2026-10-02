@@ -123,3 +123,9 @@ Risks and side effects:
 * `verifier_choose_challenge_for_read_challenge` (`challenge.rs:907`) also uses `my_execution[0]` without checking `step_number`. Consider the same defensive check there.
 * `TraceRWStep::default()` for a non-zero step reports `step_number = 0`, which also shows up in the `execute_helper([C, C+1])` output above. Any consumer that keys on `step_number` (e.g. `fail_hash_until` in `get_round_hashes`, `program_definition.rs:203`) sees step 0 for that entry. This is harmless today because the entry is skipped.
 * If a program halts exactly at `k*C`, the checkpoint at `k*C` has `halt = true`. With the current code, queries for `k*C` load that checkpoint and keep executing past the halt. The fix avoids this for `k*C` itself. Queries for `k*C + j` are past the halt and are outside the normal protocol range.
+
+## Client-side check (rust-bitvmx-client `dispute/*`)
+
+**Not mitigated.** The zeroed trace has `opcode = 0`, which doesn't decode to a known instruction, so `execution.rs:216-224` should return `InstructionNotFound` and the honest prover posts no EXECUTE tx (opcode 0 assumed to fail to decode, not run). It loses by timeout rather than by `TraceHash`, which is the same outcome.
+
+See [client-mitigations.md](../client-mitigations.md).

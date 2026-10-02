@@ -201,3 +201,9 @@ Risks / side effects:
   Consider never merging the input section.
 * The register section is included in the uninitialized ranges (visible in the scratch-run output as
   `(f0000000, f0000087)`). This is tracked in EMU-002.
+
+## Client-side check (rust-bitvmx-client `dispute/*`)
+
+**Not mitigated.** `challenge_scripts` calls `get_uninitialized_ranges` during setup on both parties (`challenge.rs:603`), and nothing checks `sum(inputs.size)` against the input section size.
+
+See [client-mitigations.md](../client-mitigations.md).

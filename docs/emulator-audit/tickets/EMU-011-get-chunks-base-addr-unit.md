@@ -84,3 +84,9 @@ The same bug was reported independently by an external report, which also gave a
 * Add a property test in the emulator: every chunk word equals the memory word at its address.
 * Consider making the unit explicit (`chunk_words`) to avoid this class of bug.
 * Re-run the existing challenge tests with a multi-chunk program (e.g. `zkverifier-new-mul.elf`), not only `hello-world`.
+
+## Client-side check (rust-bitvmx-client `dispute/*`)
+
+**Not mitigated.** The opcode and initialized leaves come straight from `get_code_chunks` / `get_initialized_chunks`, with `chunk_index` as the leaf offset (`challenge.rs:293`, `:492`, `:851-859`, `:890-902`).
+
+See [client-mitigations.md](../client-mitigations.md).

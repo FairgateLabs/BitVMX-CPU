@@ -163,3 +163,12 @@ Without `--include-ignored` the suite is green: 5 passed, 2 ignored.
 2. Validate `sum(inputs.size) <= input section size` once, when the program definition is loaded, and return an error there. Today this case surfaces as the `get_uninitialized_ranges` assert at client setup (EMU-006).
 3. Add an end-to-end client test of the `InputData` challenge (and the `Const` input / `rom_challenge` path) with a **non-palindromic** input word, to confirm the byte order between the Winternitz-committed input words, `set_input_u32(value.to_be_bytes())` read values, and the emulator's `read_mem` (see Endianness above).
 4. `merge_sections` (`program.rs:263-278`) renames merged sections to `merge_<a>_<b>`. If `.input` were ever merged with an adjacent compatible section, `find_section_by_name(".input")` would fail (`SectionNotFound`) and the input-section logic in `get_uninitialized_ranges` and the client would break. This doesn't happen for current ELFs, but it's worth an assertion or exclusion.
+
+## Client-side check (rust-bitvmx-client `dispute/*`)
+
+**Endianness question resolved: it is a real bug, tracked as [EMU-013](EMU-013-input-leaf-byte-order.md) (Critical).**
+* Prover input words are signed as raw bytes, and Const words compiled as `from_be_bytes`.
+* The read values are signed as `to_be_bytes(from_le_bytes(bytes))`.
+* So any non-palindromic input word makes the `input` leaf succeed against an honest prover. This was confirmed by running the real leaves with real WOTS signatures.
+
+See [client-mitigations.md](../client-mitigations.md).

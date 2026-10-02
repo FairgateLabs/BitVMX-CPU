@@ -275,3 +275,9 @@ cargo test -p emulator --test audit_emu_009 -- --nocapture --include-ignored  # 
   * `check_item6_swapped_witness_is_rejected`: with quotient and remainder swapped in the witness, the script rejects the
     trace in the regular Div/Rem/Divu/Remu cases. So the witness really is constrained outside the special cases.
 * **No fix needed.**
+
+## Client-side check (rust-bitvmx-client `dispute/*`)
+
+The client doesn't call `generate_rom_commitment`, `is_register_address` or `get_last_register_address`, so items 1–2 don't affect the DRP. The client has its own (also broken, dead) `rom` leaves: [EMU-014](EMU-014-client-rom-leaf-count.md).
+
+See [client-mitigations.md](../client-mitigations.md).

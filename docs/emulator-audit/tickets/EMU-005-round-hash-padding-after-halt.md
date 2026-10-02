@@ -116,3 +116,9 @@ No change is needed for the padding rule itself. Padding with `h_H` (the ticket'
 * Open a dedicated ticket for the read-value `choose_segment` bug (High). Add unit tests in `nary_search.rs` for `ReadValueChallenge` (there are none today), and in-crate challenge tests where the prover keeps its failure config in the 2nd search.
 * Document the padding semantics in `get_round_hashes` ("hashes for steps beyond the executed range are filler and must never be used").
 * Separate, not investigated in depth: a prover that claims `last_step > H_v` while the verifier's run halts validly is only challenged with `ForceCondition::ValidInputWrongStepOrHash`. In that case the 1st search ends at `H_v` and the halt challenge needs `last_step == conflict + 1`. Worth checking which challenge the verifier has when the prover keeps "executing" past a real halt.
+
+## Client-side check (rust-bitvmx-client `dispute/*`)
+
+Confirms "benign": the conflict-search `challenge_step_script` (`mod.rs:1294-1323`) lets the prover end the dispute if the verifier ever selects a step `>= last_step`, so padded hashes after halt can't be targeted.
+
+See [client-mitigations.md](../client-mitigations.md).
