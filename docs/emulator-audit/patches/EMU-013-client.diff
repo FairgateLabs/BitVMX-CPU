@@ -1,0 +1,73 @@
+diff --git a/src/program/protocols/dispute/challenge.rs b/src/program/protocols/dispute/challenge.rs
+index 6fbd3b6..ce55a99 100644
+--- a/src/program/protocols/dispute/challenge.rs
++++ b/src/program/protocols/dispute/challenge.rs
+@@ -308,6 +308,7 @@ pub fn challenge_scripts<BC: BitcoinCoordinatorApi>(
+                         challenge_current_leaf += chunks.len() as u32;
+                     }
+                     "input" => {
++                        let swap_input_script = swap_input_word_script();
+                         let base_addr = program
+                             .find_section_by_name(&program_definitions.input_section_name)
+                             .ok_or_else(|| {
+@@ -358,7 +359,8 @@ pub fn challenge_scripts<BC: BitcoinCoordinatorApi>(
+                                             .collect::<Result<Vec<_>, _>>()?;
+ 
+                                         let address = base_addr + j * 4;
+-                                        let mut scripts = vec![reverse_script.clone()];
++                                        let mut scripts =
++                                            vec![reverse_script.clone(), swap_input_script.clone()];
+                                         stack = StackTracker::new();
+                                         input_challenge(&mut stack, address);
+                                         scripts.push(stack.get_script());
+@@ -415,7 +417,8 @@ pub fn challenge_scripts<BC: BitcoinCoordinatorApi>(
+                                             .extend_from_slice(const_names_and_keys.as_slice());
+ 
+                                         let address = base_addr + (j + offset) * 4;
+-                                        let mut scripts = vec![reverse_script.clone()];
++                                        let mut scripts =
++                                            vec![reverse_script.clone(), swap_input_script.clone()];
+                                         stack = StackTracker::new();
+                                         input_challenge(&mut stack, address);
+                                         scripts.push(stack.get_script());
+@@ -444,8 +447,9 @@ pub fn challenge_scripts<BC: BitcoinCoordinatorApi>(
+                                         let value =
+                                             context.globals.get_var_or_err(id, &key)?.input()?;
+ 
++                                        // memory words are read little-endian (emulator `load_input` + `read_mem`)
+                                         let value =
+-                                            u32::from_be_bytes(value.as_slice().try_into()?);
++                                            u32::from_le_bytes(value.as_slice().try_into()?);
+ 
+                                         rom_challenge(&mut stack, address, value);
+                                         scripts.push(stack.get_script());
+@@ -1059,6 +1063,29 @@ pub fn get_challenge_leaf<BC: BitcoinCoordinatorApi>(
+     Ok(Some(leaf_start + dynamic_offset))
+ }
+ 
++/// The input words are signed as raw input bytes, but the program reads memory words
++/// little-endian, so the signed word is byte-swapped before `input_challenge` compares it with the
++/// read values. Runs after the reverse script and keeps the layout `input_challenge` expects.
++fn swap_input_word_script() -> ScriptBuf {
++    let mut stack = StackTracker::new();
++    let input = stack.define(INPUT_CHALLENGE[0].1 as u32 * 2, "prover_input");
++    let rest: Vec<_> = INPUT_CHALLENGE
++        .iter()
++        .skip(1)
++        .map(|(name, size)| stack.define(*size as u32 * 2, name))
++        .collect();
++    let input = stack.move_var(input);
++    let nibbles = stack.explode(input);
++    for i in [6, 7, 4, 5, 2, 3, 0, 1] {
++        stack.move_var(nibbles[i]);
++    }
++    stack.join_count(nibbles[6], 7);
++    for var in rest {
++        stack.move_var(var);
++    }
++    stack.get_script()
++}
++
+ pub fn extract_nibble(
+     stack: &mut StackTracker,
+     scripts: &mut Vec<ScriptBuf>,

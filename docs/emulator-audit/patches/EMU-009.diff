@@ -1,0 +1,120 @@
+diff --git a/emulator/src/executor/fetcher.rs b/emulator/src/executor/fetcher.rs
+index 8750b67..a7d47d0 100644
+--- a/emulator/src/executor/fetcher.rs
++++ b/emulator/src/executor/fetcher.rs
+@@ -84,7 +84,7 @@ pub fn execute_program(
+         }
+ 
+         let mut trace = match &fail_config.fail_execute {
+-            Some(fe) if fe.step - 1 == program.step => {
++            Some(fe) if fe.step == program.step + 1 => {
+                 program.step += 1;
+                 program.pc.next_address();
+                 Ok(fe.fake_trace.clone())
+@@ -266,7 +266,9 @@ pub fn execute_step(
+         }
+     };
+ 
+-    let instruction = riscv_decode::decode(opcode).unwrap();
++    let instruction = riscv_decode::decode(opcode).map_err(|e| {
++        ExecutionResult::InstructionNotImplemented(opcode, format!("undecodable: {:?}", e))
++    })?;
+ 
+     if debug && program.step % 100000000 < 10000 {
+         info!(
+diff --git a/emulator/src/executor/utils.rs b/emulator/src/executor/utils.rs
+index 3c3a549..00fac9f 100644
+--- a/emulator/src/executor/utils.rs
++++ b/emulator/src/executor/utils.rs
+@@ -52,7 +52,9 @@ impl FailRead {
+         }
+ 
+         Self {
+-            step: parse_value::<u64>(&args[0]) - 1,
++            step: parse_value::<u64>(&args[0])
++                .checked_sub(1)
++                .expect("fail-read step must be >= 1"),
+             address_original: parse_value::<u32>(&args[1]),
+             value: parse_value::<u32>(&args[2]),
+             modified_address: parse_value::<u32>(&args[3]),
+@@ -193,7 +195,8 @@ pub struct FailExecute {
+ impl FailExecute {
+     pub fn new(args: &[String]) -> Self {
+         Self {
+-            step: parse_value::<u64>(&args[0]) - 1,
++            // same meaning as the struct field: the step whose trace is replaced
++            step: parse_value::<u64>(&args[0]),
+             fake_trace: TraceRWStep::from_str(&args[1]).unwrap(),
+         }
+     }
+diff --git a/emulator/src/loader/program.rs b/emulator/src/loader/program.rs
+index 8172b90..0ee4664 100644
+--- a/emulator/src/loader/program.rs
++++ b/emulator/src/loader/program.rs
+@@ -142,7 +142,8 @@ impl Registers {
+     }
+ 
+     pub fn get_last_register_address(&self) -> u32 {
+-        self.base_address + (RISCV32_REGISTERS as u32 * 4 + AUX_REGISTERS as u32 * 4)
++        // address of the last (AUX_2) register, inclusive
++        self.base_address + ((RISCV32_REGISTERS + AUX_REGISTERS - 1) as u32 * 4)
+     }
+ 
+     pub fn get(&self, idx: u32) -> u32 {
+@@ -497,6 +498,9 @@ impl Program {
+         if cfg!(target_endian = "big") {
+             panic!("Big endian machine not supported");
+         }
++        if !address.is_multiple_of(4) {
++            return Err(ExecutionResult::UnalignedJump(address));
++        }
+         let section = self.find_section(address)?;
+         if !section.is_code {
+             return Err(ExecutionResult::ExecuteFromNonCodeSection);
+@@ -805,6 +809,15 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Result<Program, EmulatorErr
+     });
+ 
+     program.sanity_check(Some(STACK_BASE_ADDRESS))?;
++    let entry = program.pc.get_address();
++    if !entry.is_multiple_of(4)
++        || !program.find_section(entry).map(|s| s.is_code).unwrap_or(false)
++    {
++        return Err(EmulatorError::CantLoadPorgram(format!(
++            "Invalid entrypoint 0x{:08x}: must be 4-byte aligned and inside a code section",
++            entry
++        )));
++    }
+     program.merge_sections();
+     program.generate_sections_definitions();
+ 
+@@ -839,7 +852,7 @@ pub fn generate_rom_commitment(program: &Program) -> Result<RomCommitment, Emula
+         if section.is_code {
+             for i in 0..section.size / 4 {
+                 let position = section.start + i * 4;
+-                let data = program.read_mem(position, false)?;
++                let data = program.read_instruction(position)?;
+ 
+                 let instruction = riscv_decode::decode(data).unwrap_or_else(|_| {
+                     panic!(
+@@ -875,7 +888,7 @@ pub fn generate_rom_commitment(program: &Program) -> Result<RomCommitment, Emula
+         }
+     }
+     for section in &program.sections {
+-        if !section.is_code && !section.initialized {
++        if !section.is_code && !section.initialized && !section.registers {
+             info!(
+                 "Zero initialized range: start: 0x{:08x} size: 0x{:08x}",
+                 section.start, section.size
+diff --git a/emulator/tests/audit_emu_011.rs b/emulator/tests/audit_emu_011.rs
+index 56b9a31..cd41637 100644
+--- a/emulator/tests/audit_emu_011.rs
++++ b/emulator/tests/audit_emu_011.rs
+@@ -32,7 +32,7 @@ const ELFS: [&str; 2] = [
+ /// bypassing access checks.
+ fn word_at(program: &Program, address: u32) -> u32 {
+     let base = program.registers.get_base_address();
+-    if address >= base && address < program.registers.get_last_register_address() {
++    if address >= base && address <= program.registers.get_last_register_address() {
+         // register chunks (see EMU-012) hold the loader's initial register values
+         return program.registers.get((address - base) / 4);
+     }

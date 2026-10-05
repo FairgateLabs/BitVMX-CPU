@@ -1,0 +1,56 @@
+diff --git a/emulator/src/decision/challenge.rs b/emulator/src/decision/challenge.rs
+index 7572a9f..91addab 100644
+--- a/emulator/src/decision/challenge.rs
++++ b/emulator/src/decision/challenge.rs
+@@ -136,6 +136,16 @@ pub fn verifier_check_execution(
+     save_non_checkpoint_steps: bool,
+ ) -> Result<Option<u64>, EmulatorError> {
+     let program_def = ProgramDefinition::from_config(program_definition_file)?;
++
++    // `claim_last_step` comes from the prover. The on-chain COMMITMENT script enforces
++    // 0 < claim_last_step <= max_steps, but never panic on it here.
++    if claim_last_step == 0 || claim_last_step > program_def.max_steps {
++        return Err(EmulatorError::ChallengeError(format!(
++            "Invalid prover claim: last_step {} must be in 1..={}",
++            claim_last_step, program_def.max_steps
++        )));
++    }
++
+     let (result, last_step, last_hash) = program_def.get_execution_result(
+         input.clone(),
+         input_checkpoint_path,
+@@ -143,6 +153,9 @@ pub fn verifier_check_execution(
+         fail_config,
+         save_non_checkpoint_steps,
+     )?;
++    if last_step == 0 {
++        return Err(EmulatorError::CantObtainTrace);
++    }
+ 
+     let input_is_valid = result == ExecutionResult::Halt(0, last_step);
+     let same_step_and_hash = last_step == claim_last_step && last_hash == claim_last_hash;
+@@ -167,8 +180,6 @@ pub fn verifier_check_execution(
+     warn!("There is a discrepancy between the prover and verifier execution");
+     warn!("This execution will be challenged");
+ 
+-    assert!(claim_last_step > 0 && last_step > 0);
+-
+     // we use the minimum agreed step (that is one before the disagreement)
+     let step_to_challenge = claim_last_step.min(last_step) - 1;
+ 
+diff --git a/emulator/src/loader/program_definition.rs b/emulator/src/loader/program_definition.rs
+index 3c1329a..51bb7df 100644
+--- a/emulator/src/loader/program_definition.rs
++++ b/emulator/src/loader/program_definition.rs
+@@ -50,7 +50,10 @@ impl ProgramDefinition {
+     }
+ 
+     pub fn nary_def(&self) -> NArySearchDefinition {
+-        NArySearchDefinition::new(self.max_steps, self.nary_search)
++        // The search space must contain every step up to and including `max_steps`
++        // (a claim of `last_step == max_steps` is valid on-chain). With
++        // `max_steps == 2^k`, `ceil(log2(max_steps))` would only cover steps < 2^k.
++        NArySearchDefinition::new(self.max_steps + 1, self.nary_search)
+     }
+ 
+     pub fn load_program(&self) -> Result<Program, EmulatorError> {

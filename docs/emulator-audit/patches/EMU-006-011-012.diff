@@ -1,0 +1,115 @@
+diff --git a/emulator/src/decision/challenge.rs b/emulator/src/decision/challenge.rs
+index 7572a9f..ca1513b 100644
+--- a/emulator/src/decision/challenge.rs
++++ b/emulator/src/decision/challenge.rs
+@@ -724,7 +724,7 @@ pub fn verifier_choose_challenge(
+                     address: conflict_address,
+                     input_for_address: value,
+                 });
+-            } else if (section.initialized && force == ForceChallenge::No)
++            } else if ((section.initialized || section.registers) && force == ForceChallenge::No)
+                 || force == ForceChallenge::InitializedData
+             {
+                 info!("Verifier choose to challenge invalid INITIALIZED DATA");
+diff --git a/emulator/src/loader/program.rs b/emulator/src/loader/program.rs
+index 8172b90..a5965df 100644
+--- a/emulator/src/loader/program.rs
++++ b/emulator/src/loader/program.rs
+@@ -629,7 +629,8 @@ impl Program {
+                     .chunks(chunk_size as usize)
+                     .enumerate()
+                     .map(|(index, chunk)| {
+-                        let offset = section.start + index as u32 * chunk_size;
++                        // chunk_size is in words, addresses are in bytes
++                        let offset = section.start + index as u32 * chunk_size * 4;
+                         let data = chunk.iter().map(|opcode| u32::from_be(*opcode)).collect();
+                         Chunk {
+                             base_addr: offset,
+@@ -640,10 +641,32 @@ impl Program {
+             .collect()
+     }
+ 
++    // The registers have loader-defined initial values (e.g. SP), so they are committed as
++    // initialized data. Their values live in `self.registers`, not in the section data.
+     pub fn get_initialized_chunks(&self, chunk_size: u32) -> Vec<Chunk> {
+-        self.get_chunks(chunk_size, |section| {
++        assert_eq!(
++            self.step, 0,
++            "initialized chunks must be computed from a freshly loaded program"
++        );
++
++        let mut chunks = self.get_chunks(chunk_size, |section| {
+             section.initialized && !section.is_code
+-        })
++        });
++
++        // appended last, so the indexes of the section chunks don't change
++        let base_address = self.registers.get_base_address();
++        chunks.extend(
++            self.registers
++                .value
++                .chunks(chunk_size as usize)
++                .enumerate()
++                .map(|(index, values)| Chunk {
++                    base_addr: base_address + index as u32 * chunk_size * 4,
++                    data: values.to_vec(),
++                }),
++        );
++
++        chunks
+     }
+ 
+     pub fn get_code_chunks(&self, chunk_size: u32) -> Vec<Chunk> {
+@@ -658,8 +681,10 @@ impl Program {
+             .sections
+             .iter()
+             .filter(|section| {
+-                // we do inputs separately
+-                !section.initialized && section.name != program_definition.input_section_name
++                // we do inputs separately, registers are initialized data
++                !section.initialized
++                    && !section.registers
++                    && section.name != program_definition.input_section_name
+             })
+             .map(|section| section.range())
+             .collect();
+@@ -669,24 +694,28 @@ impl Program {
+             .expect("Input section not found");
+ 
+         // input section is usually bigger than the actual input of the program, so the remaining space should be uninitialized
+-        let input_size = program_definition
++        let input_size: u64 = program_definition
+             .inputs
+             .iter()
+-            .fold(0, |acc, input| acc + input.size);
+-
+-        let (start, end) = input_section.range();
+-        let uninit_start = start + input_size as u32;
++            .map(|input| input.size)
++            .sum();
+ 
+         assert!(
+-            uninit_start <= end,
+-            "Input size ({}) exceeds input section size ({}..{})",
++            input_size <= input_section.size as u64,
++            "Input size ({}) exceeds input section size ({})",
+             input_size,
+-            start,
+-            end
++            input_section.size
+         );
+ 
+-        if uninit_start < end {
+-            uninitialized.push((uninit_start, end));
++        // An initialized (PROGBITS) input section keeps its ELF contents after the input,
++        // so its tail is not zero and must not be challengeable as uninitialized.
++        if !input_section.initialized {
++            // load_input pads the last input word with zeros; start the range at the next word
++            let used = (input_size + 3) & !3;
++            if used < input_section.size as u64 {
++                let (start, end) = input_section.range();
++                uninitialized.push((start + used as u32, end));
++            }
+         }
+ 
+         SectionDefinition {

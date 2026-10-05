@@ -1,0 +1,26 @@
+diff --git a/src/program/protocols/dispute/challenge.rs b/src/program/protocols/dispute/challenge.rs
+index 6fbd3b6..b1c7915 100644
+--- a/src/program/protocols/dispute/challenge.rs
++++ b/src/program/protocols/dispute/challenge.rs
+@@ -116,11 +116,12 @@ pub const UNINITIALIZED_CHALLENGE: [(&str, usize); 7] = [
+     ("prover_read_2_last_step", 8),
+     ("verifier_read_selector", 1),
+ ];
+-pub const FUTURE_READ_CHALLENGE: [(&str, usize); 4] = [
++pub const FUTURE_READ_CHALLENGE: [(&str, usize); 5] = [
+     ("prover_conflict_step_tk", 8),
+     ("prover_read_1_last_step", 8),
+     ("prover_read_2_last_step", 8),
+     ("verifier_read_selector", 1),
++    ("prover_mem_witness", 1),
+ ];
+ pub const READ_VALUE_NARY_SEARCH_CHALLENGE: [(&str, usize); 1] =
+     [("verifier_selection_bits2_1", 1)];
+@@ -916,6 +917,7 @@ pub fn get_challenge_leaf<BC: BitcoinCoordinatorApi>(
+             prover_read_step_2: _,
+             read_selector,
+             prover_conflict_step_tk: _,
++            prover_mem_witness: _,
+         } => {
+             name = "future_read";
+             info!("Verifier chose {name} challenge");

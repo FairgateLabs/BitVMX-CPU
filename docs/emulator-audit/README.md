@@ -97,3 +97,40 @@ Every one of these decisions must be **provable by an on-chain script** (`bitcoi
 The client-side checks that do (or don't) mitigate each ticket are analysed in [client-mitigations.md](client-mitigations.md).
 
 Findings in the on-chain scripts (`bitcoin-script-riscv`, the instruction leaves and their mapping) are in the separate [script audit](../script-audit/README.md) (SCR-001..007).
+
+## 9. Patches
+
+The proposed fixes from the tickets are in [`patches/`](patches/) as `git apply`-able diffs, validated against `claudeaudit` @ 4763c9a (CPU) and `claudeaudit` @ 5c79201 (client). They are not applied to the tree.
+
+| Patch | Apply from | Fixes | Files |
+|---|---|---|---|
+| [`EMU-001.diff`](patches/EMU-001.diff) | `BitVMX-CPU/` | EMU-001 | `program_definition.rs` |
+| [`EMU-003.diff`](patches/EMU-003.diff) | `BitVMX-CPU/` | EMU-003 (CPU side: `FutureRead` gets `prover_mem_witness`) | `challenges.rs` (script), `definitions/challenge.rs`, `decision/challenge.rs`, plus the new field in the `audit_emu_003` / `audit_scr` test literals |
+| [`EMU-004.diff`](patches/EMU-004.diff) | `BitVMX-CPU/` | EMU-004 (claim range check, `nary_def(max_steps + 1)`) | `decision/challenge.rs`, `program_definition.rs` |
+| [`EMU-006-011-012.diff`](patches/EMU-006-011-012.diff) | `BitVMX-CPU/` | EMU-011, EMU-012 (and so EMU-002), EMU-006, merged by hand | `program.rs`, `decision/challenge.rs` |
+| [`EMU-007.diff`](patches/EMU-007.diff) | `BitVMX-CPU/` | EMU-007 | `lib.rs`, `program.rs` |
+| [`EMU-008.diff`](patches/EMU-008.diff) | `BitVMX-CPU/` | EMU-008 | `fetcher.rs` |
+| [`EMU-009.diff`](patches/EMU-009.diff) | `BitVMX-CPU/` | EMU-009 items 1–5 (item 6 was refuted). Also fixes the `audit_emu_011` test helper, which relied on the old off-by-one in `get_last_register_address`. | `fetcher.rs`, `utils.rs`, `program.rs`, `tests/audit_emu_011.rs` |
+| [`EMU-010.diff`](patches/EMU-010.diff) | `BitVMX-CPU/` | EMU-010 (the fix proposed in EMU-005) | `nary_search.rs` |
+| [`EMU-003-client.diff`](patches/EMU-003-client.diff) | `rust-bitvmx-client/` | EMU-003 (client side). **Requires `EMU-003.diff`** in the CPU. | `dispute/challenge.rs` |
+| [`EMU-013-client.diff`](patches/EMU-013-client.diff) | `rust-bitvmx-client/` | EMU-013 | `dispute/challenge.rs` |
+| [`EMU-014-client.diff`](patches/EMU-014-client.diff) | `rust-bitvmx-client/` | EMU-014: removes the `rom` leaves and derives every `challenge_leaf_start_*` from `challenge_leaf_script.len()`. **Apply after `EMU-013-client.diff`.** | `dispute/challenge.rs` |
+
+```
+# BitVMX-CPU/ (each patch also applies alone)
+for p in EMU-001 EMU-003 EMU-004 EMU-006-011-012 EMU-007 EMU-008 EMU-009 EMU-010; do git apply docs/emulator-audit/patches/$p.diff; done
+# rust-bitvmx-client/ (in this order)
+for p in EMU-003-client EMU-013-client EMU-014-client; do git apply ../BitVMX-CPU/docs/emulator-audit/patches/$p.diff; done
+```
+
+Validation (scratch worktree, release builds):
+* Each CPU patch alone: its ticket's `#[ignore]` tests pass, `emulator --lib` (70) and `--test challenge` pass. `EMU-003.diff` also passes `bitcoin-script-riscv --lib challenges` (51).
+* All CPU patches together: `cargo test --release -p emulator -- --include-ignored` passes everything except:
+  * the 18 `demo_*` / `emu0NN_demo_*` tests in `audit_emu_003/006/007/009/011`, which demonstrate the bugs and fail by design once they are fixed. Delete them with the fixes;
+  * `emu006_progbits_input_words_not_initialized_chunks`: the EMU-006 follow-up (PROGBITS input section in the initialized chunks) has no fix in these patches;
+  * the 5 SCR tests in `audit_scr`, which need the [script-audit patches](../script-audit/patches/).
+  
+  `bitcoin-script-riscv --lib` passes (137). The SCR patches also apply on top of the EMU patches with no conflicts.
+* Client patches: `cargo check --lib` passes with all three applied (with `EMU-003.diff` in the CPU checkout). They change leaf scripts, so they have no unit test here; EMU-013's leaf logic is the one validated in `rust-bitvmx-client/tests/audit_emu_013_input_byte_order.rs`.
+
+All the patches that change dispute leaves (EMU-003, 004 for power-of-two `max_steps`, 006, 011/012, 013, 014) must ship together in one coordinated CPU + client version bump; see the rollout notes in [handover.md](handover.md).

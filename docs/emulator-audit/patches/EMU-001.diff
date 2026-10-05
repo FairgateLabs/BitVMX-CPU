@@ -1,0 +1,25 @@
+diff --git a/emulator/src/loader/program_definition.rs b/emulator/src/loader/program_definition.rs
+index 3c1329a..d13ee84 100644
+--- a/emulator/src/loader/program_definition.rs
++++ b/emulator/src/loader/program_definition.rs
+@@ -73,7 +73,10 @@ impl ProgramDefinition {
+             )));
+         }
+ 
+-        let checkpoint_step = (step / CHECKPOINT_SIZE) * CHECKPOINT_SIZE;
++        // A checkpoint stores the state *after* its step was executed, so the trace of
++        // that step cannot be produced from it. Load the last checkpoint strictly before
++        // `step` (step 0 is the initial state: only its hash is meaningful).
++        let checkpoint_step = (step.saturating_sub(1) / CHECKPOINT_SIZE) * CHECKPOINT_SIZE;
+ 
+         if checkpoint_step == 0 {
+             self.load_program()
+@@ -241,7 +244,7 @@ impl ProgramDefinition {
+             false,
+         )?;
+         // at least the base step should be present
+-        if trace.is_empty() {
++        if trace.is_empty() || trace[0].0.step_number != step {
+             return Err(EmulatorError::CantObtainTrace);
+         }
+ 

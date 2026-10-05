@@ -1,0 +1,252 @@
+diff --git a/bitcoin-script-riscv/src/riscv/challenges.rs b/bitcoin-script-riscv/src/riscv/challenges.rs
+index c9239a5..69a2626 100644
+--- a/bitcoin-script-riscv/src/riscv/challenges.rs
++++ b/bitcoin-script-riscv/src/riscv/challenges.rs
+@@ -622,18 +622,65 @@ pub fn future_read_challenge(stack: &mut StackTracker) {
+     let read_step_2 = stack.define(16, "prover_read_step_2");
+ 
+     let read_selector = stack.define(1, "read_selector");
++    let memory_witness = stack.define(2, "prover_mem_witness");
++
++    // Impossible read step: step 0 is the initial state (it has no trace) so nothing is ever
++    // written at step 0. A *used* read (witness != Unused) claiming last_step == 0 is always a lie.
++    // Unused reads are TraceRead::default() (last_step == 0) in honest traces, so they are excluded.
++    let upper_half_nibble_table = load_upper_half_nibble_table(stack);
++    let lower_half_nibble_table = load_lower_half_nibble_table(stack);
++
++    witness_equals(
++        stack,
++        &lower_half_nibble_table,
++        0,
++        &memory_witness,
++        MemoryAccessType::Unused,
++    );
++    stack.op_not();
++    let read_step_1_copy = stack.copy_var(read_step_1);
++    let zero = stack.number_u64(0);
++    stack.equality(read_step_1_copy, true, zero, true, true, false);
++    stack.op_booland();
++
++    witness_equals(
++        stack,
++        &upper_half_nibble_table,
++        1,
++        &memory_witness,
++        MemoryAccessType::Unused,
++    );
++    stack.op_not();
++    let read_step_2_copy = stack.copy_var(read_step_2);
++    let zero = stack.number_u64(0);
++    stack.equality(read_step_2_copy, true, zero, true, true, false);
++    stack.op_booland();
++
++    stack.op_boolor();
++    stack.to_altstack();
++
++    stack.drop(lower_half_nibble_table);
++    stack.drop(upper_half_nibble_table);
++    stack.drop(memory_witness);
+ 
+     let [read_step] = get_selected_vars(stack, [read_step_1], [read_step_2], read_selector);
+ 
+     // read_step != LAST_STEP_INIT
+     let init = stack.number_u64(LAST_STEP_INIT);
+-    stack.equality(read_step, false, init, true, false, true);
++    stack.equality(read_step, false, init, true, false, false);
++    stack.to_altstack();
+ 
+     // The first step corresponds to the step selected by the decision bits, and the second step
+     // is the step of the given trace, that trace corresponds to the next step selected so
+     // if both steps are the same that means that the trace did a read to a value writen in the previous step.
+     // so step == read_step is valid and we shouldn't be able to challenge it, only if step < read_step ≡ trace_step <= read_step
+     is_lower_than(stack, step, read_step, true);
++    stack.from_altstack();
++    stack.op_booland();
++
++    // future read || impossible (zero) read step
++    stack.from_altstack();
++    stack.op_boolor();
+     stack.op_verify();
+ }
+ 
+@@ -932,11 +979,13 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
+             prover_read_step_1,
+             prover_read_step_2,
+             read_selector,
++            prover_mem_witness,
+         } => {
+             stack.number_u64(*prover_conflict_step_tk);
+             stack.number_u64(*prover_read_step_1);
+             stack.number_u64(*prover_read_step_2);
+             stack.number(*read_selector);
++            stack.byte(*prover_mem_witness);
+ 
+             future_read_challenge(&mut stack);
+         }
+@@ -2155,12 +2204,23 @@ mod tests {
+     }
+ 
+     fn test_future_read_aux(step: u64, read_step: u64) -> bool {
++        test_future_read_witness_aux(step, read_step, read_step, 1, MemoryWitness::registers())
++    }
++
++    fn test_future_read_witness_aux(
++        step: u64,
++        read_step_1: u64,
++        read_step_2: u64,
++        read_selector: u32,
++        witness: MemoryWitness,
++    ) -> bool {
+         let stack = &mut StackTracker::new();
+ 
+         stack.number_u64(step);
+-        stack.number_u64(read_step); // read_1_step
+-        stack.number_u64(read_step); // read_2_step
+-        stack.number(1); // read_selector
++        stack.number_u64(read_step_1); // read_1_step
++        stack.number_u64(read_step_2); // read_2_step
++        stack.number(read_selector); // read_selector
++        stack.byte(witness.byte()); // memory witness
+ 
+         future_read_challenge(stack);
+ 
+@@ -2182,6 +2242,21 @@ mod tests {
+ 
+         // challenge is valid if read after current step
+         assert!(test_future_read_aux(step, step + 1));
++
++        // EMU-003: a used read can never have last_step == 0
++        assert!(test_future_read_aux(step, 0));
++        let rur = MemoryWitness::rur();
++        assert!(test_future_read_witness_aux(step, 0, 0, 1, rur.clone()));
++        assert!(test_future_read_witness_aux(step, 0, 0, 2, rur.clone()));
++        assert!(test_future_read_witness_aux(step, 0, LAST_STEP_INIT, 2, MemoryWitness::registers()));
++        assert!(test_future_read_witness_aux(step, 50, 0, 1, MemoryWitness::registers()));
++        // ...but unused reads are TraceRead::default() (last_step == 0) in honest traces
++        assert!(!test_future_read_witness_aux(step, 50, 0, 2, rur.clone()));
++        assert!(!test_future_read_witness_aux(step, 50, 0, 1, rur.clone()));
++        assert!(!test_future_read_witness_aux(step, 0, 0, 1, MemoryWitness::default()));
++        assert!(!test_future_read_witness_aux(step, 50, 99, 2, MemoryWitness::registers()));
++        // future read still detected regardless of the witness of the other read
++        assert!(test_future_read_witness_aux(step, 0, step + 1, 2, MemoryWitness::default()));
+     }
+ 
+     fn test_read_value_aux(
+diff --git a/definitions/src/challenge.rs b/definitions/src/challenge.rs
+index bf94a03..3303be8 100644
+--- a/definitions/src/challenge.rs
++++ b/definitions/src/challenge.rs
+@@ -83,6 +83,7 @@ pub enum ChallengeType {
+         prover_read_step_1: u64,
+         prover_read_step_2: u64,
+         read_selector: u32,
++        prover_mem_witness: u8,
+     },
+     ReadValueNArySearch {
+         bits: u32,
+diff --git a/emulator/src/decision/challenge.rs b/emulator/src/decision/challenge.rs
+index 7572a9f..2eca8c9 100644
+--- a/emulator/src/decision/challenge.rs
++++ b/emulator/src/decision/challenge.rs
+@@ -1,7 +1,7 @@
+ use bitvmx_cpu_definitions::{
+     challenge::{ChallengeType, EquivocationKind, ProverFinalTraceType, ProverHashesAndStepType},
+     constants::{CHUNK_SIZE, LAST_STEP_INIT},
+-    memory::Chunk,
++    memory::{Chunk, MemoryAccessType},
+     trace::{generate_initial_step_hash, hashvec_to_string, validate_step_hash, TraceRWStep},
+ };
+ 
+@@ -659,8 +659,16 @@ pub fn verifier_choose_challenge(
+     let prover_read_step_1 = prover_read_1.last_step;
+     let prover_read_step_2 = prover_read_2.last_step;
+ 
+-    let is_read_1_future = prover_read_step_1 > step && prover_read_step_1 != LAST_STEP_INIT;
+-    let is_read_2_future = prover_read_step_2 > step && prover_read_step_2 != LAST_STEP_INIT;
++    let is_read_1_used = trace.mem_witness.read_1() != MemoryAccessType::Unused;
++    let is_read_2_used = trace.mem_witness.read_2() != MemoryAccessType::Unused;
++
++    // A read can only return a value written at a step in [1, step] (or LAST_STEP_INIT).
++    // Step 0 is the initial state: nothing is ever written there, so a used read claiming
++    // last_step == 0 is a lie (unused reads are TraceRead::default() and carry last_step == 0).
++    let is_read_1_future = (prover_read_step_1 > step && prover_read_step_1 != LAST_STEP_INIT)
++        || (prover_read_step_1 == 0 && is_read_1_used);
++    let is_read_2_future = (prover_read_step_2 > step && prover_read_step_2 != LAST_STEP_INIT)
++        || (prover_read_step_2 == 0 && is_read_2_used);
+ 
+     if ((is_read_1_future || is_read_2_future) && force == ForceChallenge::No)
+         || force == ForceChallenge::FutureRead
+@@ -672,12 +680,13 @@ pub fn verifier_choose_challenge(
+             prover_read_step_1,
+             prover_read_step_2,
+             read_selector,
++            prover_mem_witness: trace.mem_witness.byte(),
+         });
+     }
+ 
+-    // check const read value
+-    let is_read_1_conflict = prover_read_1.value != my_trace.read_1.value;
+-    let is_read_2_conflict = prover_read_2.value != my_trace.read_2.value;
++    // check const read value (only reads that are actually used by the instruction)
++    let is_read_1_conflict = is_read_1_used && prover_read_1.value != my_trace.read_1.value;
++    let is_read_2_conflict = is_read_2_used && prover_read_2.value != my_trace.read_2.value;
+ 
+     if ((is_read_1_conflict || is_read_2_conflict) && force == ForceChallenge::No)
+         || force == ForceChallenge::InputData
+@@ -762,6 +771,14 @@ pub fn verifier_choose_challenge(
+                 conflict_last_step.max(my_conflict_last_step)
+             };
+ 
++            // unreachable after the impossible-read check above, but never underflow on
++            // prover-controlled data
++            if step_to_challenge == 0 {
++                return Err(EmulatorError::ChallengeError(
++                    "read value challenge with last_step 0".to_string(),
++                ));
++            }
++
+             let mut bits = nary_def.step_bits_for_round(1, step_to_challenge - 1);
+ 
+             let read_challenge_log = &mut verifier_log.read_challenge_log;
+diff --git a/emulator/tests/audit_emu_003.rs b/emulator/tests/audit_emu_003.rs
+index 50f9220..ee45ffc 100644
+--- a/emulator/tests/audit_emu_003.rs
++++ b/emulator/tests/audit_emu_003.rs
+@@ -13,7 +13,10 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
+ 
+ use bitcoin_script_riscv::riscv::challenges::execute_challenge;
+ use bitvmx_cpu_definitions::{
+-    challenge::ChallengeType, constants::LAST_STEP_INIT, trace::TraceRWStep,
++    challenge::ChallengeType,
++    constants::LAST_STEP_INIT,
++    memory::{MemoryAccessType, MemoryWitness},
++    trace::TraceRWStep,
+     trace::TraceRead,
+ };
+ use emulator::{
+@@ -298,6 +301,13 @@ fn emu_003_demo_no_script_rejects_last_step_zero() {
+         prover_read_step_1: read_1.last_step,
+         prover_read_step_2: last_step,
+         read_selector: 2,
++        // lw: read_1 = base register, read_2 = memory, write = register
++        prover_mem_witness: MemoryWitness::new(
++            MemoryAccessType::Register,
++            MemoryAccessType::Memory,
++            MemoryAccessType::Register,
++        )
++        .byte(),
+     };
+ 
+     // controls: these lies are provable
+diff --git a/emulator/tests/audit_scr.rs b/emulator/tests/audit_scr.rs
+index 5f2b991..21b30ea 100644
+--- a/emulator/tests/audit_scr.rs
++++ b/emulator/tests/audit_scr.rs
+@@ -591,6 +591,7 @@ fn scr003_demo_skip_halt_with_true_reads_is_unchallengeable() {
+             prover_read_step_1: forged.read_1.last_step,
+             prover_read_step_2: forged.read_2.last_step,
+             read_selector: selector,
++            prover_mem_witness: forged.mem_witness.byte(),
+         })));
+     }
+     for (name, w) in &wins {

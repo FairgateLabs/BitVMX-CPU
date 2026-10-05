@@ -1,0 +1,19 @@
+diff --git a/emulator/src/decision/nary_search.rs b/emulator/src/decision/nary_search.rs
+index cfa2ac7..d31358d 100644
+--- a/emulator/src/decision/nary_search.rs
++++ b/emulator/src/decision/nary_search.rs
+@@ -209,6 +209,14 @@ pub fn choose_segment(
+         0
+     };
+     for i in 0..prover_hashes.hashes.len() {
++        if nary_type == NArySearchType::ReadValueChallenge {
++            // Hashes after the (agreed) conflict step are expected to differ, or are
++            // padding past the halt step: they must not steer the read-value search.
++            let step = nary_defs.step_from_base_and_bits(round, base_step, (i + 1) as u32);
++            if step > conflict_step.unwrap() {
++                break;
++            }
++        }
+         let prover_hash = &prover_hashes.hashes[i];
+         let my_hash = &my_hashes.hashes[i];
+         if prover_hash != my_hash {

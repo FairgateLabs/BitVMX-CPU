@@ -1,0 +1,27 @@
+diff --git a/emulator/src/executor/fetcher.rs b/emulator/src/executor/fetcher.rs
+index 8750b67..ab10f29 100644
+--- a/emulator/src/executor/fetcher.rs
++++ b/emulator/src/executor/fetcher.rs
+@@ -36,6 +36,11 @@ pub fn execute_program(
+     save_non_checkpoint_steps: bool,
+ ) -> (ExecutionResult, FullTrace) {
+     let trace_set: Option<HashSet<u64>> = trace_list.map(|vec| vec.into_iter().collect());
++    // In trace-list mode (step queries) nothing is recorded after the highest requested step,
++    // so the execution can stop there instead of running until halt / error / limit_step.
++    let last_requested_step: Option<u64> = trace_set
++        .as_ref()
++        .and_then(|set| set.iter().max().copied());
+ 
+     let mut traces = Vec::new();
+ 
+@@ -211,6 +216,10 @@ pub fn execute_program(
+         if limit_step_reached {
+             break ExecutionResult::LimitStepReached(program.step);
+         }
++
++        if last_requested_step.is_some_and(|last| program.step >= last) {
++            break ExecutionResult::LimitStepReached(program.step);
++        }
+     };
+ 
+     if debug && verify_on_chain {

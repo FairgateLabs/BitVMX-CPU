@@ -2,6 +2,8 @@
 
 State as of 2026-10-02. Nothing has been applied to production code: every fix exists only as a diff in its ticket, plus tests that prove the bug and, where noted, the fix.
 
+Update 2026-10-05: the fixes are also available as validated, `git apply`-able diffs in [`patches/`](patches/) (see README section 9).
+
 ## Where things are
 
 | What | Location |
@@ -9,6 +11,7 @@ State as of 2026-10-02. Nothing has been applied to production code: every fix e
 | Architecture / protocol reference + ticket index | `BitVMX-CPU/docs/emulator-audit/README.md` |
 | Which client (`rust-bitvmx-client` `dispute/*`) checks mitigate which ticket | `BitVMX-CPU/docs/emulator-audit/client-mitigations.md` |
 | Tickets (bug, evidence, test, proposed diff, risks) | `BitVMX-CPU/docs/emulator-audit/tickets/EMU-001..014*.md` |
+| Validated patches (CPU + client) | `BitVMX-CPU/docs/emulator-audit/patches/*.diff` |
 | Emulator-side tests | `BitVMX-CPU/emulator/tests/audit_emu_0NN.rs` (EMU-010's tests are in `audit_emu_005.rs`) |
 | Client-side test | `rust-bitvmx-client/tests/audit_emu_013_input_byte_order.rs` |
 | Branch | `claudeaudit` in both `BitVMX-CPU` and `rust-bitvmx-client` (this file may still be uncommitted) |
