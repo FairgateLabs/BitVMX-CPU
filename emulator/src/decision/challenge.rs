@@ -12,8 +12,8 @@ use tracing::{error, info, warn};
 
 use crate::{
     decision::{
-        execution_log::{VerifierChallengeLog, VerifierNAryLog},
-        nary_search::{choose_segment, ExecutionHashes, NArySearchType, Party, SearchMode},
+        execution_log::VerifierChallengeLog,
+        nary_search::{choose_segment, ExecutionHashes, NArySearchType, Party},
     },
     executor::utils::{FailConfiguration, FailSelectionBits},
     loader::program_definition::ProgramDefinition,
@@ -223,8 +223,7 @@ fn advance_full_duplex(
     base_step: &mut u64,
     step_to_challenge: &mut u64,
     decisions: &mut Vec<u32>,
-    my_hash_rounds: &mut Vec<Vec<String>>,
-    counterparty_hash_rounds: &mut Vec<Vec<String>>,
+    published_hash_rounds: &mut Vec<Vec<String>>,
 ) -> Result<(Option<u32>, Vec<String>), EmulatorError> {
     let nary_def = program_def.nary_def();
 
@@ -234,6 +233,12 @@ fn advance_full_duplex(
         *base_step = nary_def.step_from_base_and_bits(stage - 2, *base_step, digit);
         decisions.push(digit);
     }
+
+    // Past the last round only the trailing selection remains. It is reported
+    // but not committed here: it rides on the adjudication message, and
+    // prover_final_trace applies it along with everything else that message
+    // carries.
+    let commit_selection = stage <= nary_def.total_rounds();
 
     let selection = if stage > 1 {
         let previous = stage - 1;
@@ -260,10 +265,15 @@ fn advance_full_duplex(
             None,
         );
 
-        *base_step = new_base;
-        *step_to_challenge = new_selected;
-        decisions.push(bits);
-        counterparty_hash_rounds.push(counterparty_hashes.to_vec());
+        // Record the counterparty's dissection under its round number. Stages
+        // run in order and each records the previous round before its own, so
+        // this vector stays indexed by round for both parties.
+        published_hash_rounds.push(counterparty_hashes.to_vec());
+        if commit_selection {
+            *base_step = new_base;
+            *step_to_challenge = new_selected;
+            decisions.push(bits);
+        }
         Some(bits)
     } else {
         None
@@ -271,7 +281,7 @@ fn advance_full_duplex(
 
     // Dissect the subinterval just selected, unless the search has run out of
     // levels and only the trailing selection remained.
-    let hashes = if stage <= nary_def.total_rounds() {
+    let hashes = if commit_selection {
         let hashes = program_def.get_round_hashes(
             input_checkpoint_path,
             output_checkpoint_path,
@@ -281,7 +291,7 @@ fn advance_full_duplex(
             fail_config,
             last_step,
         )?;
-        my_hash_rounds.push(hashes.clone());
+        published_hash_rounds.push(hashes.clone());
         hashes
     } else {
         Vec::new()
@@ -314,8 +324,7 @@ pub fn prover_full_duplex_stage(
     let mut base_step = log.base_step;
     let mut step_to_challenge = log.step_to_challenge;
     let mut decisions = std::mem::take(&mut log.verifier_decisions);
-    let mut mine = std::mem::take(&mut log.hash_rounds);
-    let mut theirs = std::mem::take(&mut log.counterparty_hash_rounds);
+    let mut published = std::mem::take(&mut log.hash_rounds);
 
     let result = advance_full_duplex(
         &program_def,
@@ -330,16 +339,14 @@ pub fn prover_full_duplex_stage(
         &mut base_step,
         &mut step_to_challenge,
         &mut decisions,
-        &mut mine,
-        &mut theirs,
+        &mut published,
     )?;
 
     let log = challenge_log.get_nary_log(NArySearchType::ConflictStep);
     log.base_step = base_step;
     log.step_to_challenge = step_to_challenge;
     log.verifier_decisions = decisions;
-    log.hash_rounds = mine;
-    log.counterparty_hash_rounds = theirs;
+    log.hash_rounds = published;
     challenge_log.save(output_checkpoint_path)?;
 
     Ok(result)
@@ -363,8 +370,7 @@ pub fn verifier_full_duplex_stage(
     let mut base_step = log.base_step;
     let mut step_to_challenge = log.step_to_challenge;
     let mut decisions = std::mem::take(&mut log.verifier_decisions);
-    let mut mine = std::mem::take(&mut log.verifier_hash_rounds);
-    let mut theirs = std::mem::take(&mut log.prover_hash_rounds);
+    let mut published = std::mem::take(&mut log.prover_hash_rounds);
 
     let result = advance_full_duplex(
         &program_def,
@@ -379,16 +385,14 @@ pub fn verifier_full_duplex_stage(
         &mut base_step,
         &mut step_to_challenge,
         &mut decisions,
-        &mut mine,
-        &mut theirs,
+        &mut published,
     )?;
 
     let log = challenge_log.get_nary_log(NArySearchType::ConflictStep);
     log.base_step = base_step;
     log.step_to_challenge = step_to_challenge;
     log.verifier_decisions = decisions;
-    log.verifier_hash_rounds = mine;
-    log.prover_hash_rounds = theirs;
+    log.prover_hash_rounds = published;
     challenge_log.save(output_checkpoint_path)?;
 
     Ok(result)
@@ -575,22 +579,6 @@ pub fn prover_get_hashes_and_step(
     })
 }
 
-/// The hashes published at each round, taken from whichever party dissected
-/// that round. Under the asymmetric search that is always the prover, so this
-/// reduces to the prover's rounds.
-pub fn published_hash_rounds(
-    mode: SearchMode,
-    rounds: u8,
-    log: &VerifierNAryLog,
-) -> Vec<Vec<String>> {
-    (1..rounds + 1)
-        .map(|r| match mode.dissector(rounds, r) {
-            Party::Prover => log.prover_hash_rounds[r as usize - 1].clone(),
-            Party::Verifier => log.verifier_hash_rounds[r as usize - 1].clone(),
-        })
-        .collect()
-}
-
 pub fn get_hashes(
     mapping: &HashMap<u64, (u8, u8)>,
     hashes: &[Vec<String>],
@@ -684,8 +672,10 @@ pub fn verifier_choose_challenge(
     let mode = program_def.search_mode();
     let total_rounds = nary_def.total_rounds();
 
-    let published = published_hash_rounds(mode, total_rounds, conflict_step_log);
-    let (committed_step_hash, committed_next_hash) = get_hashes(mapping, &published, step);
+    // Each round's dissection is recorded under its round number by whichever
+    // party published it, so this is the committed view in either mode.
+    let (committed_step_hash, committed_next_hash) =
+        get_hashes(mapping, &conflict_step_log.prover_hash_rounds, step);
 
     let nary = return_script_parameters.then_some(nary_def.nary);
     let nary_last_round = return_script_parameters.then_some(nary_def.nary_last_round);

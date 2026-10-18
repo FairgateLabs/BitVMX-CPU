@@ -24,16 +24,15 @@ impl ExecutionLog {
 pub struct ProverNAryLog {
     pub base_step: u64,
     pub verifier_decisions: Vec<u32>,
+    /// Each round's dissection, indexed by round. Under the full-duplex search
+    /// the rounds alternate between the parties, so this is the published view
+    /// rather than only this party's own dissections.
     pub hash_rounds: Vec<Vec<String>>,
     pub final_trace: TraceRWStep,
     /// Running upper bound on the disputed step. Only used by the full-duplex
     /// search, where the prover selects as well as dissects.
     #[serde(default)]
     pub step_to_challenge: u64,
-    /// Dissections published by the counterparty. Only used by the full-duplex
-    /// search.
-    #[serde(default)]
-    pub counterparty_hash_rounds: Vec<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

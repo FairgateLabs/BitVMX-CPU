@@ -264,7 +264,7 @@ mod search_tests {
     use super::*;
     use crate::decision::challenge::ForceCondition;
     use crate::decision::challenge::{
-        prover_execute, prover_full_duplex_stage, verifier_check_execution,
+        prover_execute, prover_final_trace, prover_full_duplex_stage, verifier_check_execution,
         verifier_full_duplex_stage,
     };
     use crate::decision::challenge::{prover_get_hashes_for_round, verifier_choose_segment};
@@ -375,6 +375,18 @@ mod search_tests {
             last_decision = step.0;
             hashes = step.1;
         }
+
+        // The trailing selection rides on the adjudication message, so hand it
+        // to the final-trace step exactly as the protocol does. That is also
+        // what commits the last digit.
+        prover_final_trace(
+            &definition,
+            &prover_cp,
+            &prover_cp,
+            last_decision.expect("the trailing stage selects") + 1,
+            prover_fail,
+        )
+        .unwrap();
 
         // The disputed step is what the digit sequence spells out, which is
         // the quantity the on-chain script reconstructs. The trailing
