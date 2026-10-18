@@ -26,6 +26,14 @@ pub struct ProverNAryLog {
     pub verifier_decisions: Vec<u32>,
     pub hash_rounds: Vec<Vec<String>>,
     pub final_trace: TraceRWStep,
+    /// Running upper bound on the disputed step. Only used by the full-duplex
+    /// search, where the prover selects as well as dissects.
+    #[serde(default)]
+    pub step_to_challenge: u64,
+    /// Dissections published by the counterparty. Only used by the full-duplex
+    /// search.
+    #[serde(default)]
+    pub counterparty_hash_rounds: Vec<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -38,10 +46,19 @@ pub struct ProverChallengeLog {
 
 impl ProverChallengeLog {
     pub fn new(execution: ExecutionLog, input: Vec<u8>) -> Self {
+        // Under the full-duplex search the prover selects as well as dissects,
+        // so it needs the same running bound on the disputed step that the
+        // verifier keeps: one before the earliest step the parties could still
+        // disagree on. The prover's own claim is its only knowledge of that,
+        // and the bound is only ever tightened by later selections.
+        let step_to_challenge = execution.last_step.saturating_sub(1);
         Self {
             execution,
             input,
-            conflict_step_log: ProverNAryLog::default(),
+            conflict_step_log: ProverNAryLog {
+                step_to_challenge,
+                ..Default::default()
+            },
             read_challenge_log: ProverNAryLog::default(),
         }
     }
@@ -145,4 +162,30 @@ pub fn deserialize_challenge_log<T: for<'a> Deserialize<'a>>(
         .map_err(|e| EmulatorError::ChallengeError(format!("Error parsing file: {}", e)))?;
     serde_json::from_str(serialized_str)
         .map_err(|e| EmulatorError::ChallengeError(format!("Error deserializing file: {}", e)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ExecutionResult;
+
+    /// The full-duplex search clamps each selection by this bound, so a prover
+    /// log that started it at zero would pin every selection to step zero.
+    #[test]
+    fn prover_log_starts_with_a_usable_selection_bound() {
+        let log = ProverChallengeLog::new(
+            ExecutionLog::new(ExecutionResult::Halt(0, 100), 100, "ab".to_string()),
+            vec![],
+        );
+        assert_eq!(log.conflict_step_log.step_to_challenge, 99);
+    }
+
+    #[test]
+    fn prover_log_bound_does_not_underflow_on_an_empty_execution() {
+        let log = ProverChallengeLog::new(
+            ExecutionLog::new(ExecutionResult::Halt(0, 0), 0, "ab".to_string()),
+            vec![],
+        );
+        assert_eq!(log.conflict_step_log.step_to_challenge, 0);
+    }
 }

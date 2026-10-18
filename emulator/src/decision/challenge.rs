@@ -187,6 +187,184 @@ pub fn verifier_check_execution(
     Ok(Some(step_to_challenge))
 }
 
+/// One stage of a full-duplex search: select over the counterparty's previous
+/// dissection, then dissect the subinterval just selected, in a single step.
+///
+/// This is the whole of what distinguishes the full-duplex search from the
+/// asymmetric one at the emulator level. The asymmetric search splits the same
+/// work across `prover_get_hashes_for_round` and `verifier_choose_segment`,
+/// one per message; here a party does both, so the search advances a whole
+/// level per message.
+///
+/// `counterparty_hashes` is the dissection published at the previous stage, and
+/// is empty at stage 1, which has no predecessor to select over.
+#[allow(clippy::too_many_arguments)]
+fn advance_full_duplex(
+    program_def: &ProgramDefinition,
+    input: Vec<u8>,
+    input_checkpoint_path: &str,
+    output_checkpoint_path: &str,
+    stage: u8,
+    counterparty_hashes: &[String],
+    last_step: Option<u64>,
+    fail_config: Option<FailConfiguration>,
+    base_step: &mut u64,
+    step_to_challenge: &mut u64,
+    decisions: &mut Vec<u32>,
+    my_hash_rounds: &mut Vec<Vec<String>>,
+    counterparty_hash_rounds: &mut Vec<Vec<String>>,
+) -> Result<(Option<u32>, Vec<String>), EmulatorError> {
+    let nary_def = program_def.nary_def();
+
+    let selection = if stage > 1 {
+        let previous = stage - 1;
+
+        // Our own view of the positions the counterparty dissected.
+        let mine = program_def.get_round_hashes(
+            input_checkpoint_path,
+            output_checkpoint_path,
+            input.clone(),
+            previous,
+            *base_step,
+            fail_config.clone(),
+            last_step,
+        )?;
+
+        let (bits, new_base, new_selected) = choose_segment(
+            &nary_def,
+            *base_step,
+            *step_to_challenge,
+            previous,
+            &ExecutionHashes::from_hexstr(&counterparty_hashes.to_vec()),
+            &ExecutionHashes::from_hexstr(&mine),
+            NArySearchType::ConflictStep,
+            None,
+        );
+
+        *base_step = new_base;
+        *step_to_challenge = new_selected;
+        decisions.push(bits);
+        counterparty_hash_rounds.push(counterparty_hashes.to_vec());
+        Some(bits)
+    } else {
+        None
+    };
+
+    // Dissect the subinterval just selected.
+    let hashes = program_def.get_round_hashes(
+        input_checkpoint_path,
+        output_checkpoint_path,
+        input,
+        stage,
+        *base_step,
+        fail_config,
+        last_step,
+    )?;
+    my_hash_rounds.push(hashes.clone());
+
+    info!(
+        "Full-duplex stage {}: selection {:?} base {} bound {}",
+        stage, selection, base_step, step_to_challenge
+    );
+
+    Ok((selection, hashes))
+}
+
+/// The prover's half of a full-duplex stage.
+pub fn prover_full_duplex_stage(
+    program_definition_file: &str,
+    input_checkpoint_path: &str,
+    output_checkpoint_path: &str,
+    stage: u8,
+    counterparty_hashes: &[String],
+    fail_config: Option<FailConfiguration>,
+) -> Result<(Option<u32>, Vec<String>), EmulatorError> {
+    let mut challenge_log = ProverChallengeLog::load(input_checkpoint_path)?;
+    let program_def = ProgramDefinition::from_config(program_definition_file)?;
+    let input = challenge_log.input.clone();
+    let last_step = challenge_log.execution.last_step;
+    let log = challenge_log.get_nary_log(NArySearchType::ConflictStep);
+
+    let mut base_step = log.base_step;
+    let mut step_to_challenge = log.step_to_challenge;
+    let mut decisions = std::mem::take(&mut log.verifier_decisions);
+    let mut mine = std::mem::take(&mut log.hash_rounds);
+    let mut theirs = std::mem::take(&mut log.counterparty_hash_rounds);
+
+    let result = advance_full_duplex(
+        &program_def,
+        input,
+        input_checkpoint_path,
+        output_checkpoint_path,
+        stage,
+        counterparty_hashes,
+        Some(last_step),
+        fail_config,
+        &mut base_step,
+        &mut step_to_challenge,
+        &mut decisions,
+        &mut mine,
+        &mut theirs,
+    )?;
+
+    let log = challenge_log.get_nary_log(NArySearchType::ConflictStep);
+    log.base_step = base_step;
+    log.step_to_challenge = step_to_challenge;
+    log.verifier_decisions = decisions;
+    log.hash_rounds = mine;
+    log.counterparty_hash_rounds = theirs;
+    challenge_log.save(output_checkpoint_path)?;
+
+    Ok(result)
+}
+
+/// The verifier's half of a full-duplex stage.
+pub fn verifier_full_duplex_stage(
+    program_definition_file: &str,
+    input_checkpoint_path: &str,
+    output_checkpoint_path: &str,
+    stage: u8,
+    counterparty_hashes: &[String],
+    fail_config: Option<FailConfiguration>,
+) -> Result<(Option<u32>, Vec<String>), EmulatorError> {
+    let mut challenge_log = VerifierChallengeLog::load(input_checkpoint_path)?;
+    let program_def = ProgramDefinition::from_config(program_definition_file)?;
+    let input = challenge_log.input.clone();
+    let log = challenge_log.get_nary_log(NArySearchType::ConflictStep);
+
+    let mut base_step = log.base_step;
+    let mut step_to_challenge = log.step_to_challenge;
+    let mut decisions = std::mem::take(&mut log.verifier_decisions);
+    let mut mine = std::mem::take(&mut log.verifier_hash_rounds);
+    let mut theirs = std::mem::take(&mut log.prover_hash_rounds);
+
+    let result = advance_full_duplex(
+        &program_def,
+        input,
+        input_checkpoint_path,
+        output_checkpoint_path,
+        stage,
+        counterparty_hashes,
+        None,
+        fail_config,
+        &mut base_step,
+        &mut step_to_challenge,
+        &mut decisions,
+        &mut mine,
+        &mut theirs,
+    )?;
+
+    let log = challenge_log.get_nary_log(NArySearchType::ConflictStep);
+    log.base_step = base_step;
+    log.step_to_challenge = step_to_challenge;
+    log.verifier_decisions = decisions;
+    log.verifier_hash_rounds = mine;
+    log.prover_hash_rounds = theirs;
+    challenge_log.save(output_checkpoint_path)?;
+
+    Ok(result)
+}
+
 pub fn verifier_choose_segment(
     program_definition_file: &str,
     input_checkpoint_path: &str,
