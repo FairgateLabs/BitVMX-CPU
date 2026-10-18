@@ -110,6 +110,10 @@ pub enum ChallengeType {
         kind: EquivocationKind,
         expected_round: u8,
         expected_index: u8,
+        /// Whether the position was committed by the counterparty rather than
+        /// by the party now publishing the trace. Only possible under the
+        /// full-duplex search, where the dissections alternate.
+        counterparty_committed: bool,
         rounds: Option<u8>,
         nary: Option<u8>,
         nary_last_round: Option<u8>,

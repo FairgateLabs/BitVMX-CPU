@@ -12,8 +12,8 @@ use tracing::{error, info, warn};
 
 use crate::{
     decision::{
-        execution_log::VerifierChallengeLog,
-        nary_search::{choose_segment, ExecutionHashes, NArySearchType},
+        execution_log::{VerifierChallengeLog, VerifierNAryLog},
+        nary_search::{choose_segment, ExecutionHashes, NArySearchType, Party, SearchMode},
     },
     executor::utils::{FailConfiguration, FailSelectionBits},
     loader::program_definition::ProgramDefinition,
@@ -368,6 +368,22 @@ pub fn prover_get_hashes_and_step(
     })
 }
 
+/// The hashes published at each round, taken from whichever party dissected
+/// that round. Under the asymmetric search that is always the prover, so this
+/// reduces to the prover's rounds.
+pub fn published_hash_rounds(
+    mode: SearchMode,
+    rounds: u8,
+    log: &VerifierNAryLog,
+) -> Vec<Vec<String>> {
+    (1..rounds + 1)
+        .map(|r| match mode.dissector(rounds, r) {
+            Party::Prover => log.prover_hash_rounds[r as usize - 1].clone(),
+            Party::Verifier => log.verifier_hash_rounds[r as usize - 1].clone(),
+        })
+        .collect()
+}
+
 pub fn get_hashes(
     mapping: &HashMap<u64, (u8, u8)>,
     hashes: &[Vec<String>],
@@ -458,52 +474,78 @@ pub fn verifier_choose_challenge(
 
     let mapping = &nary_def.step_mapping(&conflict_step_log.verifier_decisions);
     let step = conflict_step_log.step_to_challenge;
+    let mode = program_def.search_mode();
+    let total_rounds = nary_def.total_rounds();
 
-    let (prover_step_hash, prover_next_hash) =
-        get_hashes(mapping, &conflict_step_log.prover_hash_rounds, step);
+    let published = published_hash_rounds(mode, total_rounds, conflict_step_log);
+    let (committed_step_hash, committed_next_hash) = get_hashes(mapping, &published, step);
 
     let nary = return_script_parameters.then_some(nary_def.nary);
     let nary_last_round = return_script_parameters.then_some(nary_def.nary_last_round);
     let rounds = return_script_parameters.then_some(nary_def.total_rounds());
 
-    if (prover_step_hash != resigned_step_hash && force == ForceChallenge::No)
+    let (step_round, step_index) = *mapping.get(&step).unwrap();
+    let (next_round, next_index) = *mapping.get(&(step + 1)).unwrap();
+    let step_by_counterparty = mode.dissector(total_rounds, step_round) == Party::Verifier;
+    let next_by_counterparty = mode.dissector(total_rounds, next_round) == Party::Verifier;
+
+    // The prover is bound to the agreed boundary whoever published it, so a
+    // mismatch there is always the misbehaviour. At the disputed boundary a
+    // value published by the counterparty was one the prover declared it
+    // disagreed with, so there claiming it is the misbehaviour.
+    let step_inconsistent = committed_step_hash != resigned_step_hash;
+    let next_inconsistent = if next_by_counterparty {
+        committed_next_hash == resigned_next_hash
+    } else {
+        committed_next_hash != resigned_next_hash
+    };
+
+    if (step_inconsistent && force == ForceChallenge::No)
         || force == ForceChallenge::EquivocationResign(EquivocationKind::StepHash)
     {
-        let (round, index) = *mapping.get(&step).unwrap();
-
         return Ok(ChallengeType::EquivocationResign {
-            prover_true_hash: prover_step_hash,
+            prover_true_hash: committed_step_hash,
             prover_wrong_hash: resigned_step_hash.to_string(),
             prover_challenge_step_tk: step,
             kind: EquivocationKind::StepHash,
-            expected_round: round,
-            expected_index: index + 1,
+            expected_round: step_round,
+            expected_index: step_index + 1,
+            counterparty_committed: step_by_counterparty,
             nary,
             nary_last_round,
             rounds,
         });
     }
 
-    if (prover_next_hash != resigned_next_hash && force == ForceChallenge::No)
+    if (next_inconsistent && force == ForceChallenge::No)
         || force == ForceChallenge::EquivocationResign(EquivocationKind::NextHash)
     {
-        let (round, index) = *mapping.get(&(step + 1)).unwrap();
+        let (round, index) = (next_round, next_index);
         return Ok(ChallengeType::EquivocationResign {
-            prover_true_hash: prover_next_hash,
+            prover_true_hash: committed_next_hash,
             prover_wrong_hash: resigned_next_hash.to_string(),
             prover_challenge_step_tk: step,
             kind: EquivocationKind::NextHash,
             expected_round: round,
             expected_index: index + 1,
+            counterparty_committed: next_by_counterparty,
             nary,
             nary_last_round,
             rounds,
         });
     }
 
-    // check trace_hash
-    if (!validate_step_hash(&prover_step_hash, &trace.trace_step, &prover_next_hash)
-        && force == ForceChallenge::No)
+    // Check the prover's own hash chain. This uses the prover's resigned
+    // hashes, not the committed ones: under the full-duplex search the value
+    // committed at the disputed boundary may be the counterparty's, which the
+    // prover is bound to differ from, so comparing against it here would
+    // validate the wrong party's claim. Where no equivocation fired in the
+    // asymmetric search the two are equal, so this is unchanged there.
+    if (!validate_step_hash(
+        &resigned_step_hash.to_string(),
+        &trace.trace_step,
+        &resigned_next_hash.to_string(),
+    ) && force == ForceChallenge::No)
         || force == ForceChallenge::TraceHash
         || force == ForceChallenge::TraceHashZero
     {
@@ -511,16 +553,16 @@ pub fn verifier_choose_challenge(
             info!("Verifier choose to challenge TRACE_HASH_ZERO");
             return Ok(ChallengeType::TraceHashZero {
                 prover_trace: trace.trace_step,
-                prover_next_hash,
+                prover_next_hash: resigned_next_hash.to_string(),
                 prover_conflict_step_tk: step,
             });
         }
 
         info!("Verifier choose to challenge TRACE_HASH");
         return Ok(ChallengeType::TraceHash {
-            prover_step_hash,
+            prover_step_hash: resigned_step_hash.to_string(),
             prover_trace: trace.trace_step,
-            prover_next_hash,
+            prover_next_hash: resigned_next_hash.to_string(),
         });
     }
 
@@ -531,7 +573,7 @@ pub fn verifier_choose_challenge(
     } = verifier_log.prover_claim_execution.clone();
 
     if (step + 1 == prover_claim_last_step
-        && (prover_next_hash != prover_claim_last_hash
+        && (resigned_next_hash != prover_claim_last_hash
             // halt opcode
             || trace.read_1.value != 93
             // exit code
@@ -545,7 +587,7 @@ pub fn verifier_choose_challenge(
             prover_last_step: prover_claim_last_step,
             prover_conflict_step_tk: step,
             prover_trace: trace,
-            prover_next_hash,
+            prover_next_hash: resigned_next_hash.to_string(),
             prover_last_hash: prover_claim_last_hash,
         });
     }
@@ -635,7 +677,7 @@ pub fn verifier_choose_challenge(
             return Ok(ChallengeType::ProgramCounter {
                 pre_hash,
                 trace: pre_step.trace_step,
-                prover_step_hash,
+                prover_step_hash: resigned_step_hash.to_string(),
                 prover_pc_read: trace.read_pc,
             });
         }
@@ -850,6 +892,8 @@ pub fn verifier_choose_challenge_for_read_challenge(
             kind: EquivocationKind::StepHash,
             expected_round: round,
             expected_index: index + 1,
+            // the second search keeps the asymmetric roles
+            counterparty_committed: false,
             nary,
             nary_last_round,
             rounds,
@@ -867,6 +911,8 @@ pub fn verifier_choose_challenge_for_read_challenge(
             kind: EquivocationKind::NextHash,
             expected_round: round,
             expected_index: index + 1,
+            // the second search keeps the asymmetric roles
+            counterparty_committed: false,
             nary,
             nary_last_round,
             rounds,
