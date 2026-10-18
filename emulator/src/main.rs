@@ -170,6 +170,11 @@ enum Commands {
         #[arg(long, value_name = "COUNTERPARTY_HASHES", num_args = 0..)]
         counterparty_hashes: Vec<String>,
 
+        /// Selection digit published alongside that dissection; absent before
+        /// stage 3
+        #[arg(long, value_name = "COUNTERPARTY_DECISION")]
+        counterparty_decision: Option<u32>,
+
         /// Fail Configuration
         #[arg(long, value_name = "FailConfig")]
         fail_config: Option<FailConfiguration>,
@@ -723,6 +728,7 @@ fn main() -> Result<(), EmulatorError> {
             is_prover,
             stage,
             counterparty_hashes,
+            counterparty_decision,
             fail_config,
             command_file,
         }) => {
@@ -733,6 +739,7 @@ fn main() -> Result<(), EmulatorError> {
                     checkpoint_output_path,
                     *stage,
                     counterparty_hashes,
+                    *counterparty_decision,
                     fail_config.clone(),
                 )?
             } else {
@@ -742,6 +749,7 @@ fn main() -> Result<(), EmulatorError> {
                     checkpoint_output_path,
                     *stage,
                     counterparty_hashes,
+                    *counterparty_decision,
                     fail_config.clone(),
                 )?
             };

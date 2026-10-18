@@ -198,6 +198,17 @@ pub fn verifier_check_execution(
 ///
 /// `counterparty_hashes` is the dissection published at the previous stage, and
 /// is empty at stage 1, which has no predecessor to select over.
+///
+/// `counterparty_decision` is the digit the counterparty published alongside
+/// that dissection, absent before stage 3. A party only selects at its own
+/// stages, so without applying the counterparty's digit its base would lag a
+/// level behind and it would compare against the wrong positions. Recording
+/// both parties' digits in order is also what makes the digit sequence the
+/// base-n representation of the disputed step.
+///
+/// Returns the stage's own selection and dissection. Beyond the last round
+/// there is nothing left to dissect: the trailing selection rides on the
+/// adjudication message, so the dissection comes back empty.
 #[allow(clippy::too_many_arguments)]
 fn advance_full_duplex(
     program_def: &ProgramDefinition,
@@ -206,6 +217,7 @@ fn advance_full_duplex(
     output_checkpoint_path: &str,
     stage: u8,
     counterparty_hashes: &[String],
+    counterparty_decision: Option<u32>,
     last_step: Option<u64>,
     fail_config: Option<FailConfiguration>,
     base_step: &mut u64,
@@ -215,6 +227,13 @@ fn advance_full_duplex(
     counterparty_hash_rounds: &mut Vec<Vec<String>>,
 ) -> Result<(Option<u32>, Vec<String>), EmulatorError> {
     let nary_def = program_def.nary_def();
+
+    // Catch up on the counterparty's selection over the dissection we
+    // published two stages ago.
+    if let Some(digit) = counterparty_decision {
+        *base_step = nary_def.step_from_base_and_bits(stage - 2, *base_step, digit);
+        decisions.push(digit);
+    }
 
     let selection = if stage > 1 {
         let previous = stage - 1;
@@ -250,17 +269,23 @@ fn advance_full_duplex(
         None
     };
 
-    // Dissect the subinterval just selected.
-    let hashes = program_def.get_round_hashes(
-        input_checkpoint_path,
-        output_checkpoint_path,
-        input,
-        stage,
-        *base_step,
-        fail_config,
-        last_step,
-    )?;
-    my_hash_rounds.push(hashes.clone());
+    // Dissect the subinterval just selected, unless the search has run out of
+    // levels and only the trailing selection remained.
+    let hashes = if stage <= nary_def.total_rounds() {
+        let hashes = program_def.get_round_hashes(
+            input_checkpoint_path,
+            output_checkpoint_path,
+            input,
+            stage,
+            *base_step,
+            fail_config,
+            last_step,
+        )?;
+        my_hash_rounds.push(hashes.clone());
+        hashes
+    } else {
+        Vec::new()
+    };
 
     info!(
         "Full-duplex stage {}: selection {:?} base {} bound {}",
@@ -277,6 +302,7 @@ pub fn prover_full_duplex_stage(
     output_checkpoint_path: &str,
     stage: u8,
     counterparty_hashes: &[String],
+    counterparty_decision: Option<u32>,
     fail_config: Option<FailConfiguration>,
 ) -> Result<(Option<u32>, Vec<String>), EmulatorError> {
     let mut challenge_log = ProverChallengeLog::load(input_checkpoint_path)?;
@@ -298,6 +324,7 @@ pub fn prover_full_duplex_stage(
         output_checkpoint_path,
         stage,
         counterparty_hashes,
+        counterparty_decision,
         Some(last_step),
         fail_config,
         &mut base_step,
@@ -325,6 +352,7 @@ pub fn verifier_full_duplex_stage(
     output_checkpoint_path: &str,
     stage: u8,
     counterparty_hashes: &[String],
+    counterparty_decision: Option<u32>,
     fail_config: Option<FailConfiguration>,
 ) -> Result<(Option<u32>, Vec<String>), EmulatorError> {
     let mut challenge_log = VerifierChallengeLog::load(input_checkpoint_path)?;
@@ -345,6 +373,7 @@ pub fn verifier_full_duplex_stage(
         output_checkpoint_path,
         stage,
         counterparty_hashes,
+        counterparty_decision,
         None,
         fail_config,
         &mut base_step,
