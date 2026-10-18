@@ -278,6 +278,14 @@ impl Party {
         }
     }
 
+    /// Prefix used for this party's protocol variable names.
+    pub fn prefix(&self) -> &'static str {
+        match self {
+            Party::Prover => "prover",
+            Party::Verifier => "verifier",
+        }
+    }
+
     /// The party that dissects at `stage`, counting stages from 1, when `first`
     /// dissects at stage 1. Ownership of a stage is fixed by parity, and so is
     /// known at setup time when the one-time keys are generated.
@@ -286,6 +294,73 @@ impl Party {
             first
         } else {
             first.other()
+        }
+    }
+}
+
+/// How the dissection search allocates work to the two parties.
+///
+/// This is a setup-time property, not a runtime one: it decides which party
+/// owns which one-time keys, and the dispute transaction graph is built and
+/// pre-signed before any dispute exists.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SearchMode {
+    /// One party dissects and the other selects: two messages per narrowing
+    /// level.
+    #[default]
+    Asymmetric,
+    /// The parties alternate, and every message both selects over the
+    /// counterparty's previous dissection and dissects the subinterval it just
+    /// selected: one message per narrowing level.
+    FullDuplex,
+}
+
+impl SearchMode {
+    /// The party that dissects at `stage`, counting stages from 1.
+    pub fn dissector(&self, total_rounds: u8, stage: u8) -> Party {
+        match self {
+            SearchMode::Asymmetric => Party::Prover,
+            SearchMode::FullDuplex => Party::at_stage(self.first_dissector(total_rounds), stage),
+        }
+    }
+
+    /// The party that commits the digit selecting over the dissection published
+    /// at `round`.
+    pub fn selector(&self, total_rounds: u8, round: u8) -> Party {
+        match self {
+            SearchMode::Asymmetric => Party::Verifier,
+            SearchMode::FullDuplex => self.dissector(total_rounds, round).other(),
+        }
+    }
+
+    /// Who dissects at stage 1.
+    ///
+    /// For the full-duplex search this is chosen from the parity of the round
+    /// count so that the trailing selection -- the digit over the final
+    /// dissection, which has no stage of its own to ride on -- always falls to
+    /// the prover. It can then be carried by the prover's adjudication
+    /// transaction rather than costing a further message.
+    pub fn first_dissector(&self, total_rounds: u8) -> Party {
+        match self {
+            SearchMode::Asymmetric => Party::Prover,
+            SearchMode::FullDuplex => {
+                if total_rounds % 2 == 0 {
+                    Party::Prover
+                } else {
+                    Party::Verifier
+                }
+            }
+        }
+    }
+
+    /// On-chain messages the search consumes, including the adjudication
+    /// message that carries the trailing selection.
+    pub fn messages(&self, total_rounds: u8) -> u32 {
+        let rounds = total_rounds as u32;
+        match self {
+            SearchMode::Asymmetric => 2 * rounds + 1,
+            SearchMode::FullDuplex => rounds + 1,
         }
     }
 }
@@ -786,6 +861,51 @@ mod tests {
             outcome.digits,
             vec![(defs.nary - 1) as u32, (defs.nary - 2) as u32]
         );
+    }
+
+    /// The trailing selection must always fall to the prover, so that it can
+    /// ride on the adjudication transaction instead of costing a message.
+    #[test]
+    fn full_duplex_trailing_selection_belongs_to_the_prover() {
+        for rounds in 1..12u8 {
+            assert_eq!(
+                SearchMode::FullDuplex.selector(rounds, rounds),
+                Party::Prover,
+                "rounds {}",
+                rounds
+            );
+        }
+    }
+
+    #[test]
+    fn search_modes_allocate_stages_consistently() {
+        for rounds in 1..12u8 {
+            for stage in 1..rounds + 1 {
+                // The asymmetric search never alternates.
+                assert_eq!(
+                    SearchMode::Asymmetric.dissector(rounds, stage),
+                    Party::Prover
+                );
+                assert_eq!(
+                    SearchMode::Asymmetric.selector(rounds, stage),
+                    Party::Verifier
+                );
+                // The full-duplex search alternates, and the party selecting
+                // over a dissection is never the one that published it.
+                let d = SearchMode::FullDuplex.dissector(rounds, stage);
+                assert_eq!(SearchMode::FullDuplex.selector(rounds, stage), d.other());
+            }
+            assert_eq!(
+                SearchMode::Asymmetric.messages(rounds),
+                2 * rounds as u32 + 1
+            );
+            assert_eq!(SearchMode::FullDuplex.messages(rounds), rounds as u32 + 1);
+        }
+    }
+
+    #[test]
+    fn search_mode_defaults_to_asymmetric() {
+        assert_eq!(SearchMode::default(), SearchMode::Asymmetric);
     }
 
     #[test]

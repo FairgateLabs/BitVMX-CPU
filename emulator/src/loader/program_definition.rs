@@ -7,7 +7,7 @@ use thiserror::Error;
 use tracing::info;
 
 use crate::{
-    decision::nary_search::NArySearchDefinition,
+    decision::nary_search::{NArySearchDefinition, SearchMode},
     executor::{
         fetcher::{execute_program, FullTrace},
         utils::FailConfiguration,
@@ -37,6 +37,10 @@ pub struct ProgramDefinition {
     pub config_path: String,
     pub elf: String,
     pub nary_search: u8,
+    /// Defaults to the asymmetric search, so existing program definitions keep
+    /// their current behaviour.
+    #[serde(default)]
+    pub search_mode: SearchMode,
     pub max_steps: u64,
     pub input_section_name: String,
     pub inputs: Vec<InputDefinition>,
@@ -51,6 +55,10 @@ impl ProgramDefinition {
 
     pub fn nary_def(&self) -> NArySearchDefinition {
         NArySearchDefinition::new(self.max_steps, self.nary_search)
+    }
+
+    pub fn search_mode(&self) -> SearchMode {
+        self.search_mode
     }
 
     pub fn load_program(&self) -> Result<Program, EmulatorError> {
