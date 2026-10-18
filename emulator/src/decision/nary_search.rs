@@ -908,6 +908,54 @@ mod tests {
         assert_eq!(SearchMode::default(), SearchMode::Asymmetric);
     }
 
+    /// One-time keys are the dominant setup cost, so it matters that making
+    /// the search symmetric redistributes them rather than adding any. Each
+    /// level still commits n-1 state hashes and one selection digit; the only
+    /// change is which party owns them.
+    #[test]
+    fn full_duplex_redistributes_one_time_keys_without_adding_any() {
+        for (max_steps, nary) in [(64u64, 2u8), (2000, 8), (500_000, 8), (1 << 20, 4)] {
+            let defs = NArySearchDefinition::new(max_steps, nary);
+            let rounds = defs.total_rounds();
+
+            let count = |mode: SearchMode, who: Party| -> (usize, usize) {
+                let mut hashes = 0;
+                let mut digits = 0;
+                for r in 1..rounds + 1 {
+                    if mode.dissector(rounds, r) == who {
+                        hashes += defs.hashes_for_round(r) as usize;
+                    }
+                    if mode.selector(rounds, r) == who {
+                        digits += 1;
+                    }
+                }
+                (hashes, digits)
+            };
+
+            for mode in [SearchMode::Asymmetric, SearchMode::FullDuplex] {
+                let (ph, pd) = count(mode, Party::Prover);
+                let (vh, vd) = count(mode, Party::Verifier);
+                let total: usize = (1..rounds + 1)
+                    .map(|r| defs.hashes_for_round(r) as usize)
+                    .sum();
+                assert_eq!(ph + vh, total, "{:?}: state hash keys", mode);
+                assert_eq!(pd + vd, rounds as usize, "{:?}: digit keys", mode);
+            }
+
+            // The asymmetric search gives every hash to the prover and every
+            // digit to the verifier.
+            assert_eq!(count(SearchMode::Asymmetric, Party::Verifier).0, 0);
+            assert_eq!(count(SearchMode::Asymmetric, Party::Prover).1, 0);
+
+            // The full-duplex search splits both, and a party's digits are the
+            // ones over the counterparty's dissections.
+            if rounds > 1 {
+                assert!(count(SearchMode::FullDuplex, Party::Verifier).0 > 0);
+                assert!(count(SearchMode::FullDuplex, Party::Prover).1 > 0);
+            }
+        }
+    }
+
     #[test]
     fn stage_ownership_alternates_by_parity() {
         assert_eq!(Party::at_stage(Party::Prover, 1), Party::Prover);
