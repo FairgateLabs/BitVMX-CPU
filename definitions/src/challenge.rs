@@ -226,6 +226,14 @@ pub enum EmulatorResultType {
         v_decision: u32,
         round: u8,
     },
+    /// One stage of a full-duplex search, which both selects and dissects.
+    /// `decision` is absent at stage 1, which has no previous dissection to
+    /// select over.
+    FullDuplexStageResult {
+        decision: Option<u32>,
+        hashes: Vec<String>,
+        stage: u8,
+    },
     ProverFinalTraceResult {
         prover_final_trace: ProverFinalTraceType,
     },
