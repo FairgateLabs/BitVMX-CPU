@@ -110,6 +110,10 @@ pub enum ChallengeType {
         kind: EquivocationKind,
         expected_round: u8,
         expected_index: u8,
+        /// Whether the position was committed by the counterparty rather than
+        /// by the party now publishing the trace. Only possible under the
+        /// full-duplex search, where the dissections alternate.
+        counterparty_committed: bool,
         rounds: Option<u8>,
         nary: Option<u8>,
         nary_last_round: Option<u8>,
@@ -221,6 +225,21 @@ pub enum EmulatorResultType {
     VerifierChooseSegmentResult {
         v_decision: u32,
         round: u8,
+    },
+    /// The trailing stage of a full-duplex search: the selection over the final
+    /// dissection, together with the trace for the disputed step. Both ride on
+    /// the adjudication message, so they are produced together.
+    FullDuplexFinalTraceResult {
+        decision: u32,
+        prover_final_trace: ProverFinalTraceType,
+    },
+    /// One stage of a full-duplex search, which both selects and dissects.
+    /// `decision` is absent at stage 1, which has no previous dissection to
+    /// select over.
+    FullDuplexStageResult {
+        decision: Option<u32>,
+        hashes: Vec<String>,
+        stage: u8,
     },
     ProverFinalTraceResult {
         prover_final_trace: ProverFinalTraceType,

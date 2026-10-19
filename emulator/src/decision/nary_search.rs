@@ -186,32 +186,49 @@ impl From<Vec<Vec<u8>>> for ExecutionHashes {
     }
 }
 
-// we assume that the previous hash to the list provided is agreed by both parties
+/// Selects the subinterval of a dissection in which the two views diverge.
+///
+/// We assume that the hash preceding the provided list is agreed by both
+/// parties.
+///
+/// This decision is *symmetric*: it depends only on the positionwise comparison
+/// of the two hash vectors, never on which party published which. Agreement at
+/// a position is a symmetric relation, so either party may run this routine on
+/// the other's dissection and both obtain the same answer. That is what allows
+/// the full-duplex search (see [`full_duplex_stage`]) to let each message both
+/// select and dissect, rather than spending one message on each.
+///
+/// `published_hashes` are the counterparty's committed values for this round's
+/// positions, and `local_hashes` are our own values at the same positions.
 #[allow(clippy::too_many_arguments)]
 pub fn choose_segment(
     nary_defs: &NArySearchDefinition,
     base_step: u64,
     selected_step: u64,
     round: u8,
-    prover_hashes: &ExecutionHashes,
-    my_hashes: &ExecutionHashes,
+    published_hashes: &ExecutionHashes,
+    local_hashes: &ExecutionHashes,
     nary_type: NArySearchType,
     conflict_step: Option<u64>,
 ) -> (u32, u64, u64) {
-    if prover_hashes.hashes.len() != my_hashes.hashes.len() {
-        error!("Prover and my hashes should have the same length");
+    if published_hashes.hashes.len() != local_hashes.hashes.len() {
+        error!("Published and local hashes should have the same length");
     }
 
     // finds if there is any difference in the hashes
+    // When every published interior hash matches ours, the divergence is the
+    // one already recorded at the upper boundary of the interval, so we select
+    // the topmost subinterval. This is the case where a party can select
+    // without ever having seen the counterparty's value at that boundary.
     let mut selection = if nary_type == NArySearchType::ConflictStep {
-        prover_hashes.hashes.len() + 1
+        published_hashes.hashes.len() + 1
     } else {
         0
     };
-    for i in 0..prover_hashes.hashes.len() {
-        let prover_hash = &prover_hashes.hashes[i];
-        let my_hash = &my_hashes.hashes[i];
-        if prover_hash != my_hash {
+    for i in 0..published_hashes.hashes.len() {
+        let published_hash = &published_hashes.hashes[i];
+        let my_hash = &local_hashes.hashes[i];
+        if published_hash != my_hash {
             selection = i + 1;
             if nary_type == NArySearchType::ConflictStep {
                 break;
@@ -240,6 +257,334 @@ pub fn choose_segment(
     let base_step = nary_defs.step_from_base_and_bits(round, base_step, lower_limit_bits);
 
     (lower_limit_bits, base_step, choice)
+}
+
+/// Which party dissects at a given stage of a full-duplex search.
+///
+/// In the asymmetric search one party always dissects and the other always
+/// selects. In the full-duplex search the two alternate, and every message
+/// carries both a selection and a dissection.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Party {
+    Prover,
+    Verifier,
+}
+
+impl Party {
+    pub fn other(&self) -> Party {
+        match self {
+            Party::Prover => Party::Verifier,
+            Party::Verifier => Party::Prover,
+        }
+    }
+
+    /// Prefix used for this party's protocol variable names.
+    pub fn prefix(&self) -> &'static str {
+        match self {
+            Party::Prover => "prover",
+            Party::Verifier => "verifier",
+        }
+    }
+
+    /// The party that dissects at `stage`, counting stages from 1, when `first`
+    /// dissects at stage 1. Ownership of a stage is fixed by parity, and so is
+    /// known at setup time when the one-time keys are generated.
+    pub fn at_stage(first: Party, stage: u8) -> Party {
+        if stage % 2 == 1 {
+            first
+        } else {
+            first.other()
+        }
+    }
+}
+
+/// How the dissection search allocates work to the two parties.
+///
+/// This is a setup-time property, not a runtime one: it decides which party
+/// owns which one-time keys, and the dispute transaction graph is built and
+/// pre-signed before any dispute exists.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SearchMode {
+    /// One party dissects and the other selects: two messages per narrowing
+    /// level.
+    #[default]
+    Asymmetric,
+    /// The parties alternate, and every message both selects over the
+    /// counterparty's previous dissection and dissects the subinterval it just
+    /// selected: one message per narrowing level.
+    FullDuplex,
+}
+
+impl SearchMode {
+    /// The party that dissects at `stage`, counting stages from 1.
+    pub fn dissector(&self, total_rounds: u8, stage: u8) -> Party {
+        match self {
+            SearchMode::Asymmetric => Party::Prover,
+            SearchMode::FullDuplex => Party::at_stage(self.first_dissector(total_rounds), stage),
+        }
+    }
+
+    /// The party that commits the digit selecting over the dissection published
+    /// at `round`.
+    pub fn selector(&self, total_rounds: u8, round: u8) -> Party {
+        match self {
+            SearchMode::Asymmetric => Party::Verifier,
+            SearchMode::FullDuplex => self.dissector(total_rounds, round).other(),
+        }
+    }
+
+    /// Who dissects at stage 1.
+    ///
+    /// For the full-duplex search this is chosen from the parity of the round
+    /// count so that the trailing selection -- the digit over the final
+    /// dissection, which has no stage of its own to ride on -- always falls to
+    /// the prover. It can then be carried by the prover's adjudication
+    /// transaction rather than costing a further message.
+    pub fn first_dissector(&self, total_rounds: u8) -> Party {
+        match self {
+            SearchMode::Asymmetric => Party::Prover,
+            SearchMode::FullDuplex => {
+                if total_rounds % 2 == 0 {
+                    Party::Prover
+                } else {
+                    Party::Verifier
+                }
+            }
+        }
+    }
+
+    /// On-chain messages the search consumes, including the adjudication
+    /// message that carries the trailing selection.
+    pub fn messages(&self, total_rounds: u8) -> u32 {
+        let rounds = total_rounds as u32;
+        match self {
+            SearchMode::Asymmetric => 2 * rounds + 1,
+            SearchMode::FullDuplex => rounds + 1,
+        }
+    }
+}
+
+/// The contents of one full-duplex stage message.
+#[derive(Clone, Debug)]
+pub struct StageMessage {
+    pub stage: u8,
+    pub sender: Party,
+    /// Digit selecting a subinterval of the dissection published at the
+    /// previous stage. `None` only at stage 1, which has no predecessor.
+    pub selection: Option<u32>,
+    /// The sender's dissection of the selected subinterval.
+    pub hashes: ExecutionHashes,
+}
+
+/// The portion of a full-duplex search that both parties track identically.
+///
+/// Both parties derive the same state from the same transcript, so this is not
+/// a per-role structure.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SearchState {
+    /// Base of the currently active interval.
+    pub base_step: u64,
+    /// Running upper bound on the disputed step: the last step agreed so far.
+    pub selected_step: u64,
+    /// Selection digits committed so far, most significant first.
+    pub digits: Vec<u32>,
+}
+
+impl SearchState {
+    pub fn new(max_selectable_step: u64) -> Self {
+        Self {
+            base_step: 0,
+            selected_step: max_selectable_step,
+            digits: Vec::new(),
+        }
+    }
+}
+
+/// Computes our own dissection of the interval based at `base_step` for `round`.
+pub fn dissect<F>(
+    nary_defs: &NArySearchDefinition,
+    round: u8,
+    base_step: u64,
+    hash_at: &F,
+) -> ExecutionHashes
+where
+    F: Fn(u64) -> Vec<u8>,
+{
+    ExecutionHashes::new(
+        nary_defs
+            .required_steps(round, base_step)
+            .into_iter()
+            .map(hash_at)
+            .collect(),
+    )
+}
+
+/// Records a selection over the dissection published at `round`, advancing the
+/// active interval. This is the half of a stage that resolves the previous one.
+pub fn select_over<F>(
+    nary_defs: &NArySearchDefinition,
+    state: &mut SearchState,
+    round: u8,
+    published: &ExecutionHashes,
+    hash_at: &F,
+) -> u32
+where
+    F: Fn(u64) -> Vec<u8>,
+{
+    let local = dissect(nary_defs, round, state.base_step, hash_at);
+    let (bits, base, selected) = choose_segment(
+        nary_defs,
+        state.base_step,
+        state.selected_step,
+        round,
+        published,
+        &local,
+        NArySearchType::ConflictStep,
+        None,
+    );
+    state.base_step = base;
+    state.selected_step = selected;
+    state.digits.push(bits);
+    bits
+}
+
+/// Performs one full-duplex stage: select over the counterparty's previous
+/// dissection, then dissect the subinterval just selected.
+///
+/// `incoming` is the dissection published at stage `stage - 1`, and is `None`
+/// exactly at stage 1.
+pub fn full_duplex_stage<F>(
+    nary_defs: &NArySearchDefinition,
+    state: &mut SearchState,
+    stage: u8,
+    sender: Party,
+    incoming: Option<&ExecutionHashes>,
+    hash_at: &F,
+) -> StageMessage
+where
+    F: Fn(u64) -> Vec<u8>,
+{
+    let selection = incoming.map(|published| {
+        debug_assert!(stage > 1, "stage 1 has no dissection to select over");
+        select_over(nary_defs, state, stage - 1, published, hash_at)
+    });
+
+    let hashes = dissect(nary_defs, stage, state.base_step, hash_at);
+
+    StageMessage {
+        stage,
+        sender,
+        selection,
+        hashes,
+    }
+}
+
+/// The outcome of running a search to completion.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SearchOutcome {
+    /// The last step both parties agree on. The disputed step is this plus one.
+    pub agreed_step: u64,
+    /// The selection digits, most significant first. Their concatenation is the
+    /// base-n representation of `agreed_step`.
+    pub digits: Vec<u32>,
+    /// On-chain messages consumed, including the final adjudication message
+    /// that carries the trailing selection.
+    pub messages: u32,
+}
+
+/// Runs a full-duplex search to completion over two views of a trace.
+///
+/// Stages alternate between the parties. Stage 1 carries a dissection only;
+/// every later stage carries a selection over the previous dissection together
+/// with a dissection of its own. The trailing selection has no dissection to
+/// accompany it and rides on the final adjudication message.
+pub fn run_full_duplex_search<FA, FB>(
+    nary_defs: &NArySearchDefinition,
+    max_selectable_step: u64,
+    first: Party,
+    prover_hash_at: &FA,
+    verifier_hash_at: &FB,
+) -> SearchOutcome
+where
+    FA: Fn(u64) -> Vec<u8>,
+    FB: Fn(u64) -> Vec<u8>,
+{
+    let rounds = nary_defs.total_rounds();
+    let mut state = SearchState::new(max_selectable_step);
+    let mut incoming: Option<ExecutionHashes> = None;
+    let mut messages = 0;
+
+    for stage in 1..rounds + 1 {
+        let sender = Party::at_stage(first, stage);
+        let msg = match sender {
+            Party::Prover => full_duplex_stage(
+                nary_defs,
+                &mut state,
+                stage,
+                sender,
+                incoming.as_ref(),
+                prover_hash_at,
+            ),
+            Party::Verifier => full_duplex_stage(
+                nary_defs,
+                &mut state,
+                stage,
+                sender,
+                incoming.as_ref(),
+                verifier_hash_at,
+            ),
+        };
+        messages += 1;
+        incoming = Some(msg.hashes);
+    }
+
+    // The trailing selection over the final dissection, carried by the
+    // adjudication message.
+    let closer = Party::at_stage(first, rounds).other();
+    let published = incoming.expect("at least one stage");
+    match closer {
+        Party::Prover => select_over(nary_defs, &mut state, rounds, &published, prover_hash_at),
+        Party::Verifier => select_over(nary_defs, &mut state, rounds, &published, verifier_hash_at),
+    };
+    messages += 1;
+
+    SearchOutcome {
+        agreed_step: state.selected_step,
+        digits: state.digits,
+        messages,
+    }
+}
+
+/// Runs the classical asymmetric search to completion, as a reference for
+/// comparison: the prover dissects and the verifier selects, two messages per
+/// level.
+pub fn run_asymmetric_search<FA, FB>(
+    nary_defs: &NArySearchDefinition,
+    max_selectable_step: u64,
+    prover_hash_at: &FA,
+    verifier_hash_at: &FB,
+) -> SearchOutcome
+where
+    FA: Fn(u64) -> Vec<u8>,
+    FB: Fn(u64) -> Vec<u8>,
+{
+    let rounds = nary_defs.total_rounds();
+    let mut state = SearchState::new(max_selectable_step);
+    let mut messages = 0;
+
+    for round in 1..rounds + 1 {
+        let published = dissect(nary_defs, round, state.base_step, prover_hash_at);
+        messages += 1; // the prover's dissection
+        select_over(nary_defs, &mut state, round, &published, verifier_hash_at);
+        messages += 1; // the verifier's selection
+    }
+
+    SearchOutcome {
+        agreed_step: state.selected_step,
+        digits: state.digits,
+        messages: messages + 1, // the adjudication message
+    }
 }
 
 #[cfg(test)]
@@ -337,6 +682,287 @@ mod tests {
         assert_eq!(nary_search.step_from_base_and_bits(2, 80, 5), 90);
         assert_eq!(nary_search.step_from_base_and_bits(3, 90, 0), 90);
         assert_eq!(nary_search.step_from_base_and_bits(3, 90, 1), 91);
+    }
+
+    // ---------------------------------------------------------------
+    // Full-duplex search
+    // ---------------------------------------------------------------
+
+    /// A trace whose state hashes are distinct per step.
+    fn trace_hash(step: u64) -> Vec<u8> {
+        let mut h = vec![0u8; 20];
+        h[..8].copy_from_slice(&step.to_le_bytes());
+        h
+    }
+
+    /// A trace that matches `trace_hash` below `divergence` and differs from it
+    /// at and above `divergence`.
+    fn diverging_trace(divergence: u64) -> impl Fn(u64) -> Vec<u8> {
+        move |step: u64| {
+            let mut h = trace_hash(step);
+            if step >= divergence {
+                h[19] = 0xff;
+            }
+            h
+        }
+    }
+
+    fn search_cases() -> Vec<(u64, u8)> {
+        vec![
+            (64, 2),
+            (64, 8),
+            (128, 8),
+            (256, 4),
+            (2000, 8),
+            (500_000, 8),
+        ]
+    }
+
+    #[test]
+    fn full_duplex_locates_the_first_divergence() {
+        for (max_steps, nary) in search_cases() {
+            let defs = NArySearchDefinition::new(max_steps, nary);
+            let top = defs.max_steps - 1;
+            for divergence in [1, 2, 7, 13, 64, top - 1, top] {
+                if divergence > top {
+                    continue;
+                }
+                let prover = diverging_trace(divergence);
+                let outcome =
+                    run_full_duplex_search(&defs, top, Party::Prover, &prover, &trace_hash);
+                assert_eq!(
+                    outcome.agreed_step,
+                    divergence - 1,
+                    "max_steps {} nary {} divergence {}",
+                    max_steps,
+                    nary,
+                    divergence
+                );
+            }
+        }
+    }
+
+    /// The two searches descend through the same intervals, because agreement
+    /// at a position is a symmetric relation and so does not depend on which
+    /// party evaluates it.
+    #[test]
+    fn full_duplex_agrees_with_asymmetric_search() {
+        for (max_steps, nary) in search_cases() {
+            let defs = NArySearchDefinition::new(max_steps, nary);
+            let top = defs.max_steps - 1;
+            for divergence in [1, 3, 9, 50, 129, top] {
+                if divergence > top {
+                    continue;
+                }
+                let prover = diverging_trace(divergence);
+                let full = run_full_duplex_search(&defs, top, Party::Prover, &prover, &trace_hash);
+                let asym = run_asymmetric_search(&defs, top, &prover, &trace_hash);
+
+                assert_eq!(full.agreed_step, asym.agreed_step);
+                assert_eq!(full.digits, asym.digits);
+            }
+        }
+    }
+
+    /// One on-chain message per narrowing level instead of one per round trip.
+    #[test]
+    fn full_duplex_halves_the_message_count() {
+        for (max_steps, nary) in search_cases() {
+            let defs = NArySearchDefinition::new(max_steps, nary);
+            let rounds = defs.total_rounds() as u32;
+            let top = defs.max_steps - 1;
+            let prover = diverging_trace(7);
+
+            let full = run_full_duplex_search(&defs, top, Party::Prover, &prover, &trace_hash);
+            let asym = run_asymmetric_search(&defs, top, &prover, &trace_hash);
+
+            assert_eq!(full.messages, rounds + 1);
+            assert_eq!(asym.messages, 2 * rounds + 1);
+        }
+    }
+
+    /// Ownership independence: the located step and the committed digits do not
+    /// depend on which party dissects first, and therefore not on which party
+    /// owns which stage.
+    #[test]
+    fn full_duplex_outcome_is_independent_of_who_starts() {
+        for (max_steps, nary) in search_cases() {
+            let defs = NArySearchDefinition::new(max_steps, nary);
+            let top = defs.max_steps - 1;
+            for divergence in [1, 11, 97, top] {
+                if divergence > top {
+                    continue;
+                }
+                let prover = diverging_trace(divergence);
+                let prover_first =
+                    run_full_duplex_search(&defs, top, Party::Prover, &prover, &trace_hash);
+                let verifier_first =
+                    run_full_duplex_search(&defs, top, Party::Verifier, &prover, &trace_hash);
+                assert_eq!(prover_first, verifier_first);
+            }
+        }
+    }
+
+    /// The concatenated selection digits are the base-n representation of the
+    /// agreed step, which is what lets the final script recover the step number
+    /// without carrying an interval forward between transactions.
+    #[test]
+    fn full_duplex_digits_reconstruct_the_agreed_step() {
+        for (max_steps, nary) in search_cases() {
+            let defs = NArySearchDefinition::new(max_steps, nary);
+            let top = defs.max_steps - 1;
+            for divergence in [1, 5, 33, 200, top] {
+                if divergence > top {
+                    continue;
+                }
+                let prover = diverging_trace(divergence);
+                let outcome =
+                    run_full_duplex_search(&defs, top, Party::Prover, &prover, &trace_hash);
+                assert_eq!(
+                    defs.step_from_decision_bits(&outcome.digits),
+                    outcome.agreed_step
+                );
+            }
+        }
+    }
+
+    /// When a party agrees with every published interior hash, the divergence
+    /// is the one already recorded at the upper boundary, and it selects the
+    /// topmost subinterval without ever seeing the counterparty's value there.
+    ///
+    /// This is the case where the two traces agree everywhere the search can
+    /// look, and the dispute rests solely on the state following the last
+    /// inspected step.
+    #[test]
+    fn full_duplex_inherits_disagreement_at_the_upper_boundary() {
+        let defs = NArySearchDefinition::new(64, 8);
+        let top = defs.max_steps - 1;
+
+        // Diverging only beyond the last selectable step means every interior
+        // hash of every dissection matches, so every selection takes the top
+        // branch and the search converges on the upper boundary itself.
+        let prover = diverging_trace(defs.max_steps);
+        let outcome = run_full_duplex_search(&defs, top, Party::Prover, &prover, &trace_hash);
+
+        assert_eq!(outcome.agreed_step, top);
+        for (round, digit) in outcome.digits.iter().enumerate() {
+            let max_digit = (1u32 << defs.bits_for_round(round as u8 + 1)) - 1;
+            assert_eq!(*digit, max_digit, "round {}", round + 1);
+        }
+
+        // Diverging at the last selectable step instead: the first dissection
+        // still sees no divergence and inherits the boundary, but the final
+        // dissection does reach the diverging step and selects it directly.
+        let prover = diverging_trace(top);
+        let outcome = run_full_duplex_search(&defs, top, Party::Prover, &prover, &trace_hash);
+
+        assert_eq!(outcome.agreed_step, top - 1);
+        assert_eq!(
+            outcome.digits,
+            vec![(defs.nary - 1) as u32, (defs.nary - 2) as u32]
+        );
+    }
+
+    /// The trailing selection must always fall to the prover, so that it can
+    /// ride on the adjudication transaction instead of costing a message.
+    #[test]
+    fn full_duplex_trailing_selection_belongs_to_the_prover() {
+        for rounds in 1..12u8 {
+            assert_eq!(
+                SearchMode::FullDuplex.selector(rounds, rounds),
+                Party::Prover,
+                "rounds {}",
+                rounds
+            );
+        }
+    }
+
+    #[test]
+    fn search_modes_allocate_stages_consistently() {
+        for rounds in 1..12u8 {
+            for stage in 1..rounds + 1 {
+                // The asymmetric search never alternates.
+                assert_eq!(
+                    SearchMode::Asymmetric.dissector(rounds, stage),
+                    Party::Prover
+                );
+                assert_eq!(
+                    SearchMode::Asymmetric.selector(rounds, stage),
+                    Party::Verifier
+                );
+                // The full-duplex search alternates, and the party selecting
+                // over a dissection is never the one that published it.
+                let d = SearchMode::FullDuplex.dissector(rounds, stage);
+                assert_eq!(SearchMode::FullDuplex.selector(rounds, stage), d.other());
+            }
+            assert_eq!(
+                SearchMode::Asymmetric.messages(rounds),
+                2 * rounds as u32 + 1
+            );
+            assert_eq!(SearchMode::FullDuplex.messages(rounds), rounds as u32 + 1);
+        }
+    }
+
+    #[test]
+    fn search_mode_defaults_to_asymmetric() {
+        assert_eq!(SearchMode::default(), SearchMode::Asymmetric);
+    }
+
+    /// One-time keys are the dominant setup cost, so it matters that making
+    /// the search symmetric redistributes them rather than adding any. Each
+    /// level still commits n-1 state hashes and one selection digit; the only
+    /// change is which party owns them.
+    #[test]
+    fn full_duplex_redistributes_one_time_keys_without_adding_any() {
+        for (max_steps, nary) in [(64u64, 2u8), (2000, 8), (500_000, 8), (1 << 20, 4)] {
+            let defs = NArySearchDefinition::new(max_steps, nary);
+            let rounds = defs.total_rounds();
+
+            let count = |mode: SearchMode, who: Party| -> (usize, usize) {
+                let mut hashes = 0;
+                let mut digits = 0;
+                for r in 1..rounds + 1 {
+                    if mode.dissector(rounds, r) == who {
+                        hashes += defs.hashes_for_round(r) as usize;
+                    }
+                    if mode.selector(rounds, r) == who {
+                        digits += 1;
+                    }
+                }
+                (hashes, digits)
+            };
+
+            for mode in [SearchMode::Asymmetric, SearchMode::FullDuplex] {
+                let (ph, pd) = count(mode, Party::Prover);
+                let (vh, vd) = count(mode, Party::Verifier);
+                let total: usize = (1..rounds + 1)
+                    .map(|r| defs.hashes_for_round(r) as usize)
+                    .sum();
+                assert_eq!(ph + vh, total, "{:?}: state hash keys", mode);
+                assert_eq!(pd + vd, rounds as usize, "{:?}: digit keys", mode);
+            }
+
+            // The asymmetric search gives every hash to the prover and every
+            // digit to the verifier.
+            assert_eq!(count(SearchMode::Asymmetric, Party::Verifier).0, 0);
+            assert_eq!(count(SearchMode::Asymmetric, Party::Prover).1, 0);
+
+            // The full-duplex search splits both, and a party's digits are the
+            // ones over the counterparty's dissections.
+            if rounds > 1 {
+                assert!(count(SearchMode::FullDuplex, Party::Verifier).0 > 0);
+                assert!(count(SearchMode::FullDuplex, Party::Prover).1 > 0);
+            }
+        }
+    }
+
+    #[test]
+    fn stage_ownership_alternates_by_parity() {
+        assert_eq!(Party::at_stage(Party::Prover, 1), Party::Prover);
+        assert_eq!(Party::at_stage(Party::Prover, 2), Party::Verifier);
+        assert_eq!(Party::at_stage(Party::Prover, 3), Party::Prover);
+        assert_eq!(Party::at_stage(Party::Verifier, 1), Party::Verifier);
+        assert_eq!(Party::at_stage(Party::Verifier, 2), Party::Prover);
     }
 
     fn test_vector(size: usize, diff_index: Option<usize>) -> Vec<Vec<u8>> {

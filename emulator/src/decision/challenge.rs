@@ -13,7 +13,7 @@ use tracing::{error, info, warn};
 use crate::{
     decision::{
         execution_log::VerifierChallengeLog,
-        nary_search::{choose_segment, ExecutionHashes, NArySearchType},
+        nary_search::{choose_segment, ExecutionHashes, NArySearchType, Party},
     },
     executor::utils::{FailConfiguration, FailSelectionBits},
     loader::program_definition::ProgramDefinition,
@@ -185,6 +185,258 @@ pub fn verifier_check_execution(
     challenge_log.save(output_checkpoint_path)?;
 
     Ok(Some(step_to_challenge))
+}
+
+/// One stage of a full-duplex search: select over the counterparty's previous
+/// dissection, then dissect the subinterval just selected, in a single step.
+///
+/// This is the whole of what distinguishes the full-duplex search from the
+/// asymmetric one at the emulator level. The asymmetric search splits the same
+/// work across `prover_get_hashes_for_round` and `verifier_choose_segment`,
+/// one per message; here a party does both, so the search advances a whole
+/// level per message.
+///
+/// `counterparty_hashes` is the dissection published at the previous stage, and
+/// is empty at stage 1, which has no predecessor to select over.
+///
+/// `counterparty_decision` is the digit the counterparty published alongside
+/// that dissection, absent before stage 3. A party only selects at its own
+/// stages, so without applying the counterparty's digit its base would lag a
+/// level behind and it would compare against the wrong positions. Recording
+/// both parties' digits in order is also what makes the digit sequence the
+/// base-n representation of the disputed step.
+///
+/// Returns the stage's own selection and dissection. Beyond the last round
+/// there is nothing left to dissect: the trailing selection rides on the
+/// adjudication message, so the dissection comes back empty.
+#[allow(clippy::too_many_arguments)]
+fn advance_full_duplex(
+    program_def: &ProgramDefinition,
+    input: Vec<u8>,
+    input_checkpoint_path: &str,
+    output_checkpoint_path: &str,
+    stage: u8,
+    counterparty_hashes: &[String],
+    counterparty_decision: Option<u32>,
+    last_step: Option<u64>,
+    fail_config: Option<FailConfiguration>,
+    base_step: &mut u64,
+    step_to_challenge: &mut u64,
+    decisions: &mut Vec<u32>,
+    published_hash_rounds: &mut Vec<Vec<String>>,
+) -> Result<(Option<u32>, Vec<String>), EmulatorError> {
+    let nary_def = program_def.nary_def();
+
+    // Catch up on the counterparty's selection over the dissection we
+    // published two stages ago.
+    if let Some(digit) = counterparty_decision {
+        *base_step = nary_def.step_from_base_and_bits(stage - 2, *base_step, digit);
+        decisions.push(digit);
+    }
+
+    // Past the last round only the trailing selection remains. It is reported
+    // but not committed here: it rides on the adjudication message, and
+    // prover_final_trace applies it along with everything else that message
+    // carries.
+    let commit_selection = stage <= nary_def.total_rounds();
+
+    let selection = if stage > 1 {
+        let previous = stage - 1;
+
+        // Our own view of the positions the counterparty dissected.
+        let mine = program_def.get_round_hashes(
+            input_checkpoint_path,
+            output_checkpoint_path,
+            input.clone(),
+            previous,
+            *base_step,
+            fail_config.clone(),
+            last_step,
+        )?;
+
+        let (bits, new_base, new_selected) = choose_segment(
+            &nary_def,
+            *base_step,
+            *step_to_challenge,
+            previous,
+            &ExecutionHashes::from_hexstr(&counterparty_hashes.to_vec()),
+            &ExecutionHashes::from_hexstr(&mine),
+            NArySearchType::ConflictStep,
+            None,
+        );
+
+        // Record the counterparty's dissection under its round number. Stages
+        // run in order and each records the previous round before its own, so
+        // this vector stays indexed by round for both parties.
+        published_hash_rounds.push(counterparty_hashes.to_vec());
+        if commit_selection {
+            *base_step = new_base;
+            *step_to_challenge = new_selected;
+            decisions.push(bits);
+        }
+        Some(bits)
+    } else {
+        None
+    };
+
+    // Dissect the subinterval just selected, unless the search has run out of
+    // levels and only the trailing selection remained.
+    let hashes = if commit_selection {
+        let hashes = program_def.get_round_hashes(
+            input_checkpoint_path,
+            output_checkpoint_path,
+            input,
+            stage,
+            *base_step,
+            fail_config,
+            last_step,
+        )?;
+        published_hash_rounds.push(hashes.clone());
+        hashes
+    } else {
+        Vec::new()
+    };
+
+    info!(
+        "Full-duplex stage {}: selection {:?} base {} bound {}",
+        stage, selection, base_step, step_to_challenge
+    );
+
+    Ok((selection, hashes))
+}
+
+/// The prover's half of a full-duplex stage.
+pub fn prover_full_duplex_stage(
+    program_definition_file: &str,
+    input_checkpoint_path: &str,
+    output_checkpoint_path: &str,
+    stage: u8,
+    counterparty_hashes: &[String],
+    counterparty_decision: Option<u32>,
+    fail_config: Option<FailConfiguration>,
+) -> Result<(Option<u32>, Vec<String>), EmulatorError> {
+    let mut challenge_log = ProverChallengeLog::load(input_checkpoint_path)?;
+    let program_def = ProgramDefinition::from_config(program_definition_file)?;
+    let input = challenge_log.input.clone();
+    let last_step = challenge_log.execution.last_step;
+    let log = challenge_log.get_nary_log(NArySearchType::ConflictStep);
+
+    let mut base_step = log.base_step;
+    let mut step_to_challenge = log.step_to_challenge;
+    let mut decisions = std::mem::take(&mut log.verifier_decisions);
+    let mut published = std::mem::take(&mut log.hash_rounds);
+
+    let result = advance_full_duplex(
+        &program_def,
+        input,
+        input_checkpoint_path,
+        output_checkpoint_path,
+        stage,
+        counterparty_hashes,
+        counterparty_decision,
+        Some(last_step),
+        fail_config,
+        &mut base_step,
+        &mut step_to_challenge,
+        &mut decisions,
+        &mut published,
+    )?;
+
+    let log = challenge_log.get_nary_log(NArySearchType::ConflictStep);
+    log.base_step = base_step;
+    log.step_to_challenge = step_to_challenge;
+    log.verifier_decisions = decisions;
+    log.hash_rounds = published;
+    challenge_log.save(output_checkpoint_path)?;
+
+    Ok(result)
+}
+
+/// The prover's trailing stage: select over the final dissection and produce
+/// the trace for the disputed step, in one step.
+///
+/// The trailing selection has no dissection of its own and rides on the
+/// adjudication message, which also carries the expanded trace. Computing both
+/// in one job keeps that true of the implementation as well, and spares the
+/// protocol a round trip it would otherwise spend asking for the digit and
+/// then asking for the trace.
+pub fn prover_full_duplex_final_trace(
+    program_definition_file: &str,
+    input_checkpoint_path: &str,
+    output_checkpoint_path: &str,
+    stage: u8,
+    counterparty_hashes: &[String],
+    counterparty_decision: Option<u32>,
+    fail_config: Option<FailConfiguration>,
+) -> Result<(u32, ProverFinalTraceType), EmulatorError> {
+    let (selection, _) = prover_full_duplex_stage(
+        program_definition_file,
+        input_checkpoint_path,
+        output_checkpoint_path,
+        stage,
+        counterparty_hashes,
+        counterparty_decision,
+        fail_config.clone(),
+    )?;
+
+    let selection = selection.ok_or_else(|| {
+        EmulatorError::ChallengeError("the trailing stage must produce a selection".to_string())
+    })?;
+
+    let trace = prover_final_trace(
+        program_definition_file,
+        output_checkpoint_path,
+        output_checkpoint_path,
+        selection + 1,
+        fail_config,
+    )?;
+    Ok((selection, trace))
+}
+
+/// The verifier's half of a full-duplex stage.
+pub fn verifier_full_duplex_stage(
+    program_definition_file: &str,
+    input_checkpoint_path: &str,
+    output_checkpoint_path: &str,
+    stage: u8,
+    counterparty_hashes: &[String],
+    counterparty_decision: Option<u32>,
+    fail_config: Option<FailConfiguration>,
+) -> Result<(Option<u32>, Vec<String>), EmulatorError> {
+    let mut challenge_log = VerifierChallengeLog::load(input_checkpoint_path)?;
+    let program_def = ProgramDefinition::from_config(program_definition_file)?;
+    let input = challenge_log.input.clone();
+    let log = challenge_log.get_nary_log(NArySearchType::ConflictStep);
+
+    let mut base_step = log.base_step;
+    let mut step_to_challenge = log.step_to_challenge;
+    let mut decisions = std::mem::take(&mut log.verifier_decisions);
+    let mut published = std::mem::take(&mut log.prover_hash_rounds);
+
+    let result = advance_full_duplex(
+        &program_def,
+        input,
+        input_checkpoint_path,
+        output_checkpoint_path,
+        stage,
+        counterparty_hashes,
+        counterparty_decision,
+        None,
+        fail_config,
+        &mut base_step,
+        &mut step_to_challenge,
+        &mut decisions,
+        &mut published,
+    )?;
+
+    let log = challenge_log.get_nary_log(NArySearchType::ConflictStep);
+    log.base_step = base_step;
+    log.step_to_challenge = step_to_challenge;
+    log.verifier_decisions = decisions;
+    log.prover_hash_rounds = published;
+    challenge_log.save(output_checkpoint_path)?;
+
+    Ok(result)
 }
 
 pub fn verifier_choose_segment(
@@ -458,51 +710,101 @@ pub fn verifier_choose_challenge(
 
     let mapping = &nary_def.step_mapping(&conflict_step_log.verifier_decisions);
     let step = conflict_step_log.step_to_challenge;
+    let mode = program_def.search_mode();
+    let total_rounds = nary_def.total_rounds();
 
-    let (prover_step_hash, prover_next_hash) =
+    // Each round's dissection is recorded under its round number by whichever
+    // party published it, so this is the committed view in either mode.
+    let (committed_step_hash, committed_next_hash) =
         get_hashes(mapping, &conflict_step_log.prover_hash_rounds, step);
 
     let nary = return_script_parameters.then_some(nary_def.nary);
     let nary_last_round = return_script_parameters.then_some(nary_def.nary_last_round);
     let rounds = return_script_parameters.then_some(nary_def.total_rounds());
 
-    if (prover_step_hash != resigned_step_hash && force == ForceChallenge::No)
+    // A boundary has no position when the search never published it: step 0 is
+    // agreed by construction. Treat an absent position as the prover's own,
+    // which is what it is whenever the asymmetric search is in use.
+    let step_access = mapping.get(&step).copied();
+    let next_access = mapping.get(&(step + 1)).copied();
+    let owned_by_counterparty = |access: Option<(u8, u8)>| {
+        access
+            .map(|(round, _)| mode.dissector(total_rounds, round) == Party::Verifier)
+            .unwrap_or(false)
+    };
+    let step_by_counterparty = owned_by_counterparty(step_access);
+    let next_by_counterparty = owned_by_counterparty(next_access);
+
+    // The prover is bound to the agreed boundary whoever published it, so a
+    // mismatch there is always the misbehaviour. At the disputed boundary a
+    // value published by the counterparty was one the prover declared it
+    // disagreed with, so there claiming it is the misbehaviour.
+    // Challenges about the prover's own hash chain need the prover's value at
+    // each boundary. Where the prover published the position that is the
+    // committed value; where the counterparty published it -- only possible
+    // under the full-duplex search -- the prover's value is the one it
+    // re-signed. In the asymmetric search both boundaries are the prover's, so
+    // these are the committed values exactly as before.
+    let chain_step_hash = if step_by_counterparty {
+        resigned_step_hash.to_string()
+    } else {
+        committed_step_hash.clone()
+    };
+    let chain_next_hash = if next_by_counterparty {
+        resigned_next_hash.to_string()
+    } else {
+        committed_next_hash.clone()
+    };
+
+    let step_inconsistent = committed_step_hash != resigned_step_hash;
+    let next_inconsistent = if next_by_counterparty {
+        committed_next_hash == resigned_next_hash
+    } else {
+        committed_next_hash != resigned_next_hash
+    };
+
+    if (step_inconsistent && force == ForceChallenge::No)
         || force == ForceChallenge::EquivocationResign(EquivocationKind::StepHash)
     {
-        let (round, index) = *mapping.get(&step).unwrap();
-
         return Ok(ChallengeType::EquivocationResign {
-            prover_true_hash: prover_step_hash,
+            prover_true_hash: committed_step_hash,
             prover_wrong_hash: resigned_step_hash.to_string(),
             prover_challenge_step_tk: step,
             kind: EquivocationKind::StepHash,
-            expected_round: round,
-            expected_index: index + 1,
+            expected_round: step_access.unwrap().0,
+            expected_index: step_access.unwrap().1 + 1,
+            counterparty_committed: step_by_counterparty,
             nary,
             nary_last_round,
             rounds,
         });
     }
 
-    if (prover_next_hash != resigned_next_hash && force == ForceChallenge::No)
+    if (next_inconsistent && force == ForceChallenge::No)
         || force == ForceChallenge::EquivocationResign(EquivocationKind::NextHash)
     {
-        let (round, index) = *mapping.get(&(step + 1)).unwrap();
+        let (round, index) = next_access.unwrap();
         return Ok(ChallengeType::EquivocationResign {
-            prover_true_hash: prover_next_hash,
+            prover_true_hash: committed_next_hash,
             prover_wrong_hash: resigned_next_hash.to_string(),
             prover_challenge_step_tk: step,
             kind: EquivocationKind::NextHash,
             expected_round: round,
             expected_index: index + 1,
+            counterparty_committed: next_by_counterparty,
             nary,
             nary_last_round,
             rounds,
         });
     }
 
-    // check trace_hash
-    if (!validate_step_hash(&prover_step_hash, &trace.trace_step, &prover_next_hash)
+    // Check the prover's own hash chain. This uses the prover's resigned
+    // hashes, not the committed ones: under the full-duplex search the value
+    // committed at the disputed boundary may be the counterparty's, which the
+    // prover is bound to differ from, so comparing against it here would
+    // validate the wrong party's claim. Where no equivocation fired in the
+    // asymmetric search the two are equal, so this is unchanged there.
+    if (!validate_step_hash(&chain_step_hash, &trace.trace_step, &chain_next_hash)
         && force == ForceChallenge::No)
         || force == ForceChallenge::TraceHash
         || force == ForceChallenge::TraceHashZero
@@ -511,16 +813,16 @@ pub fn verifier_choose_challenge(
             info!("Verifier choose to challenge TRACE_HASH_ZERO");
             return Ok(ChallengeType::TraceHashZero {
                 prover_trace: trace.trace_step,
-                prover_next_hash,
+                prover_next_hash: chain_next_hash,
                 prover_conflict_step_tk: step,
             });
         }
 
         info!("Verifier choose to challenge TRACE_HASH");
         return Ok(ChallengeType::TraceHash {
-            prover_step_hash,
+            prover_step_hash: chain_step_hash,
             prover_trace: trace.trace_step,
-            prover_next_hash,
+            prover_next_hash: chain_next_hash,
         });
     }
 
@@ -531,7 +833,7 @@ pub fn verifier_choose_challenge(
     } = verifier_log.prover_claim_execution.clone();
 
     if (step + 1 == prover_claim_last_step
-        && (prover_next_hash != prover_claim_last_hash
+        && (chain_next_hash != prover_claim_last_hash
             // halt opcode
             || trace.read_1.value != 93
             // exit code
@@ -545,7 +847,7 @@ pub fn verifier_choose_challenge(
             prover_last_step: prover_claim_last_step,
             prover_conflict_step_tk: step,
             prover_trace: trace,
-            prover_next_hash,
+            prover_next_hash: chain_next_hash,
             prover_last_hash: prover_claim_last_hash,
         });
     }
@@ -635,7 +937,7 @@ pub fn verifier_choose_challenge(
             return Ok(ChallengeType::ProgramCounter {
                 pre_hash,
                 trace: pre_step.trace_step,
-                prover_step_hash,
+                prover_step_hash: chain_step_hash,
                 prover_pc_read: trace.read_pc,
             });
         }
@@ -850,6 +1152,8 @@ pub fn verifier_choose_challenge_for_read_challenge(
             kind: EquivocationKind::StepHash,
             expected_round: round,
             expected_index: index + 1,
+            // the second search keeps the asymmetric roles
+            counterparty_committed: false,
             nary,
             nary_last_round,
             rounds,
@@ -867,6 +1171,8 @@ pub fn verifier_choose_challenge_for_read_challenge(
             kind: EquivocationKind::NextHash,
             expected_round: round,
             expected_index: index + 1,
+            // the second search keeps the asymmetric roles
+            counterparty_committed: false,
             nary,
             nary_last_round,
             rounds,

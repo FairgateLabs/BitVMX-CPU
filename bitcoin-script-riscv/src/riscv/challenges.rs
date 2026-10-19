@@ -685,6 +685,15 @@ fn get_round_and_index(stack: &mut StackTracker, decisions_bits: StackVariable, 
     }
 }
 
+/// Punishes a party whose re-signed state hash is inconsistent with what was
+/// committed for the same position during the search.
+///
+/// Which inconsistency is punishable depends on who committed the position.
+/// A party is always bound to its own earlier commitment, and it is bound to
+/// the counterparty's value at the agreed boundary, because selecting that
+/// boundary is what declared the agreement. At the disputed boundary the
+/// relation inverts: selecting it declared *disagreement*, so the party is
+/// bound to differ, and claiming the counterparty's value is the misbehaviour.
 pub fn equivocation_resign_challenge(
     stack: &mut StackTracker,
     kind: EquivocationKind,
@@ -693,12 +702,18 @@ pub fn equivocation_resign_challenge(
     rounds: u8,
     nary: u8,
     nary_last_round: u8,
+    counterparty_committed: bool,
 ) {
     stack.clear_definitions();
 
+    let owner = if counterparty_committed {
+        "verifier"
+    } else {
+        "prover"
+    };
     let true_hash = stack.define(
         40,
-        format!("prover_hash_{}_{}", expected_round, expected_index).as_str(),
+        format!("{}_hash_{}_{}", owner, expected_round, expected_index).as_str(),
     );
     let wrong_hash = stack.define(40, format!("prover_{:?}_hash_tk", kind).as_str());
     let step = stack.define(16, "prover_challenge_step_tk");
@@ -729,7 +744,9 @@ pub fn equivocation_resign_challenge(
     stack.number(expected_round as u32);
     stack.op_equalverify();
 
-    stack.equality(true_hash, true, wrong_hash, true, false, true);
+    // NextHash is the disputed boundary: see the note on this function.
+    let punish_equality = counterparty_committed && kind == EquivocationKind::NextHash;
+    stack.equality(true_hash, true, wrong_hash, true, punish_equality, true);
 
     stack.drop(decisions_bits);
 }
@@ -999,6 +1016,7 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             kind,
             expected_round,
             expected_index,
+            counterparty_committed,
             rounds,
             nary,
             nary_last_round,
@@ -1016,6 +1034,7 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
                 rounds.unwrap(),
                 nary.unwrap(),
                 nary_last_round.unwrap(),
+                *counterparty_committed,
             );
         }
         ChallengeType::EquivocationHash {
@@ -1050,6 +1069,92 @@ mod tests {
 
     use super::*;
     use rand::RngExt;
+
+    /// Builds an equivocation-resign challenge for a position and runs it.
+    /// Returns whether the challenge succeeds, i.e. whether the party
+    /// publishing the trace is punished.
+    fn resign_challenge_succeeds(
+        kind: EquivocationKind,
+        counterparty_committed: bool,
+        committed_hash: &str,
+        resigned_hash: &str,
+    ) -> bool {
+        // nary = 8 over 64 steps gives two rounds. Step 9 has base-8 digits
+        // (1, 1), so its hash was published at round 2 index 1; step 10 has
+        // digits (1, 2) and was published at round 2 index 2.
+        let (round, index) = match kind {
+            EquivocationKind::StepHash => (2, 1),
+            EquivocationKind::NextHash => (2, 2),
+        };
+        execute_challenge(&ChallengeType::EquivocationResign {
+            prover_true_hash: committed_hash.to_string(),
+            prover_wrong_hash: resigned_hash.to_string(),
+            prover_challenge_step_tk: 9,
+            kind,
+            expected_round: round,
+            expected_index: index,
+            counterparty_committed,
+            rounds: Some(2),
+            nary: Some(8),
+            nary_last_round: Some(0),
+        })
+    }
+
+    const HASH_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const HASH_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    /// A party is always bound to its own earlier commitment, so differing
+    /// from it is punishable and matching it is not. This holds at both
+    /// boundaries and is the behaviour of the asymmetric search.
+    #[test]
+    fn own_commitment_is_punished_only_when_it_differs() {
+        for kind in [EquivocationKind::StepHash, EquivocationKind::NextHash] {
+            assert!(
+                resign_challenge_succeeds(kind.clone(), false, HASH_A, HASH_B),
+                "{:?}: differing from own commitment must be punishable",
+                kind
+            );
+            assert!(
+                !resign_challenge_succeeds(kind.clone(), false, HASH_A, HASH_A),
+                "{:?}: matching own commitment must not be punishable",
+                kind
+            );
+        }
+    }
+
+    /// At the agreed boundary the party selected the counterparty's value as
+    /// agreed, which binds it to that value, so the relation is the same as
+    /// for its own commitment.
+    #[test]
+    fn counterparty_agreed_boundary_is_punished_only_when_it_differs() {
+        assert!(resign_challenge_succeeds(
+            EquivocationKind::StepHash,
+            true,
+            HASH_A,
+            HASH_B
+        ));
+        assert!(!resign_challenge_succeeds(
+            EquivocationKind::StepHash,
+            true,
+            HASH_A,
+            HASH_A
+        ));
+    }
+
+    /// At the disputed boundary the relation inverts: selecting it declared
+    /// disagreement with the counterparty's value, so claiming that value is
+    /// the misbehaviour and differing from it is honest.
+    #[test]
+    fn counterparty_disputed_boundary_is_punished_only_when_it_matches() {
+        assert!(
+            resign_challenge_succeeds(EquivocationKind::NextHash, true, HASH_A, HASH_A),
+            "claiming a value previously declared disagreed must be punishable"
+        );
+        assert!(
+            !resign_challenge_succeeds(EquivocationKind::NextHash, true, HASH_A, HASH_B),
+            "an honest party that differs at the disputed boundary must not be punished"
+        );
+    }
 
     fn test_entry_point_challenge_aux(
         wots_prover_pc: u32,
@@ -2357,7 +2462,17 @@ mod tests {
         stack.hexstr_as_nibbles(hash2);
         stack.number_u64(step);
 
-        equivocation_resign_challenge(stack, kind, round, index, rounds, nary, nary_last_round);
+        // the existing cases all concern a party's own commitment
+        equivocation_resign_challenge(
+            stack,
+            kind,
+            round,
+            index,
+            rounds,
+            nary,
+            nary_last_round,
+            false,
+        );
 
         stack.op_true();
         // interactive(&stack);
