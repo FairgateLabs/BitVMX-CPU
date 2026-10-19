@@ -5,7 +5,8 @@ use emulator::{
     constants::REGISTERS_BASE_ADDRESS,
     decision::{
         challenge::{
-            prover_execute, prover_final_trace, prover_full_duplex_stage,
+            prover_execute, prover_final_trace, prover_full_duplex_final_trace,
+            prover_full_duplex_stage,
             prover_get_hashes_and_step, prover_get_hashes_for_round, verifier_check_execution,
             verifier_choose_challenge, verifier_choose_challenge_for_read_challenge,
             verifier_choose_segment, verifier_full_duplex_stage, ForceChallenge, ForceCondition,
@@ -174,6 +175,12 @@ enum Commands {
         /// stage 3
         #[arg(long, value_name = "COUNTERPARTY_DECISION")]
         counterparty_decision: Option<u32>,
+
+        /// Also produce the trace for the disputed step. Used for the trailing
+        /// stage, whose selection rides on the adjudication message together
+        /// with that trace.
+        #[arg(long)]
+        final_trace: bool,
 
         /// Fail Configuration
         #[arg(long, value_name = "FailConfig")]
@@ -729,9 +736,30 @@ fn main() -> Result<(), EmulatorError> {
             stage,
             counterparty_hashes,
             counterparty_decision,
+            final_trace,
             fail_config,
             command_file,
         }) => {
+            if *final_trace {
+                let (decision, prover_final_trace) = prover_full_duplex_final_trace(
+                    pdf,
+                    checkpoint_input_path,
+                    checkpoint_output_path,
+                    *stage,
+                    counterparty_hashes,
+                    *counterparty_decision,
+                    fail_config.clone(),
+                )?;
+                let result = EmulatorResultType::FullDuplexFinalTraceResult {
+                    decision,
+                    prover_final_trace,
+                }
+                .to_value()?;
+                let mut file = create_or_open_file(command_file);
+                file.write_all(result.to_string().as_bytes())
+                    .expect("Failed to write JSON to file");
+                return Ok(());
+            }
             let (decision, hashes) = if *is_prover {
                 prover_full_duplex_stage(
                     pdf,

@@ -226,6 +226,13 @@ pub enum EmulatorResultType {
         v_decision: u32,
         round: u8,
     },
+    /// The trailing stage of a full-duplex search: the selection over the final
+    /// dissection, together with the trace for the disputed step. Both ride on
+    /// the adjudication message, so they are produced together.
+    FullDuplexFinalTraceResult {
+        decision: u32,
+        prover_final_trace: ProverFinalTraceType,
+    },
     /// One stage of a full-duplex search, which both selects and dissects.
     /// `decision` is absent at stage 1, which has no previous dissection to
     /// select over.

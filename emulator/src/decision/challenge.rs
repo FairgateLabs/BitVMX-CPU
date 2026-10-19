@@ -352,6 +352,47 @@ pub fn prover_full_duplex_stage(
     Ok(result)
 }
 
+/// The prover's trailing stage: select over the final dissection and produce
+/// the trace for the disputed step, in one step.
+///
+/// The trailing selection has no dissection of its own and rides on the
+/// adjudication message, which also carries the expanded trace. Computing both
+/// in one job keeps that true of the implementation as well, and spares the
+/// protocol a round trip it would otherwise spend asking for the digit and
+/// then asking for the trace.
+pub fn prover_full_duplex_final_trace(
+    program_definition_file: &str,
+    input_checkpoint_path: &str,
+    output_checkpoint_path: &str,
+    stage: u8,
+    counterparty_hashes: &[String],
+    counterparty_decision: Option<u32>,
+    fail_config: Option<FailConfiguration>,
+) -> Result<(u32, ProverFinalTraceType), EmulatorError> {
+    let (selection, _) = prover_full_duplex_stage(
+        program_definition_file,
+        input_checkpoint_path,
+        output_checkpoint_path,
+        stage,
+        counterparty_hashes,
+        counterparty_decision,
+        fail_config.clone(),
+    )?;
+
+    let selection = selection.ok_or_else(|| {
+        EmulatorError::ChallengeError("the trailing stage must produce a selection".to_string())
+    })?;
+
+    let trace = prover_final_trace(
+        program_definition_file,
+        output_checkpoint_path,
+        output_checkpoint_path,
+        selection + 1,
+        fail_config,
+    )?;
+    Ok((selection, trace))
+}
+
 /// The verifier's half of a full-duplex stage.
 pub fn verifier_full_duplex_stage(
     program_definition_file: &str,
