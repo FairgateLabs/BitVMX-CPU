@@ -681,15 +681,40 @@ pub fn verifier_choose_challenge(
     let nary_last_round = return_script_parameters.then_some(nary_def.nary_last_round);
     let rounds = return_script_parameters.then_some(nary_def.total_rounds());
 
-    let (step_round, step_index) = *mapping.get(&step).unwrap();
-    let (next_round, next_index) = *mapping.get(&(step + 1)).unwrap();
-    let step_by_counterparty = mode.dissector(total_rounds, step_round) == Party::Verifier;
-    let next_by_counterparty = mode.dissector(total_rounds, next_round) == Party::Verifier;
+    // A boundary has no position when the search never published it: step 0 is
+    // agreed by construction. Treat an absent position as the prover's own,
+    // which is what it is whenever the asymmetric search is in use.
+    let step_access = mapping.get(&step).copied();
+    let next_access = mapping.get(&(step + 1)).copied();
+    let owned_by_counterparty = |access: Option<(u8, u8)>| {
+        access
+            .map(|(round, _)| mode.dissector(total_rounds, round) == Party::Verifier)
+            .unwrap_or(false)
+    };
+    let step_by_counterparty = owned_by_counterparty(step_access);
+    let next_by_counterparty = owned_by_counterparty(next_access);
 
     // The prover is bound to the agreed boundary whoever published it, so a
     // mismatch there is always the misbehaviour. At the disputed boundary a
     // value published by the counterparty was one the prover declared it
     // disagreed with, so there claiming it is the misbehaviour.
+    // Challenges about the prover's own hash chain need the prover's value at
+    // each boundary. Where the prover published the position that is the
+    // committed value; where the counterparty published it -- only possible
+    // under the full-duplex search -- the prover's value is the one it
+    // re-signed. In the asymmetric search both boundaries are the prover's, so
+    // these are the committed values exactly as before.
+    let chain_step_hash = if step_by_counterparty {
+        resigned_step_hash.to_string()
+    } else {
+        committed_step_hash.clone()
+    };
+    let chain_next_hash = if next_by_counterparty {
+        resigned_next_hash.to_string()
+    } else {
+        committed_next_hash.clone()
+    };
+
     let step_inconsistent = committed_step_hash != resigned_step_hash;
     let next_inconsistent = if next_by_counterparty {
         committed_next_hash == resigned_next_hash
@@ -705,8 +730,8 @@ pub fn verifier_choose_challenge(
             prover_wrong_hash: resigned_step_hash.to_string(),
             prover_challenge_step_tk: step,
             kind: EquivocationKind::StepHash,
-            expected_round: step_round,
-            expected_index: step_index + 1,
+            expected_round: step_access.unwrap().0,
+            expected_index: step_access.unwrap().1 + 1,
             counterparty_committed: step_by_counterparty,
             nary,
             nary_last_round,
@@ -717,7 +742,7 @@ pub fn verifier_choose_challenge(
     if (next_inconsistent && force == ForceChallenge::No)
         || force == ForceChallenge::EquivocationResign(EquivocationKind::NextHash)
     {
-        let (round, index) = (next_round, next_index);
+        let (round, index) = next_access.unwrap();
         return Ok(ChallengeType::EquivocationResign {
             prover_true_hash: committed_next_hash,
             prover_wrong_hash: resigned_next_hash.to_string(),
@@ -738,11 +763,8 @@ pub fn verifier_choose_challenge(
     // prover is bound to differ from, so comparing against it here would
     // validate the wrong party's claim. Where no equivocation fired in the
     // asymmetric search the two are equal, so this is unchanged there.
-    if (!validate_step_hash(
-        &resigned_step_hash.to_string(),
-        &trace.trace_step,
-        &resigned_next_hash.to_string(),
-    ) && force == ForceChallenge::No)
+    if (!validate_step_hash(&chain_step_hash, &trace.trace_step, &chain_next_hash)
+        && force == ForceChallenge::No)
         || force == ForceChallenge::TraceHash
         || force == ForceChallenge::TraceHashZero
     {
@@ -750,16 +772,16 @@ pub fn verifier_choose_challenge(
             info!("Verifier choose to challenge TRACE_HASH_ZERO");
             return Ok(ChallengeType::TraceHashZero {
                 prover_trace: trace.trace_step,
-                prover_next_hash: resigned_next_hash.to_string(),
+                prover_next_hash: chain_next_hash,
                 prover_conflict_step_tk: step,
             });
         }
 
         info!("Verifier choose to challenge TRACE_HASH");
         return Ok(ChallengeType::TraceHash {
-            prover_step_hash: resigned_step_hash.to_string(),
+            prover_step_hash: chain_step_hash,
             prover_trace: trace.trace_step,
-            prover_next_hash: resigned_next_hash.to_string(),
+            prover_next_hash: chain_next_hash,
         });
     }
 
@@ -770,7 +792,7 @@ pub fn verifier_choose_challenge(
     } = verifier_log.prover_claim_execution.clone();
 
     if (step + 1 == prover_claim_last_step
-        && (resigned_next_hash != prover_claim_last_hash
+        && (chain_next_hash != prover_claim_last_hash
             // halt opcode
             || trace.read_1.value != 93
             // exit code
@@ -784,7 +806,7 @@ pub fn verifier_choose_challenge(
             prover_last_step: prover_claim_last_step,
             prover_conflict_step_tk: step,
             prover_trace: trace,
-            prover_next_hash: resigned_next_hash.to_string(),
+            prover_next_hash: chain_next_hash,
             prover_last_hash: prover_claim_last_hash,
         });
     }
@@ -874,7 +896,7 @@ pub fn verifier_choose_challenge(
             return Ok(ChallengeType::ProgramCounter {
                 pre_hash,
                 trace: pre_step.trace_step,
-                prover_step_hash: resigned_step_hash.to_string(),
+                prover_step_hash: chain_step_hash,
                 prover_pc_read: trace.read_pc,
             });
         }
