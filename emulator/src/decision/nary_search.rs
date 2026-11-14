@@ -202,8 +202,29 @@ impl NArySearchDefinition {
         base + bits as u64 * self.place_value(round)
     }
 
+    /// Where each published position sits, as `step -> (round, index)`.
+    ///
+    /// Takes one selection digit per round, or every digit but the last.
+    /// The last round's digit only advances `base` after the final round's
+    /// positions have been recorded, and that advance is discarded when the
+    /// loop ends, so the mapping does not depend on it.
+    ///
+    /// Both lengths are reachable. The asymmetric search commits every digit
+    /// as it goes, so its caller holds all of them. The full-duplex search
+    /// does not commit the trailing selection when it is made -- that digit
+    /// rides on the adjudication message -- so a party asking for the mapping
+    /// before that message is applied holds one fewer. Requiring the digit
+    /// the function never reads made the second case panic, which took the
+    /// verifier's challenge selection down with it.
     pub fn step_mapping(&self, bits: &[u32]) -> HashMap<u64, (u8, u8)> {
-        assert_eq!(bits.len(), self.total_rounds() as usize);
+        let rounds = self.total_rounds() as usize;
+        assert!(
+            bits.len() == rounds || bits.len() + 1 == rounds,
+            "step_mapping wants one digit per round or all but the last: \
+             got {} for {} rounds",
+            bits.len(),
+            rounds
+        );
         let mut base = 0;
         let mut mapping: HashMap<u64, (u8, u8)> = HashMap::new();
 
@@ -213,7 +234,11 @@ impl NArySearchDefinition {
                 mapping.insert(*step, (round, n as u8));
             }
 
-            base = self.step_from_base_and_bits(round, base, bits[round as usize - 1]);
+            // Absent only for the last round, and only then because the
+            // caller does not have it yet.
+            if let Some(digit) = bits.get(round as usize - 1) {
+                base = self.step_from_base_and_bits(round, base, *digit);
+            }
         }
 
         info!("Mapping: {:?}", mapping);
@@ -947,6 +972,85 @@ mod tests {
                 "rounds {}",
                 rounds
             );
+        }
+    }
+
+    /// The trailing digit cannot change the mapping, because it is applied
+    /// after the last round's positions are recorded and then discarded.
+    ///
+    /// This is what lets the full-duplex search ask for a mapping before its
+    /// trailing selection is committed. If this ever stops holding, the two
+    /// lengths stop being interchangeable and `verifier_choose_challenge`
+    /// needs the digit plumbed through to it instead.
+    #[test]
+    fn the_trailing_digit_does_not_change_the_mapping() {
+        for (max_steps, nary) in [(2000u64, 8u8), (1 << 20, 8), (50, 8), (4096, 4)] {
+            let def = NArySearchDefinition::new(max_steps, nary);
+            let rounds = def.total_rounds() as usize;
+            let full: Vec<u32> = (0..rounds).map(|i| (i as u32) % nary as u32).collect();
+            let short = full[..rounds - 1].to_vec();
+
+            assert_eq!(
+                def.step_mapping(&full),
+                def.step_mapping(&short),
+                "max_steps {max_steps} nary {nary}: the mapping must not \
+                 depend on the digit of the last round"
+            );
+
+            // And it must not depend on *which* trailing digit, either.
+            for last in 0..nary as u32 {
+                let mut other = short.clone();
+                other.push(last);
+                assert_eq!(def.step_mapping(&other), def.step_mapping(&short));
+            }
+        }
+    }
+
+    /// Every digit before the last one is load-bearing: it moves the base the
+    /// next round's positions are measured from. Dropping two must not be
+    /// quietly accepted, or a mapping would be built against the wrong base.
+    #[test]
+    fn dropping_more_than_the_trailing_digit_is_rejected() {
+        let def = NArySearchDefinition::new(2000, 8);
+        let rounds = def.total_rounds() as usize;
+        assert!(rounds >= 3, "need enough rounds for this to be meaningful");
+
+        let short = vec![0u32; rounds - 2];
+        assert!(
+            std::panic::catch_unwind(|| def.step_mapping(&short)).is_err(),
+            "a vector two digits short must be rejected, not silently used"
+        );
+
+        let long = vec![0u32; rounds + 1];
+        assert!(
+            std::panic::catch_unwind(|| def.step_mapping(&long)).is_err(),
+            "a vector longer than the round count must be rejected"
+        );
+    }
+
+    /// The full-duplex search leaves one party holding every digit but the
+    /// trailing one at the point it has to choose a challenge. Pin that
+    /// length against the stage allocation, so a change to either is caught
+    /// here rather than in a regtest dispute.
+    #[test]
+    fn full_duplex_holds_every_digit_but_the_trailing_one() {
+        for (max_steps, nary) in [(2000u64, 8u8), (1 << 20, 8)] {
+            let def = NArySearchDefinition::new(max_steps, nary);
+            let rounds = def.total_rounds();
+
+            // advance_full_duplex commits a selection only while
+            // `stage <= total_rounds`, and each stage past the first commits
+            // one digit, so the committed count is one short of the rounds.
+            let committed = (1..=rounds).filter(|stage| *stage > 1).count() as u8;
+            assert_eq!(
+                committed,
+                rounds - 1,
+                "max_steps {max_steps}: full duplex commits one digit per \
+                 stage after the first"
+            );
+
+            let digits = vec![0u32; committed as usize];
+            def.step_mapping(&digits);
         }
     }
 
