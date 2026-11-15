@@ -843,6 +843,24 @@ pub fn verifier_equivocation_challenge(stack: &mut StackTracker, round: u8, inde
 /// while both bind to the same one-time key.
 pub const VERIFIER_RESIGNED_PREFIX: &str = "verifier_resigned_hash_";
 
+/// Name prefix of a verifier's dissection position, as published at its stage.
+pub const VERIFIER_STAGE_PREFIX: &str = "verifier_hash_";
+
+/// The companion name under which a *second* signature for `name` is kept.
+///
+/// Both names bind to one positional key, so holding a signature under each
+/// is holding two signatures under that key -- which is the equivocation
+/// [`verifier_equivocation_challenge`] convicts on. Keeping the second under
+/// its own name rather than overwriting the first is what makes the pair
+/// presentable at all.
+///
+/// `None` for anything that is not a verifier dissection position, since no
+/// other variable has a companion name or needs one.
+pub fn resigned_name_for(name: &str) -> Option<String> {
+    name.strip_prefix(VERIFIER_STAGE_PREFIX)
+        .map(|position| format!("{}{}", VERIFIER_RESIGNED_PREFIX, position))
+}
+
 //TODO: memory section challenge
 //TODO: program crash challenge - this might be more about finding the right place to challenge that a challenge itself
 
@@ -2719,6 +2737,26 @@ mod tests {
             "an honest verifier re-presents the signature it stored, so the \
              two messages are identical and nothing is punishable"
         );
+    }
+
+    /// The two names have to agree with the key schedule, which builds them
+    /// independently. If they drift apart the punishment leaf still builds
+    /// and still spends, and convicts nobody.
+    #[test]
+    fn the_companion_name_matches_the_stage_name() {
+        assert_eq!(
+            resigned_name_for("verifier_hash_4_3").as_deref(),
+            Some("verifier_resigned_hash_4_3")
+        );
+        assert_eq!(
+            resigned_name_for("verifier_hash_2_7").as_deref(),
+            Some("verifier_resigned_hash_2_7")
+        );
+        // Nothing else has a companion: the prover's positional keys are
+        // already bound, and no other variable is signed twice.
+        assert_eq!(resigned_name_for("prover_hash_4_3"), None);
+        assert_eq!(resigned_name_for("prover_step_hash_tk"), None);
+        assert_eq!(resigned_name_for("verifier_selection_bits_1"), None);
     }
 
     #[test]
