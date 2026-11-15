@@ -2512,13 +2512,13 @@ mod tests {
         rounds: u8,
         nary: u8,
         nary_last_round: u8,
+        counterparty_committed: bool,
     ) -> bool {
         let stack = &mut StackTracker::new();
         stack.hexstr_as_nibbles(hash1);
         stack.hexstr_as_nibbles(hash2);
         stack.number_u64(step);
 
-        // the existing cases all concern a party's own commitment
         equivocation_resign_challenge(
             stack,
             kind,
@@ -2527,13 +2527,73 @@ mod tests {
             rounds,
             nary,
             nary_last_round,
-            false,
+            counterparty_committed,
         );
 
         stack.op_true();
         // interactive(&stack);
 
         stack.run().success
+    }
+
+    /// Under the full-duplex search a boundary may have been published by the
+    /// counterparty, and then the leaf reads *their* commitment and flips the
+    /// sense of the comparison at the disputed boundary. Nothing exercised
+    /// that: every existing case is a party disputing a value it published
+    /// itself, which is the only shape the asymmetric search produces.
+    ///
+    /// The two boundaries are not symmetric, and that is the point of the
+    /// flag. The agreed boundary binds the prover whoever published it, so a
+    /// mismatch is always the misbehaviour. At the disputed boundary a value
+    /// the counterparty published is one the prover said it disagreed with,
+    /// so re-signing it *equal* is the misbehaviour instead.
+    #[test]
+    fn counterparty_committed_flips_only_the_disputed_boundary() {
+        let a = &"e2f115006467b4b1b2b27612bbfd40ed3bc8299b".to_string();
+        let b = &"345721506e79c53d2549fc63d02ba8fc3b17efa4".to_string();
+        let (rounds, nary, nary_last_round) = (4u8, 8u8, 4u8);
+        let step = 1055;
+
+        // The agreed boundary: a mismatch is punishable either way.
+        for cc in [false, true] {
+            assert!(
+                test_equivocation_resign_aux(
+                    a, b, step, EquivocationKind::StepHash, 4, 3,
+                    rounds, nary, nary_last_round, cc),
+                "StepHash: differing hashes must be punishable \
+                 (counterparty_committed = {cc})"
+            );
+            assert!(
+                !test_equivocation_resign_aux(
+                    a, a, step, EquivocationKind::StepHash, 4, 3,
+                    rounds, nary, nary_last_round, cc),
+                "StepHash: identical hashes are not an equivocation \
+                 (counterparty_committed = {cc})"
+            );
+        }
+
+        // The disputed boundary: the sense depends on who published it.
+        // round 2 index 1 is the next-hash position for this step.
+        assert!(
+            test_equivocation_resign_aux(
+                a, b, step, EquivocationKind::NextHash, 2, 1,
+                rounds, nary, nary_last_round, false),
+            "NextHash on our own commitment: a mismatch is the misbehaviour"
+        );
+        assert!(
+            test_equivocation_resign_aux(
+                a, a, step, EquivocationKind::NextHash, 2, 1,
+                rounds, nary, nary_last_round, true),
+            "NextHash on the counterparty's commitment: re-signing it equal \
+             is the misbehaviour"
+        );
+        assert!(
+            !test_equivocation_resign_aux(
+                a, b, step, EquivocationKind::NextHash, 2, 1,
+                rounds, nary, nary_last_round, true),
+            "NextHash on the counterparty's commitment: disagreeing with it \
+             is what the prover already said, not a punishable act"
+        );
     }
 
     #[test]
@@ -2560,6 +2620,7 @@ mod tests {
             rounds,
             nary,
             nary_last_round,
+            false,
         ));
 
         // can't challenge with other step hash
@@ -2574,6 +2635,7 @@ mod tests {
             rounds,
             nary,
             nary_last_round,
+            false,
         ));
 
         // can challenge if wrong hash and correct round and index
@@ -2587,6 +2649,7 @@ mod tests {
             rounds,
             nary,
             nary_last_round,
+            false,
         ));
 
         // can challenge if wrong hash and correct round and index for next hash
@@ -2600,6 +2663,7 @@ mod tests {
             rounds,
             nary,
             nary_last_round,
+            false,
         ));
     }
     mod coin_tests {
