@@ -2596,6 +2596,61 @@ mod tests {
         );
     }
 
+    /// The counterparty's commitment is not bound by this leaf, so the
+    /// verdict is decided by whoever supplies it.
+    ///
+    /// Cases 2 and 3 read `verifier_hash_<round>_<index>`, verified under the
+    /// *verifier's* one-time key. Under the full-duplex search the verifier is
+    /// also the party spending this leaf, so it supplies that signature
+    /// itself. A Winternitz signature binds a message to a key, not to any
+    /// message published earlier, and a script cannot read a previous
+    /// transaction's witness -- so nothing here checks that the value signed
+    /// is the one the verifier dissected with.
+    ///
+    /// Below, the prover's commitment is held FIXED and only the verifier's
+    /// choice varies. Both outcomes are reachable. That is the whole of the
+    /// attack: an honest prover is convicted or not according to a value its
+    /// counterparty picks when it spends.
+    ///
+    /// This is not a defect in the script -- a leaf cannot do better -- and
+    /// the behaviour here is unchanged by fixing it. It is the reason the
+    /// binding has to come from somewhere else: an equivocation punishment
+    /// over the verifier's positional keys, spendable by the prover. Until
+    /// that exists, this test documents an unsound path rather than a sound
+    /// one, and it should be read alongside whatever closes it.
+    #[test]
+    fn the_counterpartys_value_is_chosen_by_the_spender_not_bound() {
+        let provers_next_hash = &"e2f115006467b4b1b2b27612bbfd40ed3bc8299b".to_string();
+        let verifiers_published = &"345721506e79c53d2549fc63d02ba8fc3b17efa4".to_string();
+        let (rounds, nary, nary_last_round) = (4u8, 8u8, 4u8);
+        let step = 1055;
+        // The disputed boundary N, published by the counterparty: case 3.
+        let (round, index) = (2u8, 1u8);
+
+        // Honest verifier: signs what it actually dissected with. It disagreed
+        // with the prover there, so the values differ and the leaf refuses --
+        // the prover is not convicted.
+        assert!(
+            !test_equivocation_resign_aux(
+                verifiers_published, provers_next_hash, step,
+                EquivocationKind::NextHash, round, index,
+                rounds, nary, nary_last_round, true),
+            "honest verifier: a prover that differs from the value the \
+             verifier published has done nothing punishable"
+        );
+
+        // Dishonest verifier: signs the prover's own value afresh under the
+        // same positional key. Identical prover commitment, opposite verdict.
+        assert!(
+            test_equivocation_resign_aux(
+                provers_next_hash, provers_next_hash, step,
+                EquivocationKind::NextHash, round, index,
+                rounds, nary, nary_last_round, true),
+            "dishonest verifier: re-signing the prover's own value convicts \
+             an honest prover -- nothing in the leaf prevents this"
+        );
+    }
+
     #[test]
     pub fn test_equivocation_resign() {
         let true_hash = &"e2f115006467b4b1b2b27612bbfd40ed3bc8299b".to_string();
