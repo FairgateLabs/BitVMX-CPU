@@ -709,7 +709,26 @@ pub fn verifier_choose_challenge(
     )?;
 
     let mapping = &nary_def.step_mapping(&conflict_step_log.verifier_decisions);
-    let step = conflict_step_log.step_to_challenge;
+
+    // The adjudicated step is the one the prover committed, not this party's
+    // running bound. The leaf reads `prover_conflict_step_tk` and recomputes
+    // the round and index from it, checking them against what the leaf
+    // hard-codes, so a challenge built from any other number names a position
+    // the script will not agree with.
+    //
+    // Under the asymmetric search the two are the same: the verifier applies
+    // every digit as it selects, so its bound already is the agreed boundary.
+    // Under full duplex the trailing selection rides on this very message and
+    // the verifier has never applied it, leaving its bound one selection
+    // short.
+    let step = trace.step_number.saturating_sub(1);
+    if step != conflict_step_log.step_to_challenge {
+        info!(
+            "Adjudicating at step {} rather than the running bound {}: the \
+             trailing selection arrived with the trace",
+            step, conflict_step_log.step_to_challenge
+        );
+    }
     let mode = program_def.search_mode();
     let total_rounds = nary_def.total_rounds();
 
