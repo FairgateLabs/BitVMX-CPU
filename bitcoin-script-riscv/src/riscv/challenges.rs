@@ -806,6 +806,43 @@ pub fn equivocation_hash_challenge(stack: &mut StackTracker) {
     stack.equals(write_step, true, conflict_step, true);
 }
 
+/// Two signatures under one positional key, over different messages.
+///
+/// The full-duplex search has both parties dissect, so both commit state
+/// hashes under one-time positional keys. Cases 2 and 3 of the resign leaf
+/// (see [`equivocation_resign_challenge`]) then read the *counterparty's*
+/// commitment -- and the counterparty is the party spending that leaf, so it
+/// supplies that signature itself. A Winternitz signature binds a message to
+/// a key, not to a message published earlier, and no leaf can read a previous
+/// transaction's witness. Nothing in that leaf forces the value to be the one
+/// actually dissected with.
+///
+/// What forces it is this leaf, spendable by the counterparty: present both
+/// signatures under the same positional key, over different messages, and the
+/// signer is convicted. The one-time key makes the pair impossible for an
+/// honest party to produce, because an honest client re-presents the
+/// signature it stored rather than signing again.
+///
+/// The two values arrive already verified under that single key by the
+/// Winternitz check preceding this script, so all that remains is to show
+/// they differ.
+pub fn verifier_equivocation_challenge(stack: &mut StackTracker, round: u8, index: u8) {
+    stack.clear_definitions();
+    let published = stack.define(40, &format!("verifier_hash_{}_{}", round, index));
+    let resigned = stack.define(
+        40,
+        &format!("{}{}_{}", VERIFIER_RESIGNED_PREFIX, round, index),
+    );
+    // Succeeds when they differ: that difference is the equivocation.
+    stack.equality(published, true, resigned, true, false, true);
+}
+
+/// Name prefix for the second signature a verifier produced under a
+/// positional key, as re-presented by the prover from the challenge it is
+/// punishing. Distinct from the stage variable so both can be held at once,
+/// while both bind to the same one-time key.
+pub const VERIFIER_RESIGNED_PREFIX: &str = "verifier_resigned_hash_";
+
 //TODO: memory section challenge
 //TODO: program crash challenge - this might be more about finding the right place to challenge that a challenge itself
 
@@ -2648,6 +2685,39 @@ mod tests {
                 rounds, nary, nary_last_round, true),
             "dishonest verifier: re-signing the prover's own value convicts \
              an honest prover -- nothing in the leaf prevents this"
+        );
+    }
+
+    fn verifier_equivocation_aux(published: &str, resigned: &str) -> bool {
+        let stack = &mut StackTracker::new();
+        stack.hexstr_as_nibbles(&published.to_string());
+        stack.hexstr_as_nibbles(&resigned.to_string());
+        verifier_equivocation_challenge(stack, 4, 3);
+        stack.op_true();
+        stack.run().success
+    }
+
+    /// The punishment for the gap documented in
+    /// `the_counterpartys_value_is_chosen_by_the_spender_not_bound`.
+    ///
+    /// The verifier may sign whatever it likes under its positional key when
+    /// it spends the resign leaf. What it cannot do is sign two different
+    /// messages under a one-time key without the pair becoming provable: this
+    /// leaf takes both and convicts on the difference.
+    #[test]
+    fn two_values_under_one_positional_key_are_punishable() {
+        let published = "345721506e79c53d2549fc63d02ba8fc3b17efa4";
+        let resigned = "e2f115006467b4b1b2b27612bbfd40ed3bc8299b";
+
+        assert!(
+            verifier_equivocation_aux(published, resigned),
+            "two distinct messages under one positional key is the \
+             equivocation, and must be punishable"
+        );
+        assert!(
+            !verifier_equivocation_aux(published, published),
+            "an honest verifier re-presents the signature it stored, so the \
+             two messages are identical and nothing is punishable"
         );
     }
 
