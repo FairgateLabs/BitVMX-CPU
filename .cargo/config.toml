@@ -1,0 +1,5 @@
+[resolver]
+incompatible-publish-age = "deny"
+
+[registry]
+global-min-publish-age = "14 days"
