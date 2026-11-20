@@ -5,6 +5,7 @@ pub mod instructions;
 pub mod instructions_load;
 pub mod instructions_store;
 pub mod memory_alignment;
+pub mod memory_proof;
 pub mod operations;
 pub mod script_utils;
 pub mod trace;

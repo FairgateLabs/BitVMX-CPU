@@ -3442,6 +3442,41 @@ mod tests {
             s
         }
 
+        /// The cases that broke the garbled RV32M circuit, run against
+        /// the Script implementation.
+        ///
+        /// There, `q*d + r` was checked by adding a 32-bit remainder to a
+        /// 64-bit product, which truncated, so the check compared the
+        /// product's sign against the sum's. Those differ exactly when
+        /// `q*d + r` is negative and `q*d` is not -- a zero quotient with
+        /// a negative dividend -- and an honest `div(-1, 2)` was reported
+        /// as faulted.
+        ///
+        /// Script verifies division a different way, so this asks whether
+        /// it shares the defect. It does not; these are pinned so that a
+        /// future change to either side has to keep them agreeing.
+        #[test]
+        fn signed_division_with_a_zero_quotient_and_negative_dividend() {
+            for (n, d) in [
+                (-1i32, 2i32),
+                (-7, -9),
+                (-5, 3),
+                (-991_549_079, -1_001_680_343),
+                (7, 9),
+                (-1, 3),
+                (-2, 3),
+                (i32::MIN + 1, i32::MAX),
+            ] {
+                assert_eq!(n / d, if n.abs() < d.abs() { 0 } else { n / d });
+                assert!(
+                    div_rem_signed_aux(n, d),
+                    "div/rem({n}, {d}) -> q={}, r={}",
+                    n / d,
+                    n % d
+                );
+            }
+        }
+
         #[test]
         fn fuzz_div_rem() {
             fuzz_generic_and_catch_panics(
