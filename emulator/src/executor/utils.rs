@@ -84,7 +84,7 @@ impl FailRead {
         // todo this will be changed when we consolidate sections and registers
         if is_register_address(program, self.address_original) {
             let idx = program.registers.get_original_idx(self.address_original);
-            program.registers.set(idx, self.value, program.step);
+            program.set_register(idx, self.value, program.step);
         }
 
         if program.find_section(self.address_original).is_ok() {
@@ -164,7 +164,7 @@ impl FailWrite {
             patch = true;
             if is_register_address(program, self.address_original) {
                 let idx = program.registers.get_original_idx(self.address_original);
-                program.registers.set(idx, self.value, program.step);
+                program.set_register(idx, self.value, program.step);
             }
 
             if program.find_section(self.address_original).is_ok() {

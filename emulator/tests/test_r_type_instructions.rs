@@ -237,4 +237,16 @@ pub fn test_division() {
 
     test_division_aux(100, 6, 16, 4, false);
     test_division_aux(100, -1, -100, 0, true);
+
+    // A zero quotient with a negative dividend, which is what |n| < |d|
+    // gives and which nothing above reaches. The garbled RV32M circuit
+    // reported these as faulted until the remainder was sign-extended
+    // into its q*d + r check; Script and the emulator were always right,
+    // so the two backends disagreed about a valid instruction. Pinned
+    // here so the emulator's own tests cover the case.
+    test_division_aux(-1, 2, 0, -1, true);
+    test_division_aux(-7, -9, 0, -7, true);
+    test_division_aux(-5, 3, -1, -2, true);
+    test_division_aux(7, 9, 0, 7, true);
+    test_division_aux(-991_549_079, -1_001_680_343, 0, -991_549_079, true);
 }

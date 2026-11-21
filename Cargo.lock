@@ -266,6 +266,7 @@ dependencies = [
 name = "bitvmx-cpu-definitions"
 version = "0.8.9"
 dependencies = [
+ "bitcoin_hashes",
  "blake3",
  "config",
  "hex",

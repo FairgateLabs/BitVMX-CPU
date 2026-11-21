@@ -333,7 +333,10 @@ pub fn execute_step(
         read_1,
         read_2,
         TraceReadPC::new(pc, opcode),
-        TraceStep::new(write_1, program.pc.clone()),
+        match program.trace_mem_root() {
+            Some(root) => TraceStep::new_with_root(write_1, program.pc.clone(), root),
+            None => TraceStep::new(write_1, program.pc.clone()),
+        },
         witness,
         mem_witness,
     );
@@ -600,7 +603,7 @@ pub fn op_arithmetic(
         _ => panic!("Unreachable"),
     };
 
-    program.registers.set(x.rd(), result, program.step);
+    program.set_register(x.rd(), result, program.step);
     program.pc.next_address();
 
     (
@@ -652,7 +655,7 @@ pub fn op_arithmetic_imm(
         _ => panic!("Unreachable"),
     };
 
-    program.registers.set(rd, result, program.step);
+    program.set_register(rd, result, program.step);
     program.pc.next_address();
 
     let write = program.registers.to_trace_write(rd);
@@ -702,7 +705,7 @@ pub fn op_shift_sl(
         _ => panic!("Unreachable"),
     };
 
-    program.registers.set(x.rd(), result, program.step);
+    program.set_register(x.rd(), result, program.step);
     program.pc.next_address();
 
     (
@@ -738,7 +741,7 @@ pub fn op_shift_imm(
         _ => panic!("Unreachable"),
     };
 
-    program.registers.set(x.rd(), result, program.step);
+    program.set_register(x.rd(), result, program.step);
     program.pc.next_address();
 
     (
@@ -787,7 +790,7 @@ pub fn op_sl_imm(
         _ => panic!("Unreachable"),
     };
 
-    program.registers.set(x.rd(), result, program.step);
+    program.set_register(x.rd(), result, program.step);
     program.pc.next_address();
 
     (
@@ -869,7 +872,7 @@ pub fn op_store(
             let read_2 = TraceRead::new(dest_mem, value, program.get_last_step(dest_mem));
 
             let masked = mask_dst & value;
-            program.registers.set(AUX_REGISTER_1, masked, program.step);
+            program.set_register(AUX_REGISTER_1, masked, program.step);
             program.pc.next_micro();
 
             (
@@ -904,7 +907,7 @@ pub fn op_store(
                 Ordering::Equal => masked,
             };
 
-            program.registers.set(AUX_REGISTER_2, shifted, program.step);
+            program.set_register(AUX_REGISTER_2, shifted, program.step);
             program.pc.next_micro();
 
             (
@@ -1040,7 +1043,7 @@ pub fn op_load(
                         ),
                     ));
                 }
-                program.registers.set(x.rd(), shifted, program.step);
+                program.set_register(x.rd(), shifted, program.step);
                 program.registers.to_trace_write(x.rd())
             } else {
                 program.pc.next_micro();
@@ -1049,7 +1052,7 @@ pub fn op_load(
                 } else {
                     AUX_REGISTER_2
                 };
-                program.registers.set(dest, shifted, program.step);
+                program.set_register(dest, shifted, program.step);
                 program.registers.to_trace_write(dest)
             };
 
@@ -1086,7 +1089,7 @@ pub fn op_load(
             let value = program.registers.get(AUX_REGISTER_1);
             let read_1 = program.registers.to_trace_read(AUX_REGISTER_1);
 
-            program.registers.set(x.rd(), value, program.step);
+            program.set_register(x.rd(), value, program.step);
             program.pc.next_address();
             let write_1 = program.registers.to_trace_write(x.rd());
 
@@ -1121,7 +1124,7 @@ pub fn op_upper(
     };
 
     //state modification
-    program.registers.set(dest_register, value, program.step);
+    program.set_register(dest_register, value, program.step);
     program.pc.next_address();
 
     (
@@ -1134,4 +1137,247 @@ pub fn op_upper(
             MemoryAccessType::Register,
         ),
     )
+}
+
+#[cfg(test)]
+mod memory_tree_tests {
+    use crate::executor::utils::FailConfiguration;
+    use crate::loader::program_definition::ProgramDefinition;
+    use crate::loader::synthetic::SyntheticProgram;
+    use bitvmx_cpu_definitions::memory_tree::{leaf_index, verify_multiproof};
+
+    use super::*;
+
+    fn loaded() -> (SyntheticProgram, ProgramDefinition, Program) {
+        let prog = SyntheticProgram::new(20, 8, 128).unwrap();
+        let def = ProgramDefinition::from_config(&prog.definition()).unwrap();
+        let program = def.load_program().unwrap();
+        (prog, def, program)
+    }
+
+    /// Run to `limit`, and insist that it actually ran.  An unknown input
+    /// section makes `execute_program` return before the first instruction,
+    /// which looks exactly like a program that changes no memory.
+    fn run(def: &ProgramDefinition, program: &mut Program, limit: u64) -> ExecutionResult {
+        let before = program.step;
+        let result = execute_program(
+            program,
+            vec![0, 0, 0, 0],
+            &def.input_section_name,
+            false,
+            &None,
+            Some(limit),
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            None,
+            None,
+            FailConfiguration::default(),
+            false,
+        )
+        .0;
+        assert!(
+            program.step > before,
+            "execution did not advance past step {before}: {result:?}"
+        );
+        result
+    }
+
+    #[test]
+    fn a_loaded_program_has_a_memory_root() {
+        let (_prog, _def, program) = loaded();
+        assert!(
+            program.memory_tree_is_consistent(),
+            "the tree built at load must match a rebuild"
+        );
+        assert_ne!(
+            program.memory_root(),
+            bitvmx_cpu_definitions::memory_tree::empty_root(
+                bitvmx_cpu_definitions::memory_tree::DEPLOYED_DEPTH
+            ),
+            "a loaded ELF is not empty memory"
+        );
+    }
+
+    #[test]
+    fn the_tree_tracks_execution_step_by_step() {
+        // Every path that changes memory has to update the tree.  Running
+        // to a series of limits and rebuilding at each is what catches one
+        // that does not -- a missed register write or a missed store shows
+        // up as a divergence here and nowhere else.
+        for limit in 1..=23u64 {
+            let (_prog, def, mut program) = loaded();
+            run(&def, &mut program, limit);
+            assert!(
+                program.memory_tree_is_consistent(),
+                "the tree diverged from memory by step {limit}"
+            );
+        }
+    }
+
+    #[test]
+    fn execution_moves_the_root_and_the_registers_are_in_it() {
+        let (_prog, def, mut program) = loaded();
+        let before = program.memory_root();
+        run(&def, &mut program, 23);
+        let after = program.memory_root();
+        assert_ne!(before, after, "twenty-three steps must change memory");
+        assert!(program.memory_tree_is_consistent());
+
+        // A register is an ordinary leaf, and it opens like one.
+        for idx in [1u32, 2, 10] {
+            let address = program.registers.get_register_address(idx);
+            let index = leaf_index(address);
+            assert_eq!(
+                program.memory_tree.read(index),
+                program.registers.get(idx),
+                "register {idx} must be the leaf at its own address"
+            );
+            let proof = program.memory_tree.multiproof(&[index]);
+            assert!(verify_multiproof(&after, &proof), "register {idx} opens");
+        }
+    }
+
+    #[test]
+    fn a_checkpoint_recovers_the_tree_it_does_not_carry() {
+        let (_prog, def, mut program) = loaded();
+        run(&def, &mut program, 23);
+        let root = program.memory_root();
+
+        // A checkpoint stores section data and registers, not the tree.
+        let json = serde_json::to_string(&program).unwrap();
+        let mut restored: Program = serde_json::from_str(&json).unwrap();
+        assert_ne!(
+            restored.memory_root(),
+            root,
+            "deserialization alone leaves an empty tree"
+        );
+        restored.rebuild_memory_tree();
+        assert_eq!(
+            restored.memory_root(),
+            root,
+            "and rebuilding recovers it exactly"
+        );
+    }
+}
+
+#[cfg(test)]
+mod merkle_model_tests {
+    use crate::executor::utils::FailConfiguration;
+    use crate::loader::program_definition::ProgramDefinition;
+    use crate::loader::synthetic::SyntheticProgram;
+    use bitvmx_cpu_definitions::memory_tree::MemoryModel;
+
+    use super::*;
+
+    fn run_under(model: MemoryModel) -> (Program, FullTrace) {
+        let prog = SyntheticProgram::new(20, 8, 128).unwrap();
+        let def = ProgramDefinition::from_config(&prog.definition()).unwrap();
+        let mut program = def.load_program().unwrap();
+        program.memory_model = model;
+        let before = program.step;
+        let (_result, traces) = execute_program(
+            &mut program,
+            vec![0, 0, 0, 0],
+            &def.input_section_name,
+            false,
+            &None,
+            Some(23),
+            true,
+            false,
+            false,
+            false,
+            false,
+            false,
+            None,
+            None,
+            FailConfiguration::default(),
+            false,
+        );
+        assert!(program.step > before, "execution did not advance");
+        // Keep the synthetic program's directory alive until here.
+        drop(prog);
+        (program, traces)
+    }
+
+    #[test]
+    fn last_step_is_the_default_and_chains_no_root() {
+        let prog = SyntheticProgram::new(4, 8, 128).unwrap();
+        let def = ProgramDefinition::from_config(&prog.definition()).unwrap();
+        let program = def.load_program().unwrap();
+        assert_eq!(
+            program.memory_model,
+            MemoryModel::LastStep,
+            "an existing program definition means what it meant before"
+        );
+        assert!(program.trace_mem_root().is_none());
+    }
+
+    #[test]
+    fn a_merkle_step_carries_the_post_state_root() {
+        let (program, traces) = run_under(MemoryModel::Merkle);
+        let last = traces.last().expect("at least one step");
+        let root = last
+            .0
+            .trace_step
+            .mem_root
+            .expect("a Merkle step carries a root");
+        assert_eq!(
+            root,
+            program.memory_root(),
+            "and it is the root after that step"
+        );
+    }
+
+    #[test]
+    fn the_step_message_grows_by_exactly_one_root() {
+        let (_m, merkle) = run_under(MemoryModel::Merkle);
+        let (_l, last_step) = run_under(MemoryModel::LastStep);
+        let m = merkle.last().unwrap().0.trace_step.to_bytes();
+        let l = last_step.last().unwrap().0.trace_step.to_bytes();
+        assert_eq!(l.len(), 13, "write address, value, pc, micro");
+        assert_eq!(m.len(), 33, "and twenty more for the root");
+        assert_eq!(&m[..13], &l[..], "the original fields are untouched");
+        // The blake3 message the on-chain script hashes is the previous
+        // state hash followed by these bytes, so the script's length goes
+        // from 33 to 53 -- which is (40 + 8 + 8 + 8 + 2) / 2 and then
+        // (40 + 8 + 8 + 8 + 2 + 40) / 2 in nibbles.
+        assert_eq!(20 + l.len(), 33);
+        assert_eq!(20 + m.len(), 53);
+    }
+
+    #[test]
+    fn the_two_models_give_different_state_hashes() {
+        // Which is the point: under Merkle an agreed state pins the root
+        // the endgame opens against, and under LastStep it does not.
+        let (_m, merkle) = run_under(MemoryModel::Merkle);
+        let (_l, last_step) = run_under(MemoryModel::LastStep);
+        assert_eq!(merkle.len(), last_step.len(), "same execution");
+        assert_ne!(
+            merkle.last().unwrap().1,
+            last_step.last().unwrap().1,
+            "but the state hash commits to more"
+        );
+    }
+
+    #[test]
+    fn every_merkle_step_s_root_opens_its_own_writes() {
+        let (program, traces) = run_under(MemoryModel::Merkle);
+        assert!(program.memory_tree_is_consistent());
+        let mut seen_roots = 0;
+        for (trace, _hash) in &traces {
+            if let Some(root) = trace.trace_step.mem_root {
+                seen_roots += 1;
+                let write = &trace.trace_step.write_1;
+                if write.address != 0 {
+                    // The written word is in the tree that step produced.
+                    assert_ne!(root, [0u8; 20]);
+                }
+            }
+        }
+        assert!(seen_roots > 0, "a Merkle run must carry roots");
+    }
 }

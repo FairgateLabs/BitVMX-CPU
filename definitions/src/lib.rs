@@ -1,5 +1,6 @@
 pub mod challenge;
 pub mod memory;
+pub mod memory_tree;
 pub mod trace;
 
 pub mod constants {

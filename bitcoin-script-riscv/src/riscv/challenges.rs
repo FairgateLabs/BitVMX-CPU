@@ -4,7 +4,8 @@ use bitvmx_cpu_definitions::{
     challenge::{ChallengeType, EquivocationKind},
     constants::LAST_STEP_INIT,
     memory::{Chunk, MemoryAccessType, SectionDefinition},
-    trace::{generate_initial_step_hash, hashvec_to_string},
+    memory_tree::MemoryModel,
+    trace::{generate_initial_step_hash, hashvec_to_string, TraceStep},
 };
 
 use crate::riscv::{
@@ -133,7 +134,24 @@ pub fn entry_point_challenge(stack: &mut StackTracker, entry_point: u32) {
 // NOTE: the verifiers provides an step back of the agreed step.
 // hash_funcion ( UNSIGNED_VERIFIER_HASH_PREV_PREV_STEP:64 | UNSIGINED_VERIFIER_WRITE_ADD_PREV:8 | UNSIGINED_VERIFIER_WRITE_DATA_PREV:8 | UNSIGNED_VERIFIER_WRITE_PC_PREV:8 | UNSIGNED_VERIFIER_WRITE_MICRO_PREV:2 ) == WOTS_PROVER_HASH_PREV_STEP:64
 // && WOTS_PROVER_TRACE_READ_PC:8 | WOTS_PROVER_TRACE_READ_MICRO:2 != UNSIGNED_VERIFIER_WRITE_PC_PREV | UNSIGNED_VERIFIER_WRITE_MICRO_PREV
-pub fn program_counter_challenge(stack: &mut StackTracker) {
+/// Bytes of the blake3 message a state-hash check hashes.
+///
+/// The previous state hash and the trace step, and under Merkle memory the
+/// post-state memory root as well -- `TraceStep::to_bytes` appends it last,
+/// so the script explodes it last.  Thirty-three bytes becomes fifty-three.
+fn state_hash_bytes(model: MemoryModel) -> u32 {
+    let nibbles = 40 + 8 + 8 + 8 + 2 + if model.chains_root() { 40 } else { 0 };
+    nibbles / 2
+}
+
+/// Define the memory root the state hash chains, if this model chains one.
+fn define_mem_root(stack: &mut StackTracker, model: MemoryModel) -> Option<StackVariable> {
+    model
+        .chains_root()
+        .then(|| stack.define(40, "prev_mem_root"))
+}
+
+pub fn program_counter_challenge(stack: &mut StackTracker, model: MemoryModel) {
     stack.clear_definitions();
 
     // verifier values (unsigned)
@@ -142,6 +160,7 @@ pub fn program_counter_challenge(stack: &mut StackTracker) {
     let prev_write_data = stack.define(8, "prev_write_data");
     let prev_write_pc = stack.define(8, "prev_write_pc");
     let prev_write_micro = stack.define(2, "prev_write_micro");
+    let prev_mem_root = define_mem_root(stack, model);
 
     // santize the stack
     stack.verify_range_var_u4(prev_prev_hash);
@@ -149,6 +168,9 @@ pub fn program_counter_challenge(stack: &mut StackTracker) {
     stack.verify_range_var_u4(prev_write_data);
     stack.verify_range_var_u4(prev_write_pc);
     stack.verify_range_var_u4(prev_write_micro);
+    if let Some(root) = prev_mem_root {
+        stack.verify_range_var_u4(root);
+    }
 
     // prover values decoded from WOTS
     let prover_pc = stack.define(8, "prover_read_pc");
@@ -173,8 +195,11 @@ pub fn program_counter_challenge(stack: &mut StackTracker) {
     stack.explode(prev_write_data);
     stack.explode(prev_write_pc);
     stack.explode(prev_write_micro);
+    if let Some(root) = prev_mem_root {
+        stack.explode(root);
+    }
 
-    let result = blake3::blake3(stack, (40 + 8 + 8 + 8 + 2) / 2, 5);
+    let result = blake3::blake3(stack, state_hash_bytes(model), 5);
     stack.from_altstack();
     stack.equals(result, true, prover_prev_hash, true);
 }
@@ -215,7 +240,7 @@ pub fn halt_challenge(stack: &mut StackTracker) {
 // When the prover expands the trace it could happen that  HASH( hash_prev_step | trace_write ) != hash_step
 // in that case the verifier can win the challenge executing:
 //  hash_funcion ( WOTS_PROVER_HASH_STEP_PREV:64 | WOTS_PROVER_WRITE_ADD:8 | WOTS_PROVER_WRITE_DATA:8 | WOTS_PROVER_WRITE_PC:8 | WOTS_PROVER_WRITE_MICRO:2 ) != WOTS_PROVER_HASH:64
-pub fn trace_hash_challenge(stack: &mut StackTracker) {
+pub fn trace_hash_challenge(stack: &mut StackTracker, model: MemoryModel) {
     stack.clear_definitions();
 
     let prev_hash = stack.define(40, "prev_hash");
@@ -223,6 +248,7 @@ pub fn trace_hash_challenge(stack: &mut StackTracker) {
     let write_data = stack.define(8, "write_data");
     let write_pc = stack.define(8, "write_pc");
     let write_micro = stack.define(2, "write_micro");
+    let mem_root = define_mem_root(stack, model);
 
     let hash = stack.define(40, "hash");
 
@@ -234,19 +260,23 @@ pub fn trace_hash_challenge(stack: &mut StackTracker) {
     stack.explode(write_data);
     stack.explode(write_pc);
     stack.explode(write_micro);
+    if let Some(root) = mem_root {
+        stack.explode(root);
+    }
 
-    let result = blake3::blake3(stack, (40 + 8 + 8 + 8 + 2) / 2, 5);
+    let result = blake3::blake3(stack, state_hash_bytes(model), 5);
     stack.from_altstack();
     stack.not_equal(result, true, hash, true);
 }
 
-pub fn trace_hash_zero_challenge(stack: &mut StackTracker) {
+pub fn trace_hash_zero_challenge(stack: &mut StackTracker, model: MemoryModel) {
     stack.clear_definitions();
 
     let write_add = stack.define(8, "write_add");
     let write_data = stack.define(8, "write_data");
     let write_pc = stack.define(8, "write_pc");
     let write_micro = stack.define(2, "write_micro");
+    let mem_root = define_mem_root(stack, model);
 
     let hash = stack.define(40, "hash");
     let step = stack.define(16, "prover_conflict_step_tk");
@@ -257,11 +287,14 @@ pub fn trace_hash_zero_challenge(stack: &mut StackTracker) {
     //save the hash to compare
     stack.to_altstack();
 
-    //save the trace steps
+    //save the trace steps -- one more under Merkle memory, for the root
     stack.to_altstack();
     stack.to_altstack();
     stack.to_altstack();
     stack.to_altstack();
+    if mem_root.is_some() {
+        stack.to_altstack();
+    }
 
     //hardcoded the initial hash
     let prev_hash = stack.hexstr_as_nibbles(&hashvec_to_string(generate_initial_step_hash()));
@@ -271,14 +304,20 @@ pub fn trace_hash_zero_challenge(stack: &mut StackTracker) {
     stack.from_altstack();
     stack.from_altstack();
     stack.from_altstack();
+    if mem_root.is_some() {
+        stack.from_altstack();
+    }
 
     stack.explode(prev_hash);
     stack.explode(write_add);
     stack.explode(write_data);
     stack.explode(write_pc);
     stack.explode(write_micro);
+    if let Some(root) = mem_root {
+        stack.explode(root);
+    }
 
-    let result = blake3::blake3(stack, (40 + 8 + 8 + 8 + 2) / 2, 5);
+    let result = blake3::blake3(stack, state_hash_bytes(model), 5);
     stack.from_altstack();
     stack.not_equal(result, true, hash, true);
 }
@@ -580,12 +619,14 @@ pub fn read_value_challenge(stack: &mut StackTracker) {
     stack.explode(write_pc);
     stack.explode(write_micro);
 
-    let result = blake3::blake3(stack, (40 + 8 + 8 + 8 + 2) / 2, 5);
+    // This challenge is about a last_step pointer, so it exists only under
+    // MemoryModel::LastStep and its message is always the shorter one.
+    let result = blake3::blake3(stack, state_hash_bytes(MemoryModel::LastStep), 5);
     stack.from_altstack();
     stack.equals(result, true, next_hash, true);
 }
 
-pub fn correct_hash_challenge(stack: &mut StackTracker) {
+pub fn correct_hash_challenge(stack: &mut StackTracker, model: MemoryModel) {
     stack.clear_definitions();
 
     let prover_hash = stack.define(40, "prover_hash");
@@ -595,6 +636,7 @@ pub fn correct_hash_challenge(stack: &mut StackTracker) {
     let write_value = stack.define(8, "write_value");
     let write_pc = stack.define(8, "write_pc");
     let write_micro = stack.define(2, "write_micro");
+    let mem_root = define_mem_root(stack, model);
 
     let next_hash = stack.define(40, "next_hash");
 
@@ -608,8 +650,11 @@ pub fn correct_hash_challenge(stack: &mut StackTracker) {
     stack.explode(write_value);
     stack.explode(write_pc);
     stack.explode(write_micro);
+    if let Some(root) = mem_root {
+        stack.explode(root);
+    }
 
-    let result = blake3::blake3(stack, (40 + 8 + 8 + 8 + 2) / 2, 5);
+    let result = blake3::blake3(stack, state_hash_bytes(model), 5);
     stack.from_altstack();
     stack.equals(result, true, next_hash, true);
 }
@@ -685,6 +730,15 @@ fn get_round_and_index(stack: &mut StackTracker, decisions_bits: StackVariable, 
     }
 }
 
+/// Punishes a party whose re-signed state hash is inconsistent with what was
+/// committed for the same position during the search.
+///
+/// Which inconsistency is punishable depends on who committed the position.
+/// A party is always bound to its own earlier commitment, and it is bound to
+/// the counterparty's value at the agreed boundary, because selecting that
+/// boundary is what declared the agreement. At the disputed boundary the
+/// relation inverts: selecting it declared *disagreement*, so the party is
+/// bound to differ, and claiming the counterparty's value is the misbehaviour.
 pub fn equivocation_resign_challenge(
     stack: &mut StackTracker,
     kind: EquivocationKind,
@@ -693,12 +747,18 @@ pub fn equivocation_resign_challenge(
     rounds: u8,
     nary: u8,
     nary_last_round: u8,
+    counterparty_committed: bool,
 ) {
     stack.clear_definitions();
 
+    let owner = if counterparty_committed {
+        "verifier"
+    } else {
+        "prover"
+    };
     let true_hash = stack.define(
         40,
-        format!("prover_hash_{}_{}", expected_round, expected_index).as_str(),
+        format!("{}_hash_{}_{}", owner, expected_round, expected_index).as_str(),
     );
     let wrong_hash = stack.define(40, format!("prover_{:?}_hash_tk", kind).as_str());
     let step = stack.define(16, "prover_challenge_step_tk");
@@ -729,7 +789,9 @@ pub fn equivocation_resign_challenge(
     stack.number(expected_round as u32);
     stack.op_equalverify();
 
-    stack.equality(true_hash, true, wrong_hash, true, false, true);
+    // NextHash is the disputed boundary: see the note on this function.
+    let punish_equality = counterparty_committed && kind == EquivocationKind::NextHash;
+    stack.equality(true_hash, true, wrong_hash, true, punish_equality, true);
 
     stack.drop(decisions_bits);
 }
@@ -744,8 +806,70 @@ pub fn equivocation_hash_challenge(stack: &mut StackTracker) {
     stack.equals(write_step, true, conflict_step, true);
 }
 
+/// Two signatures under one positional key, over different messages.
+///
+/// The full-duplex search has both parties dissect, so both commit state
+/// hashes under one-time positional keys. Cases 2 and 3 of the resign leaf
+/// (see [`equivocation_resign_challenge`]) then read the *counterparty's*
+/// commitment -- and the counterparty is the party spending that leaf, so it
+/// supplies that signature itself. A Winternitz signature binds a message to
+/// a key, not to a message published earlier, and no leaf can read a previous
+/// transaction's witness. Nothing in that leaf forces the value to be the one
+/// actually dissected with.
+///
+/// What forces it is this leaf, spendable by the counterparty: present both
+/// signatures under the same positional key, over different messages, and the
+/// signer is convicted. The one-time key makes the pair impossible for an
+/// honest party to produce, because an honest client re-presents the
+/// signature it stored rather than signing again.
+///
+/// The two values arrive already verified under that single key by the
+/// Winternitz check preceding this script, so all that remains is to show
+/// they differ.
+pub fn verifier_equivocation_challenge(stack: &mut StackTracker, round: u8, index: u8) {
+    stack.clear_definitions();
+    let published = stack.define(40, &format!("verifier_hash_{}_{}", round, index));
+    let resigned = stack.define(
+        40,
+        &format!("{}{}_{}", VERIFIER_RESIGNED_PREFIX, round, index),
+    );
+    // Succeeds when they differ: that difference is the equivocation.
+    stack.equality(published, true, resigned, true, false, true);
+}
+
+/// Name prefix for the second signature a verifier produced under a
+/// positional key, as re-presented by the prover from the challenge it is
+/// punishing. Distinct from the stage variable so both can be held at once,
+/// while both bind to the same one-time key.
+pub const VERIFIER_RESIGNED_PREFIX: &str = "verifier_resigned_hash_";
+
+/// Name prefix of a verifier's dissection position, as published at its stage.
+pub const VERIFIER_STAGE_PREFIX: &str = "verifier_hash_";
+
+/// The companion name under which a *second* signature for `name` is kept.
+///
+/// Both names bind to one positional key, so holding a signature under each
+/// is holding two signatures under that key -- which is the equivocation
+/// [`verifier_equivocation_challenge`] convicts on. Keeping the second under
+/// its own name rather than overwriting the first is what makes the pair
+/// presentable at all.
+///
+/// `None` for anything that is not a verifier dissection position, since no
+/// other variable has a companion name or needs one.
+pub fn resigned_name_for(name: &str) -> Option<String> {
+    name.strip_prefix(VERIFIER_STAGE_PREFIX)
+        .map(|position| format!("{}{}", VERIFIER_RESIGNED_PREFIX, position))
+}
+
 //TODO: memory section challenge
 //TODO: program crash challenge - this might be more about finding the right place to challenge that a challenge itself
+
+/// Push the memory root a Merkle step carries, so the script can hash it.
+fn push_mem_root(stack: &mut StackTracker, step: &TraceStep) {
+    if let Some(root) = &step.mem_root {
+        stack.hexstr_as_nibbles(&hex::encode(root));
+    }
+}
 
 pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
     let mut stack = StackTracker::new();
@@ -779,8 +903,9 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             stack.number_u32(prover_trace.get_write().value);
             stack.number_u32(prover_trace.get_pc().get_address());
             stack.byte(prover_trace.get_pc().get_micro());
+            push_mem_root(&mut stack, prover_trace);
             stack.hexstr_as_nibbles(prover_next_hash);
-            trace_hash_challenge(&mut stack);
+            trace_hash_challenge(&mut stack, prover_trace.memory_model());
         }
         ChallengeType::TraceHashZero {
             prover_trace,
@@ -791,10 +916,11 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             stack.number_u32(prover_trace.get_write().value);
             stack.number_u32(prover_trace.get_pc().get_address());
             stack.byte(prover_trace.get_pc().get_micro());
+            push_mem_root(&mut stack, prover_trace);
             stack.hexstr_as_nibbles(prover_next_hash);
             stack.number_u64(*prover_conflict_step_tk);
 
-            trace_hash_zero_challenge(&mut stack);
+            trace_hash_zero_challenge(&mut stack, prover_trace.memory_model());
         }
         ChallengeType::EntryPoint {
             prover_read_pc,
@@ -817,13 +943,14 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             stack.number_u32(trace.get_write().value);
             stack.number_u32(trace.get_pc().get_address());
             stack.byte(trace.get_pc().get_micro());
+            push_mem_root(&mut stack, trace);
 
             stack.number_u32(prover_pc_read.pc.get_address());
             stack.byte(prover_pc_read.pc.get_micro());
 
             stack.hexstr_as_nibbles(prover_step_hash);
 
-            program_counter_challenge(&mut stack);
+            program_counter_challenge(&mut stack, trace.memory_model());
         }
         ChallengeType::Opcode {
             prover_pc_read,
@@ -987,10 +1114,11 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             stack.number_u32(trace.get_write().value);
             stack.number_u32(trace.get_pc().get_address());
             stack.byte(trace.get_pc().get_micro());
+            push_mem_root(&mut stack, trace);
 
             stack.hexstr_as_nibbles(prover_next_hash);
 
-            correct_hash_challenge(&mut stack);
+            correct_hash_challenge(&mut stack, trace.memory_model());
         }
         ChallengeType::EquivocationResign {
             prover_true_hash,
@@ -999,6 +1127,7 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
             kind,
             expected_round,
             expected_index,
+            counterparty_committed,
             rounds,
             nary,
             nary_last_round,
@@ -1016,6 +1145,7 @@ pub fn execute_challenge(challege_type: &ChallengeType) -> bool {
                 rounds.unwrap(),
                 nary.unwrap(),
                 nary_last_round.unwrap(),
+                *counterparty_committed,
             );
         }
         ChallengeType::EquivocationHash {
@@ -1050,6 +1180,92 @@ mod tests {
 
     use super::*;
     use rand::RngExt;
+
+    /// Builds an equivocation-resign challenge for a position and runs it.
+    /// Returns whether the challenge succeeds, i.e. whether the party
+    /// publishing the trace is punished.
+    fn resign_challenge_succeeds(
+        kind: EquivocationKind,
+        counterparty_committed: bool,
+        committed_hash: &str,
+        resigned_hash: &str,
+    ) -> bool {
+        // nary = 8 over 64 steps gives two rounds. Step 9 has base-8 digits
+        // (1, 1), so its hash was published at round 2 index 1; step 10 has
+        // digits (1, 2) and was published at round 2 index 2.
+        let (round, index) = match kind {
+            EquivocationKind::StepHash => (2, 1),
+            EquivocationKind::NextHash => (2, 2),
+        };
+        execute_challenge(&ChallengeType::EquivocationResign {
+            prover_true_hash: committed_hash.to_string(),
+            prover_wrong_hash: resigned_hash.to_string(),
+            prover_challenge_step_tk: 9,
+            kind,
+            expected_round: round,
+            expected_index: index,
+            counterparty_committed,
+            rounds: Some(2),
+            nary: Some(8),
+            nary_last_round: Some(0),
+        })
+    }
+
+    const HASH_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const HASH_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    /// A party is always bound to its own earlier commitment, so differing
+    /// from it is punishable and matching it is not. This holds at both
+    /// boundaries and is the behaviour of the asymmetric search.
+    #[test]
+    fn own_commitment_is_punished_only_when_it_differs() {
+        for kind in [EquivocationKind::StepHash, EquivocationKind::NextHash] {
+            assert!(
+                resign_challenge_succeeds(kind.clone(), false, HASH_A, HASH_B),
+                "{:?}: differing from own commitment must be punishable",
+                kind
+            );
+            assert!(
+                !resign_challenge_succeeds(kind.clone(), false, HASH_A, HASH_A),
+                "{:?}: matching own commitment must not be punishable",
+                kind
+            );
+        }
+    }
+
+    /// At the agreed boundary the party selected the counterparty's value as
+    /// agreed, which binds it to that value, so the relation is the same as
+    /// for its own commitment.
+    #[test]
+    fn counterparty_agreed_boundary_is_punished_only_when_it_differs() {
+        assert!(resign_challenge_succeeds(
+            EquivocationKind::StepHash,
+            true,
+            HASH_A,
+            HASH_B
+        ));
+        assert!(!resign_challenge_succeeds(
+            EquivocationKind::StepHash,
+            true,
+            HASH_A,
+            HASH_A
+        ));
+    }
+
+    /// At the disputed boundary the relation inverts: selecting it declared
+    /// disagreement with the counterparty's value, so claiming that value is
+    /// the misbehaviour and differing from it is honest.
+    #[test]
+    fn counterparty_disputed_boundary_is_punished_only_when_it_matches() {
+        assert!(
+            resign_challenge_succeeds(EquivocationKind::NextHash, true, HASH_A, HASH_A),
+            "claiming a value previously declared disagreed must be punishable"
+        );
+        assert!(
+            !resign_challenge_succeeds(EquivocationKind::NextHash, true, HASH_A, HASH_B),
+            "an honest party that differs at the disputed boundary must not be punished"
+        );
+    }
 
     fn test_entry_point_challenge_aux(
         wots_prover_pc: u32,
@@ -1102,7 +1318,7 @@ mod tests {
 
         stack.hexstr_as_nibbles(pre_hash);
 
-        program_counter_challenge(&mut stack);
+        program_counter_challenge(&mut stack, MemoryModel::LastStep);
 
         stack.op_true();
         stack.run().success
@@ -1273,7 +1489,7 @@ mod tests {
 
         stack.number_u64(step);
 
-        trace_hash_zero_challenge(&mut stack);
+        trace_hash_zero_challenge(&mut stack, MemoryModel::LastStep);
 
         stack.op_true();
         stack.run().success
@@ -1317,7 +1533,7 @@ mod tests {
 
         stack.hexstr_as_nibbles(hash);
 
-        trace_hash_challenge(&mut stack);
+        trace_hash_challenge(&mut stack, MemoryModel::LastStep);
 
         stack.op_true();
         stack.run().success
@@ -1360,7 +1576,7 @@ mod tests {
 
         stack.hexstr_as_nibbles(next_hash);
 
-        correct_hash_challenge(&mut stack);
+        correct_hash_challenge(&mut stack, MemoryModel::LastStep);
 
         stack.op_true();
         stack.run().success
@@ -2351,18 +2567,196 @@ mod tests {
         rounds: u8,
         nary: u8,
         nary_last_round: u8,
+        counterparty_committed: bool,
     ) -> bool {
         let stack = &mut StackTracker::new();
         stack.hexstr_as_nibbles(hash1);
         stack.hexstr_as_nibbles(hash2);
         stack.number_u64(step);
 
-        equivocation_resign_challenge(stack, kind, round, index, rounds, nary, nary_last_round);
+        equivocation_resign_challenge(
+            stack,
+            kind,
+            round,
+            index,
+            rounds,
+            nary,
+            nary_last_round,
+            counterparty_committed,
+        );
 
         stack.op_true();
         // interactive(&stack);
 
         stack.run().success
+    }
+
+    /// Under the full-duplex search a boundary may have been published by the
+    /// counterparty, and then the leaf reads *their* commitment and flips the
+    /// sense of the comparison at the disputed boundary. Nothing exercised
+    /// that: every existing case is a party disputing a value it published
+    /// itself, which is the only shape the asymmetric search produces.
+    ///
+    /// The two boundaries are not symmetric, and that is the point of the
+    /// flag. The agreed boundary binds the prover whoever published it, so a
+    /// mismatch is always the misbehaviour. At the disputed boundary a value
+    /// the counterparty published is one the prover said it disagreed with,
+    /// so re-signing it *equal* is the misbehaviour instead.
+    #[test]
+    fn counterparty_committed_flips_only_the_disputed_boundary() {
+        let a = &"e2f115006467b4b1b2b27612bbfd40ed3bc8299b".to_string();
+        let b = &"345721506e79c53d2549fc63d02ba8fc3b17efa4".to_string();
+        let (rounds, nary, nary_last_round) = (4u8, 8u8, 4u8);
+        let step = 1055;
+
+        // The agreed boundary: a mismatch is punishable either way.
+        for cc in [false, true] {
+            assert!(
+                test_equivocation_resign_aux(
+                    a, b, step, EquivocationKind::StepHash, 4, 3,
+                    rounds, nary, nary_last_round, cc),
+                "StepHash: differing hashes must be punishable \
+                 (counterparty_committed = {cc})"
+            );
+            assert!(
+                !test_equivocation_resign_aux(
+                    a, a, step, EquivocationKind::StepHash, 4, 3,
+                    rounds, nary, nary_last_round, cc),
+                "StepHash: identical hashes are not an equivocation \
+                 (counterparty_committed = {cc})"
+            );
+        }
+
+        // The disputed boundary: the sense depends on who published it.
+        // round 2 index 1 is the next-hash position for this step.
+        assert!(
+            test_equivocation_resign_aux(
+                a, b, step, EquivocationKind::NextHash, 2, 1,
+                rounds, nary, nary_last_round, false),
+            "NextHash on our own commitment: a mismatch is the misbehaviour"
+        );
+        assert!(
+            test_equivocation_resign_aux(
+                a, a, step, EquivocationKind::NextHash, 2, 1,
+                rounds, nary, nary_last_round, true),
+            "NextHash on the counterparty's commitment: re-signing it equal \
+             is the misbehaviour"
+        );
+        assert!(
+            !test_equivocation_resign_aux(
+                a, b, step, EquivocationKind::NextHash, 2, 1,
+                rounds, nary, nary_last_round, true),
+            "NextHash on the counterparty's commitment: disagreeing with it \
+             is what the prover already said, not a punishable act"
+        );
+    }
+
+    /// The counterparty's commitment is not bound by this leaf, so the
+    /// verdict is decided by whoever supplies it.
+    ///
+    /// Cases 2 and 3 read `verifier_hash_<round>_<index>`, verified under the
+    /// *verifier's* one-time key. Under the full-duplex search the verifier is
+    /// also the party spending this leaf, so it supplies that signature
+    /// itself. A Winternitz signature binds a message to a key, not to any
+    /// message published earlier, and a script cannot read a previous
+    /// transaction's witness -- so nothing here checks that the value signed
+    /// is the one the verifier dissected with.
+    ///
+    /// Below, the prover's commitment is held FIXED and only the verifier's
+    /// choice varies. Both outcomes are reachable. That is the whole of the
+    /// attack: an honest prover is convicted or not according to a value its
+    /// counterparty picks when it spends.
+    ///
+    /// This is not a defect in the script -- a leaf cannot do better -- and
+    /// the behaviour here is unchanged by fixing it. It is the reason the
+    /// binding has to come from somewhere else: an equivocation punishment
+    /// over the verifier's positional keys, spendable by the prover. Until
+    /// that exists, this test documents an unsound path rather than a sound
+    /// one, and it should be read alongside whatever closes it.
+    #[test]
+    fn the_counterpartys_value_is_chosen_by_the_spender_not_bound() {
+        let provers_next_hash = &"e2f115006467b4b1b2b27612bbfd40ed3bc8299b".to_string();
+        let verifiers_published = &"345721506e79c53d2549fc63d02ba8fc3b17efa4".to_string();
+        let (rounds, nary, nary_last_round) = (4u8, 8u8, 4u8);
+        let step = 1055;
+        // The disputed boundary N, published by the counterparty: case 3.
+        let (round, index) = (2u8, 1u8);
+
+        // Honest verifier: signs what it actually dissected with. It disagreed
+        // with the prover there, so the values differ and the leaf refuses --
+        // the prover is not convicted.
+        assert!(
+            !test_equivocation_resign_aux(
+                verifiers_published, provers_next_hash, step,
+                EquivocationKind::NextHash, round, index,
+                rounds, nary, nary_last_round, true),
+            "honest verifier: a prover that differs from the value the \
+             verifier published has done nothing punishable"
+        );
+
+        // Dishonest verifier: signs the prover's own value afresh under the
+        // same positional key. Identical prover commitment, opposite verdict.
+        assert!(
+            test_equivocation_resign_aux(
+                provers_next_hash, provers_next_hash, step,
+                EquivocationKind::NextHash, round, index,
+                rounds, nary, nary_last_round, true),
+            "dishonest verifier: re-signing the prover's own value convicts \
+             an honest prover -- nothing in the leaf prevents this"
+        );
+    }
+
+    fn verifier_equivocation_aux(published: &str, resigned: &str) -> bool {
+        let stack = &mut StackTracker::new();
+        stack.hexstr_as_nibbles(&published.to_string());
+        stack.hexstr_as_nibbles(&resigned.to_string());
+        verifier_equivocation_challenge(stack, 4, 3);
+        stack.op_true();
+        stack.run().success
+    }
+
+    /// The punishment for the gap documented in
+    /// `the_counterpartys_value_is_chosen_by_the_spender_not_bound`.
+    ///
+    /// The verifier may sign whatever it likes under its positional key when
+    /// it spends the resign leaf. What it cannot do is sign two different
+    /// messages under a one-time key without the pair becoming provable: this
+    /// leaf takes both and convicts on the difference.
+    #[test]
+    fn two_values_under_one_positional_key_are_punishable() {
+        let published = "345721506e79c53d2549fc63d02ba8fc3b17efa4";
+        let resigned = "e2f115006467b4b1b2b27612bbfd40ed3bc8299b";
+
+        assert!(
+            verifier_equivocation_aux(published, resigned),
+            "two distinct messages under one positional key is the \
+             equivocation, and must be punishable"
+        );
+        assert!(
+            !verifier_equivocation_aux(published, published),
+            "an honest verifier re-presents the signature it stored, so the \
+             two messages are identical and nothing is punishable"
+        );
+    }
+
+    /// The two names have to agree with the key schedule, which builds them
+    /// independently. If they drift apart the punishment leaf still builds
+    /// and still spends, and convicts nobody.
+    #[test]
+    fn the_companion_name_matches_the_stage_name() {
+        assert_eq!(
+            resigned_name_for("verifier_hash_4_3").as_deref(),
+            Some("verifier_resigned_hash_4_3")
+        );
+        assert_eq!(
+            resigned_name_for("verifier_hash_2_7").as_deref(),
+            Some("verifier_resigned_hash_2_7")
+        );
+        // Nothing else has a companion: the prover's positional keys are
+        // already bound, and no other variable is signed twice.
+        assert_eq!(resigned_name_for("prover_hash_4_3"), None);
+        assert_eq!(resigned_name_for("prover_step_hash_tk"), None);
+        assert_eq!(resigned_name_for("verifier_selection_bits_1"), None);
     }
 
     #[test]
@@ -2389,6 +2783,7 @@ mod tests {
             rounds,
             nary,
             nary_last_round,
+            false,
         ));
 
         // can't challenge with other step hash
@@ -2403,6 +2798,7 @@ mod tests {
             rounds,
             nary,
             nary_last_round,
+            false,
         ));
 
         // can challenge if wrong hash and correct round and index
@@ -2416,6 +2812,7 @@ mod tests {
             rounds,
             nary,
             nary_last_round,
+            false,
         ));
 
         // can challenge if wrong hash and correct round and index for next hash
@@ -2429,6 +2826,7 @@ mod tests {
             rounds,
             nary,
             nary_last_round,
+            false,
         ));
     }
     mod coin_tests {
@@ -2546,7 +2944,7 @@ mod tests {
             stack.byte(micro);
             stack.hexstr_as_nibbles(&hex::encode(hash));
 
-            trace_hash_challenge(&mut stack);
+            trace_hash_challenge(&mut stack, MemoryModel::LastStep);
             stack.op_true();
 
             stack.run().success == expected_to_succeed
@@ -2633,7 +3031,7 @@ mod tests {
 
             stack.hexstr_as_nibbles(&hex::encode(prover_pre_hash));
 
-            program_counter_challenge(&mut stack);
+            program_counter_challenge(&mut stack, MemoryModel::LastStep);
             stack.op_true();
 
             stack.run().success == expected_to_succeed
@@ -2655,7 +3053,7 @@ mod tests {
             stack.hexstr_as_nibbles(&hex::encode(hash));
             stack.number_u64(step);
 
-            trace_hash_zero_challenge(&mut stack);
+            trace_hash_zero_challenge(&mut stack, MemoryModel::LastStep);
             stack.op_true();
 
             stack.run().success == expected_to_succeed
@@ -4519,5 +4917,103 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod merkle_state_hash_tests {
+    use super::*;
+    use bitvmx_cpu_definitions::memory_tree::{MemoryTree, DEPLOYED_DEPTH};
+    use bitvmx_cpu_definitions::trace::{compute_step_hash, ProgramCounter, TraceStep, TraceWrite};
+
+    fn a_root() -> [u8; 20] {
+        MemoryTree::with_words(DEPLOYED_DEPTH, [(7u32, 0xdead_beefu32), (0x3C00_0001, 42)]).root()
+    }
+
+    #[test]
+    fn the_message_is_thirty_three_bytes_or_fifty_three() {
+        assert_eq!(state_hash_bytes(MemoryModel::LastStep), 33);
+        assert_eq!(state_hash_bytes(MemoryModel::Merkle), 53);
+        assert_eq!(
+            state_hash_bytes(MemoryModel::Merkle) - state_hash_bytes(MemoryModel::LastStep),
+            20,
+            "exactly one root"
+        );
+    }
+
+    /// Run `trace_hash_challenge` against a step and a claimed next hash.
+    /// The challenge *succeeds* when the claimed hash is wrong, so a
+    /// correctly-hashed step must make it fail.
+    fn trace_hash_challenge_succeeds(step: &TraceStep, claimed_next: [u8; 20]) -> bool {
+        let prev = [0x11u8; 20];
+        let mut stack = StackTracker::new();
+        stack.hexstr_as_nibbles(&hex::encode(prev));
+        stack.number_u32(step.get_write().address);
+        stack.number_u32(step.get_write().value);
+        stack.number_u32(step.get_pc().get_address());
+        stack.byte(step.get_pc().get_micro());
+        push_mem_root(&mut stack, step);
+        stack.hexstr_as_nibbles(&hex::encode(claimed_next));
+        trace_hash_challenge(&mut stack, step.memory_model());
+        stack.op_true();
+        stack.run().success
+    }
+
+    fn correct_next_hash(step: &TraceStep) -> [u8; 20] {
+        let mut hasher = ::blake3::Hasher::new();
+        compute_step_hash(&mut hasher, &[0x11u8; 20], &step.to_bytes())
+    }
+
+    #[test]
+    fn a_merkle_step_hashes_in_script_exactly_as_it_does_in_rust() {
+        let step = TraceStep::new_with_root(
+            TraceWrite::new(0x1000, 0xabcd_1234),
+            ProgramCounter::new(0x8000_0010, 0),
+            a_root(),
+        );
+        assert_eq!(step.memory_model(), MemoryModel::Merkle);
+        assert!(
+            !trace_hash_challenge_succeeds(&step, correct_next_hash(&step)),
+            "an honest Merkle step must not be challengeable"
+        );
+        let mut wrong = correct_next_hash(&step);
+        wrong[0] ^= 1;
+        assert!(
+            trace_hash_challenge_succeeds(&step, wrong),
+            "and a wrong next hash must be"
+        );
+    }
+
+    #[test]
+    fn the_root_is_covered_by_the_hash_the_script_checks() {
+        // The whole point of chaining it: change only the root and the
+        // state hash must change, so a prover cannot swap memory under an
+        // agreed state.
+        let write = TraceWrite::new(0x1000, 0xabcd_1234);
+        let pc = ProgramCounter::new(0x8000_0010, 0);
+        let step = TraceStep::new_with_root(write.clone(), pc.clone(), a_root());
+        let other_root = MemoryTree::with_words(DEPLOYED_DEPTH, [(7u32, 0xdead_beefu32)]).root();
+        assert_ne!(a_root(), other_root);
+        let swapped = TraceStep::new_with_root(write, pc, other_root);
+
+        assert_ne!(correct_next_hash(&step), correct_next_hash(&swapped));
+        assert!(
+            trace_hash_challenge_succeeds(&swapped, correct_next_hash(&step)),
+            "a step claiming another root's hash is challengeable in script"
+        );
+    }
+
+    #[test]
+    fn a_last_step_trace_still_hashes_as_it_always_did() {
+        let step = TraceStep::new(
+            TraceWrite::new(0x1000, 0xabcd_1234),
+            ProgramCounter::new(0x8000_0010, 0),
+        );
+        assert_eq!(step.memory_model(), MemoryModel::LastStep);
+        assert_eq!(step.to_bytes().len(), 13);
+        assert!(!trace_hash_challenge_succeeds(
+            &step,
+            correct_next_hash(&step)
+        ));
     }
 }

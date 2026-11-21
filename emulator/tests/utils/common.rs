@@ -1,5 +1,7 @@
 #![allow(dead_code)]
-use bitvmx_cpu_definitions::{memory::SectionDefinition, trace::ProgramCounter};
+use bitvmx_cpu_definitions::{
+    memory::SectionDefinition, memory_tree::MemoryTree, trace::ProgramCounter,
+};
 use emulator::{
     executor::{
         fetcher::{execute_program, FullTrace},
@@ -66,6 +68,8 @@ pub fn get_new_program() -> Program {
         read_only_sections: SectionDefinition::default(),
         register_sections: SectionDefinition::default(),
         code_sections: SectionDefinition::default(),
+        memory_tree: MemoryTree::default(),
+        memory_model: Default::default(),
     }
 }
 

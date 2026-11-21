@@ -6,6 +6,7 @@ use bitcoin_script_riscv::riscv::instruction_mapping::{
 use bitvmx_cpu_definitions::{
     constants::LAST_STEP_INIT,
     memory::{Chunk, MemoryAccessType, SectionDefinition},
+    memory_tree::{leaf_index, MemoryModel, MemoryTree, Node, DEPLOYED_DEPTH},
     trace::{generate_initial_step_hash, ProgramCounter, TraceRead, TraceWrite},
 };
 use elf::{abi::SHF_EXECINSTR, abi::SHF_WRITE, endian::LittleEndian, ElfBytes};
@@ -197,6 +198,20 @@ pub struct Program {
     pub read_only_sections: SectionDefinition,
     pub register_sections: SectionDefinition,
     pub code_sections: SectionDefinition,
+    /// Memory as a Merkle tree, which is what the endgame opens against.
+    ///
+    /// It is a pure function of the section data and the register file, so
+    /// it is not serialized into a checkpoint -- `rebuild_memory_tree`
+    /// recovers it, and `deserialize_from_file` calls that.  During
+    /// execution it is maintained incrementally by `write_mem` and
+    /// `set_register`, and `memory_tree_is_consistent` checks the two
+    /// agree.
+    #[serde(skip)]
+    pub memory_tree: MemoryTree,
+    /// How this program's dispute justifies a read.  Defaults to
+    /// `LastStep`, so an existing program definition means what it did.
+    #[serde(default)]
+    pub memory_model: MemoryModel,
 }
 
 impl Program {
@@ -215,6 +230,7 @@ impl Program {
                 for (i, byte) in input_as_u32.iter().enumerate() {
                     section.data[i] = *byte;
                 }
+                self.rebuild_memory_tree();
             } else {
                 return Err(ExecutionResult::SectionNotFound(
                     input_section_name.to_string(),
@@ -238,9 +254,11 @@ impl Program {
         let serialized_str = std::str::from_utf8(&serialized).map_err(|_| {
             EmulatorError::CantLoadPorgram(format!("Error parsing file: {}", fname))
         })?;
-        serde_json::from_str(serialized_str).map_err(|_| {
+        let mut program: Program = serde_json::from_str(serialized_str).map_err(|_| {
             EmulatorError::CantLoadPorgram(format!("Error deserializing file: {}", fname))
-        })
+        })?;
+        program.rebuild_memory_tree();
+        Ok(program)
     }
 
     pub fn new(entry_point: u32, registers_base_address: u32, sp_base_address: u32) -> Program {
@@ -257,7 +275,77 @@ impl Program {
             read_only_sections: SectionDefinition::default(),
             register_sections: SectionDefinition::default(),
             code_sections: SectionDefinition::default(),
+            memory_tree: MemoryTree::new(DEPLOYED_DEPTH),
+            memory_model: MemoryModel::default(),
         }
+    }
+
+    /// The root of memory as it stands.
+    pub fn memory_root(&self) -> Node {
+        self.memory_tree.root()
+    }
+
+    /// The post-state root to put in a trace step, if this program's model
+    /// chains one.
+    ///
+    /// The *initial* root is not chained: the first state hash predates any
+    /// step.  It does not need to be, because step zero's state is agreed
+    /// by construction -- both parties load the same program and the same
+    /// input, and the setup commits to both.
+    pub fn trace_mem_root(&self) -> Option<Node> {
+        self.memory_model.chains_root().then(|| self.memory_root())
+    }
+
+    /// Rebuild the memory tree from the section data and the register file,
+    /// which between them are the authoritative contents.
+    ///
+    /// The registers *section* exists only to reserve the address range --
+    /// `find_section` refuses it -- so the register words come from
+    /// `self.registers` and the section's own data is skipped.
+    pub fn rebuild_memory_tree(&mut self) {
+        self.memory_tree = self.fresh_memory_tree();
+    }
+
+    /// The tree memory's current contents imply, built from scratch.
+    ///
+    /// `rebuild_memory_tree` installs this; `memory_tree_is_consistent`
+    /// compares it against the one execution has been maintaining.
+    pub fn fresh_memory_tree(&self) -> MemoryTree {
+        let mut tree = MemoryTree::new(DEPLOYED_DEPTH);
+        for section in &self.sections {
+            if section.registers {
+                continue;
+            }
+            tree.bulk_write(section.data.iter().enumerate().filter_map(|(i, &raw)| {
+                let word = u32::from_be(raw);
+                (word != 0).then(|| (leaf_index(section.start + (i as u32) * 4), word))
+            }));
+        }
+        tree.bulk_write((0..(RISCV32_REGISTERS + AUX_REGISTERS) as u32).map(|idx| {
+            (
+                leaf_index(self.registers.get_register_address(idx)),
+                self.registers.get(idx),
+            )
+        }));
+        tree
+    }
+
+    /// Whether the incrementally maintained tree still matches a rebuild.
+    ///
+    /// Every path that changes memory has to update the tree, and this is
+    /// what catches one that does not.
+    pub fn memory_tree_is_consistent(&self) -> bool {
+        self.fresh_memory_tree().root() == self.memory_root()
+    }
+
+    /// Write a register and keep the memory tree in step with it.
+    ///
+    /// Registers are memory-mapped, so a register write is an ordinary
+    /// memory write as far as the tree is concerned.
+    pub fn set_register(&mut self, idx: u32, value: u32, step: u64) {
+        self.registers.set(idx, value, step);
+        let address = self.registers.get_register_address(idx);
+        self.memory_tree.write(leaf_index(address), value);
     }
 
     pub fn merge_sections(&mut self) {
@@ -545,6 +633,7 @@ impl Program {
         }
         section.data[(address - section.start) as usize / 4] = value.to_be();
         section.last_step[(address - section.start) as usize / 4] = step;
+        self.memory_tree.write(leaf_index(address), value);
         Ok(())
     }
 
@@ -807,6 +896,7 @@ pub fn load_elf(fname: &str, show_sections: bool) -> Result<Program, EmulatorErr
     program.sanity_check(Some(STACK_BASE_ADDRESS))?;
     program.merge_sections();
     program.generate_sections_definitions();
+    program.rebuild_memory_tree();
 
     Ok(program)
 }
